@@ -20,7 +20,9 @@
 		"src/**/*.spec.tsx",
 		"test/**/*.*",
 		"loaders/**/*.d.mts",
-		"*.config.ts"
+		"eslint.config.ts",
+		"tsdown.config.ts",
+		"vitest.config.ts"
 	],
 	"exclude": ["${configDir}/node_modules", "**/fixtures/"]
 }
