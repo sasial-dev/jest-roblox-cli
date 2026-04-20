@@ -8,11 +8,12 @@ _.path = [
 [tools]
 "github:jacktabscode/drillbit" = "latest"
 "github:johnnymorganz/stylua" = "latest"
+"github:luau-lang/lute" = "1.0.0"
 "github:rojo-rbx/rojo" = "v7.7.0-rc.1"
 "github:seaofvoices/darklua" = "0.18.0"
 node = { version = "25.9.0", postinstall = "corepack enable" }
-"npm:corepack" = "latest"
 "npm:@antfu/ni" = "latest"
+"npm:corepack" = "latest"
 watchexec = "latest"
 
 [tasks.drillbit]
