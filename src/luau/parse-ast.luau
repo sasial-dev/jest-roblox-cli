@@ -96,7 +96,7 @@ end
 
 -- Single-file mode: parse one file, print stripped AST to stdout
 if string.sub(luauRoot, -5) == ".luau" or string.sub(luauRoot, -4) == ".lua" then
-	local source = fs.readfiletostring(luauRoot)
+	local source = fs.readFileToString(luauRoot)
 	local parseResult = syntax.parse(source)
 	print(json.serialize(strip(parseResult.root)))
 	return
@@ -111,7 +111,7 @@ outputDir = string.gsub(outputDir, "\\", "/")
 
 -- Discover .luau files recursively, skipping node_modules, dot dirs, spec/test files
 local function discoverFiles(directory: string, relativeTo: string, results: { string })
-	local entries = fs.listdirectory(directory)
+	local entries = fs.listDirectory(directory)
 	for _, entry in entries do
 		local fullPath = directory .. "/" .. entry.name
 		if entry.type == "dir" then
@@ -160,7 +160,7 @@ end
 local skipListPath = userArgs[3]
 local skipSet: { [string]: boolean } = {}
 if skipListPath then
-	local skipJson = fs.readfiletostring(skipListPath)
+	local skipJson = fs.readFileToString(skipListPath)
 	local skipList = json.deserialize(skipJson) :: { string }
 	for _, entry in skipList do
 		skipSet[entry] = true
@@ -177,18 +177,18 @@ for _, relativePath in files do
 	end
 
 	local fullPath = luauRoot .. "/" .. relativePath
-	local source = fs.readfiletostring(fullPath)
+	local source = fs.readFileToString(fullPath)
 	local parseResult = syntax.parse(source)
 	local stripped = strip(parseResult.root)
 
 	local outPath = outputDir .. "/" .. relativePath .. ".json"
 	local dir = dirname(outPath)
 	if dir ~= "" then
-		fs.createdirectory(dir, { makeparents = true })
+		fs.createDirectory(dir, { makeParents = true })
 	end
 
-	fs.writestringtofile(outPath, json.serialize(stripped))
+	fs.writeStringToFile(outPath, json.serialize(stripped))
 end
 
 -- Print file list to stdout (tiny — just paths)
-print(json.serialize(files :: json.array))
+print(json.serialize(files :: json.Array))

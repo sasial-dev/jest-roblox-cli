@@ -68,7 +68,7 @@ function validateLuauSource(source: string): string {
 	const checkScript = [
 		'local syntax = require("@std/syntax")',
 		'local fs = require("@std/fs")',
-		`local source = fs.readfiletostring("${normalizedPath}")`,
+		`local source = fs.readFileToString("${normalizedPath}")`,
 		"local result = syntax.parse(source)",
 		"if result.root and #result.root.statements > 0 then",
 		'  print("OK")',
