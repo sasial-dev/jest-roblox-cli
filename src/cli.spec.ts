@@ -2048,6 +2048,7 @@ function makeResolvedProject(
 		include: ["src/client/**/*.spec.ts"],
 		outDir: "out/client",
 		projects: ["ReplicatedStorage/client"],
+		rojoMounts: [{ dataModelPath: "ReplicatedStorage/client", fsPath: "out/client" }],
 		testMatch: ["**/*.spec"],
 		...overrides,
 	};

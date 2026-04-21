@@ -3,10 +3,16 @@ import { fromAny } from "@total-typescript/shoehorn";
 import { vol } from "memfs";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
+import { ConfigError } from "./errors.ts";
 import type { ResolvedProjectConfig } from "./projects.ts";
 import type { ProjectTestConfig, ResolvedConfig } from "./schema.ts";
 import { DEFAULT_CONFIG } from "./schema.ts";
-import { generateProjectConfigs, serializeToLuau, syncStubsToShadowDirectory } from "./stubs.ts";
+import {
+	assertStubCollisionRule,
+	generateProjectConfigs,
+	serializeToLuau,
+	syncStubsToShadowDirectory,
+} from "./stubs.ts";
 
 function makeResolvedProject(
 	overrides: Partial<ResolvedProjectConfig> = {},
@@ -21,6 +27,7 @@ function makeResolvedProject(
 		include: ["src/client/**/*.spec.ts"],
 		outDir: "out/client",
 		projects: ["ReplicatedStorage/client"],
+		rojoMounts: [{ dataModelPath: "ReplicatedStorage/client", fsPath: "out/client" }],
 		testMatch: ["**/*.spec"],
 		...overrides,
 	};
@@ -129,6 +136,16 @@ describe(serializeToLuau, () => {
 		const result = serializeToLuau(minimalConfig({ testEnvironment: 'env"with"quotes' }));
 
 		expect(result).toContain('\ttestEnvironment = "env\\"with\\"quotes",');
+	});
+
+	it("should escape newlines, carriage returns, and tabs in string values", () => {
+		expect.assertions(1);
+
+		const result = serializeToLuau(
+			minimalConfig({ testEnvironment: "line1\nline2\rline3\twith-tab" }),
+		);
+
+		expect(result).toContain('\ttestEnvironment = "line1\\nline2\\rline3\\twith-tab",');
 	});
 
 	it("should add auto-generated header comment", () => {
@@ -352,14 +369,14 @@ describe(syncStubsToShadowDirectory, () => {
 		expect(result).toBeFalse();
 	});
 
-	it("should skip projects without outDir", () => {
+	it("should skip projects with empty rojoMounts", () => {
 		expect.assertions(1);
 
 		onTestFinished(() => {
 			vol.reset();
 		});
 
-		const projects = [makeResolvedProject({ outDir: undefined })];
+		const projects = [makeResolvedProject({ outDir: undefined, rojoMounts: [] })];
 
 		const result = syncStubsToShadowDirectory(projects, "/root", "/shadow");
 
@@ -376,7 +393,14 @@ describe(syncStubsToShadowDirectory, () => {
 		vol.mkdirSync("/root/out/deep/nested", { recursive: true });
 		vol.writeFileSync("/root/out/deep/nested/jest.config.lua", "-- stub");
 
-		const projects = [makeResolvedProject({ outDir: "out/deep/nested" })];
+		const projects = [
+			makeResolvedProject({
+				outDir: "out/deep/nested",
+				rojoMounts: [
+					{ dataModelPath: "ReplicatedStorage/deep", fsPath: "out/deep/nested" },
+				],
+			}),
+		];
 
 		syncStubsToShadowDirectory(projects, "/root", "/shadow");
 
@@ -402,13 +426,31 @@ describe(syncStubsToShadowDirectory, () => {
 		expect(vol.existsSync("/shadow/out/removed/jest.config.lua")).toBeFalse();
 	});
 
-	it("should throw when outDir is an absolute path", () => {
+	it("should throw when mount fsPath is an absolute path", () => {
 		expect.assertions(1);
 
-		const projects = [makeResolvedProject({ outDir: "/tmp/evil" })];
+		const projects = [
+			makeResolvedProject({
+				rojoMounts: [{ dataModelPath: "ReplicatedStorage/evil", fsPath: "/tmp/evil" }],
+			}),
+		];
 
 		expect(() => syncStubsToShadowDirectory(projects, "/root", "/shadow")).toThrow(
-			"outDir must be a relative path",
+			"mount fsPath must be relative",
+		);
+	});
+
+	it("should throw when mount fsPath escapes rootDirectory via parent segments", () => {
+		expect.assertions(1);
+
+		const projects = [
+			makeResolvedProject({
+				rojoMounts: [{ dataModelPath: "ReplicatedStorage/outside", fsPath: "../outside" }],
+			}),
+		];
+
+		expect(() => syncStubsToShadowDirectory(projects, "/root", "/shadow")).toThrow(
+			"mount fsPath escapes root directory",
 		);
 	});
 
@@ -437,8 +479,8 @@ describe(syncStubsToShadowDirectory, () => {
 			vol.reset();
 		});
 
-		// No stubs anywhere, no projects with outDir
-		const projects = [makeResolvedProject({ outDir: undefined })];
+		// No stubs anywhere, no mounts tracked
+		const projects = [makeResolvedProject({ outDir: undefined, rojoMounts: [] })];
 
 		const result = syncStubsToShadowDirectory(projects, "/root", "/shadow");
 
@@ -496,5 +538,304 @@ describe(syncStubsToShadowDirectory, () => {
 		const result = syncStubsToShadowDirectory(projects, "/root", "/shadow");
 
 		expect(result).toBeFalse();
+	});
+
+	it("should copy stubs from every mount of a multi-mount project", () => {
+		expect.assertions(3);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		vol.mkdirSync("/root/src/Client", { recursive: true });
+		vol.mkdirSync("/root/src/Server", { recursive: true });
+		vol.mkdirSync("/root/src/Shared", { recursive: true });
+		vol.writeFileSync("/root/src/Client/jest.config.lua", "-- stub");
+		vol.writeFileSync("/root/src/Server/jest.config.lua", "-- stub");
+		vol.writeFileSync("/root/src/Shared/jest.config.lua", "-- stub");
+
+		const projects = [
+			makeResolvedProject({
+				outDir: undefined,
+				rojoMounts: [
+					{ dataModelPath: "ReplicatedStorage/Client", fsPath: "src/Client" },
+					{ dataModelPath: "ServerScriptService/Server", fsPath: "src/Server" },
+					{ dataModelPath: "ReplicatedStorage/Shared", fsPath: "src/Shared" },
+				],
+			}),
+		];
+
+		syncStubsToShadowDirectory(projects, "/root", "/shadow");
+
+		expect(vol.existsSync("/shadow/src/Client/jest.config.lua")).toBeTrue();
+		expect(vol.existsSync("/shadow/src/Server/jest.config.lua")).toBeTrue();
+		expect(vol.existsSync("/shadow/src/Shared/jest.config.lua")).toBeTrue();
+	});
+
+	it("should remove shadow stub when its mount is dropped between runs", () => {
+		expect.assertions(2);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		vol.mkdirSync("/root/src/Client", { recursive: true });
+		vol.writeFileSync("/root/src/Client/jest.config.lua", "-- stub");
+		vol.mkdirSync("/shadow/src/Client", { recursive: true });
+		vol.writeFileSync("/shadow/src/Client/jest.config.lua", "-- stub");
+		// Stale shadow stub for a mount that no longer exists.
+		vol.mkdirSync("/shadow/src/Removed", { recursive: true });
+		vol.writeFileSync("/shadow/src/Removed/jest.config.lua", "-- stale");
+
+		const projects = [
+			makeResolvedProject({
+				outDir: undefined,
+				rojoMounts: [{ dataModelPath: "ReplicatedStorage/Client", fsPath: "src/Client" }],
+			}),
+		];
+
+		syncStubsToShadowDirectory(projects, "/root", "/shadow");
+
+		expect(vol.existsSync("/shadow/src/Client/jest.config.lua")).toBeTrue();
+		expect(vol.existsSync("/shadow/src/Removed/jest.config.lua")).toBeFalse();
+	});
+});
+
+describe(assertStubCollisionRule, () => {
+	it("should accept when no mount has a user-authored config", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		vol.mkdirSync("/root/src/Client", { recursive: true });
+		vol.mkdirSync("/root/src/Server", { recursive: true });
+
+		const project = makeResolvedProject({
+			outDir: undefined,
+			rojoMounts: [
+				{ dataModelPath: "ReplicatedStorage/Client", fsPath: "src/Client" },
+				{ dataModelPath: "ServerScriptService/Server", fsPath: "src/Server" },
+			],
+		});
+
+		expect(() => {
+			assertStubCollisionRule(project, "/root");
+		}).not.toThrow();
+	});
+
+	it("should accept when every mount has a user jest.config.luau", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		vol.mkdirSync("/root/src/Client", { recursive: true });
+		vol.mkdirSync("/root/src/Server", { recursive: true });
+		vol.writeFileSync("/root/src/Client/jest.config.luau", "return {}");
+		vol.writeFileSync("/root/src/Server/jest.config.luau", "return {}");
+
+		const project = makeResolvedProject({
+			outDir: undefined,
+			rojoMounts: [
+				{ dataModelPath: "ReplicatedStorage/Client", fsPath: "src/Client" },
+				{ dataModelPath: "ServerScriptService/Server", fsPath: "src/Server" },
+			],
+		});
+
+		expect(() => {
+			assertStubCollisionRule(project, "/root");
+		}).not.toThrow();
+	});
+
+	it("should accept when every mount has a user jest.config.lua (non-generated)", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		vol.mkdirSync("/root/src/Client", { recursive: true });
+		vol.mkdirSync("/root/src/Server", { recursive: true });
+		vol.writeFileSync("/root/src/Client/jest.config.lua", "-- user wrote this\nreturn {}");
+		vol.writeFileSync("/root/src/Server/jest.config.lua", "-- user wrote this\nreturn {}");
+
+		const project = makeResolvedProject({
+			outDir: undefined,
+			rojoMounts: [
+				{ dataModelPath: "ReplicatedStorage/Client", fsPath: "src/Client" },
+				{ dataModelPath: "ServerScriptService/Server", fsPath: "src/Server" },
+			],
+		});
+
+		expect(() => {
+			assertStubCollisionRule(project, "/root");
+		}).not.toThrow();
+	});
+
+	it("should accept when mixed user extensions cover every mount", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		vol.mkdirSync("/root/src/Client", { recursive: true });
+		vol.mkdirSync("/root/src/Server", { recursive: true });
+		vol.writeFileSync("/root/src/Client/jest.config.luau", "return {}");
+		vol.writeFileSync("/root/src/Server/jest.config.lua", "-- user-authored\nreturn {}");
+
+		const project = makeResolvedProject({
+			outDir: undefined,
+			rojoMounts: [
+				{ dataModelPath: "ReplicatedStorage/Client", fsPath: "src/Client" },
+				{ dataModelPath: "ServerScriptService/Server", fsPath: "src/Server" },
+			],
+		});
+
+		expect(() => {
+			assertStubCollisionRule(project, "/root");
+		}).not.toThrow();
+	});
+
+	it("should throw when only some mounts have a user config", () => {
+		expect.assertions(3);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		vol.mkdirSync("/root/src/Client", { recursive: true });
+		vol.mkdirSync("/root/src/Server", { recursive: true });
+		vol.writeFileSync("/root/src/Client/jest.config.luau", "return {}");
+
+		const project = makeResolvedProject({
+			displayName: "partial",
+			outDir: undefined,
+			rojoMounts: [
+				{ dataModelPath: "ReplicatedStorage/Client", fsPath: "src/Client" },
+				{ dataModelPath: "ServerScriptService/Server", fsPath: "src/Server" },
+			],
+		});
+
+		let caught: ConfigError | undefined;
+		try {
+			assertStubCollisionRule(project, "/root");
+		} catch (err) {
+			caught = err as ConfigError;
+		}
+
+		expect(caught).toBeInstanceOf(ConfigError);
+		expect(caught?.message).toContain("src/Client");
+		expect(caught?.message).toContain("src/Server");
+	});
+
+	it("should ignore our own generated .lua when counting user configs", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		vol.mkdirSync("/root/src/Client", { recursive: true });
+		vol.mkdirSync("/root/src/Server", { recursive: true });
+		// Our generated stub in one mount should not count as a user config.
+		vol.writeFileSync(
+			"/root/src/Client/jest.config.lua",
+			"-- Auto-generated by jest-roblox (do not edit)\nreturn {}",
+		);
+
+		const project = makeResolvedProject({
+			outDir: undefined,
+			rojoMounts: [
+				{ dataModelPath: "ReplicatedStorage/Client", fsPath: "src/Client" },
+				{ dataModelPath: "ServerScriptService/Server", fsPath: "src/Server" },
+			],
+		});
+
+		// Both mounts effectively have no user config, so no throw.
+		expect(() => {
+			assertStubCollisionRule(project, "/root");
+		}).not.toThrow();
+	});
+});
+
+describe("generateProjectConfigs with multi-mount projects", () => {
+	it("should write identical stubs at every mount's outputPath", () => {
+		expect.assertions(3);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		const stubConfig: ProjectTestConfig = {
+			displayName: "friends",
+			include: [],
+			testMatch: ["**/*.spec"],
+		};
+
+		generateProjectConfigs([
+			{ config: stubConfig, outputPath: "/root/src/Client/jest.config.lua" },
+			{ config: stubConfig, outputPath: "/root/src/Server/jest.config.lua" },
+			{ config: stubConfig, outputPath: "/root/src/Shared/jest.config.lua" },
+		]);
+
+		const clientContent = vol.readFileSync("/root/src/Client/jest.config.lua", "utf8");
+		const serverContent = vol.readFileSync("/root/src/Server/jest.config.lua", "utf8");
+		const sharedContent = vol.readFileSync("/root/src/Shared/jest.config.lua", "utf8");
+
+		expect(clientContent).toBe(serverContent);
+		expect(serverContent).toBe(sharedContent);
+		expect(clientContent).toContain('\tdisplayName = "friends",');
+	});
+
+	it("should skip writing when user's jest.config.lua exists at target", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		vol.mkdirSync("/root/src/Client", { recursive: true });
+		vol.writeFileSync("/root/src/Client/jest.config.lua", "-- user-authored\nreturn {}");
+
+		generateProjectConfigs([
+			{
+				config: { displayName: "friends", include: [], testMatch: ["**/*.spec"] },
+				outputPath: "/root/src/Client/jest.config.lua",
+			},
+		]);
+
+		// User's file preserved, not overwritten.
+		expect(vol.readFileSync("/root/src/Client/jest.config.lua", "utf8")).toBe(
+			"-- user-authored\nreturn {}",
+		);
+	});
+
+	it("should overwrite our own previously-generated stub on re-gen", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		vol.mkdirSync("/root/src/Client", { recursive: true });
+		vol.writeFileSync(
+			"/root/src/Client/jest.config.lua",
+			"-- Auto-generated by jest-roblox (do not edit)\n-- old content\n",
+		);
+
+		generateProjectConfigs([
+			{
+				config: { displayName: "updated", include: [], testMatch: ["**/*.spec"] },
+				outputPath: "/root/src/Client/jest.config.lua",
+			},
+		]);
+
+		expect(vol.readFileSync("/root/src/Client/jest.config.lua", "utf8")).toContain(
+			'\tdisplayName = "updated",',
+		);
 	});
 });

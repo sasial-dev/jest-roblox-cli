@@ -1,9 +1,12 @@
+import type { PathClassifier, PathKind } from "@isentinel/rojo-utils";
+
 import type { ResolvedConfig as C12ResolvedConfig, LoadConfigOptions } from "c12";
 import { describe, expect, it, vi } from "vitest";
 
 import type { RojoTreeNode } from "../types/rojo.ts";
 import { ConfigError } from "./errors.ts";
 import {
+	createFsClassifier,
 	extractProjectRoots,
 	extractStaticRoot,
 	loadProjectConfigFile,
@@ -15,6 +18,18 @@ import {
 } from "./projects.ts";
 import { DEFAULT_CONFIG } from "./schema.ts";
 import type { ProjectTestConfig, ResolvedConfig } from "./schema.ts";
+
+function allDirectories(): PathKind {
+	return "directory";
+}
+
+function makeClassifier(kinds: Record<string, PathKind>): PathClassifier {
+	function classify(fsPath: string): PathKind {
+		return kinds[fsPath] ?? "missing";
+	}
+
+	return classify;
+}
 
 vi.mock<typeof import("c12")>(import("c12"), async (importOriginal) => {
 	const actual = await importOriginal();
@@ -413,7 +428,7 @@ describe(resolveProjectConfig, () => {
 			outDir: "out/client",
 		});
 
-		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree);
+		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories);
 
 		expect(result.projects).toStrictEqual(["ReplicatedStorage/client"]);
 	});
@@ -433,7 +448,7 @@ describe(resolveProjectConfig, () => {
 			include: ["src/shared/**/*.spec.luau"],
 		});
 
-		const result = resolveProjectConfig(project, rootConfig, tree);
+		const result = resolveProjectConfig(project, rootConfig, tree, allDirectories);
 
 		expect(result.projects).toStrictEqual(["ReplicatedStorage/shared"]);
 	});
@@ -455,7 +470,7 @@ describe(resolveProjectConfig, () => {
 			root: "packages/core",
 		});
 
-		const result = resolveProjectConfig(project, rootConfig, rojoTree);
+		const result = resolveProjectConfig(project, rootConfig, rojoTree, allDirectories);
 
 		expect(result.projects).toStrictEqual(["ReplicatedStorage/client"]);
 	});
@@ -469,7 +484,7 @@ describe(resolveProjectConfig, () => {
 			outDir: "out/client",
 		});
 
-		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree);
+		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories);
 
 		expect(result.outDir).toBe("out/client");
 	});
@@ -491,7 +506,7 @@ describe(resolveProjectConfig, () => {
 			root: "packages/core",
 		});
 
-		const result = resolveProjectConfig(project, rootConfig, rojoTree);
+		const result = resolveProjectConfig(project, rootConfig, rojoTree, allDirectories);
 
 		expect(result.outDir).toBe("packages/core/out/client");
 	});
@@ -505,7 +520,7 @@ describe(resolveProjectConfig, () => {
 			outDir: "out/client",
 		});
 
-		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree);
+		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories);
 
 		expect(result.testMatch).toStrictEqual(["**/*.spec", "**/*.test"]);
 	});
@@ -515,7 +530,7 @@ describe(resolveProjectConfig, () => {
 
 		const project = makeProject({ displayName: "client", outDir: "out/client" });
 
-		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree);
+		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories);
 
 		expect(result.config.verbose).toBeTrue();
 		expect(result.config.silent).toBeFalse();
@@ -526,7 +541,7 @@ describe(resolveProjectConfig, () => {
 
 		const project = makeProject({ displayName: "client", outDir: "out/client" });
 
-		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree);
+		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories);
 
 		expect(result.config.backend).toBe(rootConfig.backend);
 		expect(result.config.rootDir).toBe(rootConfig.rootDir);
@@ -541,7 +556,7 @@ describe(resolveProjectConfig, () => {
 			testTimeout: 5000,
 		});
 
-		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree);
+		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories);
 
 		expect(result.config.testTimeout).toBe(5000);
 	});
@@ -555,7 +570,7 @@ describe(resolveProjectConfig, () => {
 			testTimeout: undefined,
 		});
 
-		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree);
+		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories);
 
 		expect(result.config.testTimeout).toBeUndefined();
 	});
@@ -568,7 +583,7 @@ describe(resolveProjectConfig, () => {
 			outDir: "out/client",
 		});
 
-		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree);
+		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories);
 
 		expect(result.displayName).toBe("client-tests");
 	});
@@ -590,7 +605,7 @@ describe(resolveProjectConfig, () => {
 			root: "packages/core",
 		});
 
-		const result = resolveProjectConfig(project, rootConfig, rojoTree);
+		const result = resolveProjectConfig(project, rootConfig, rojoTree, allDirectories);
 
 		expect(result.include).toStrictEqual(["packages/core/src/client/**/*.spec.ts"]);
 	});
@@ -603,36 +618,333 @@ describe(resolveProjectConfig, () => {
 			include: [],
 		});
 
-		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree);
+		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories);
 
 		expect(result.projects).toBeEmpty();
 	});
 
-	it("should throw when multiple include roots and no outDir", () => {
-		expect.assertions(1);
+	it("should populate rojoMounts with a single mount when outDir is set", () => {
+		expect.assertions(2);
 
 		const project = makeProject({
-			displayName: "multi-root",
-			include: ["src/client/**/*.spec.ts", "src/server/**/*.spec.ts"],
+			displayName: "client",
+			include: ["src/client/**/*.spec.ts"],
+			outDir: "out/client",
 		});
 
-		expect(() => resolveProjectConfig(project, rootConfig, simpleRojoTree)).toThrow(
-			'Project "multi-root" has multiple include roots but no outDir',
+		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories);
+
+		expect(result.rojoMounts).toStrictEqual([
+			{ dataModelPath: "ReplicatedStorage/client", fsPath: "out/client" },
+		]);
+		expect(result.outDir).toBe("out/client");
+	});
+
+	it("should auto-expand multi-root includes via tree walk", () => {
+		expect.assertions(2);
+
+		const tree = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				Client: { $path: "src/Client" },
+				Shared: { $path: "src/Shared" },
+			},
+			ServerScriptService: {
+				Server: { $path: "src/Server" },
+			},
+		} satisfies RojoTreeNode;
+
+		const project = makeProject({
+			displayName: "friends",
+			include: ["src/**/*.spec.luau"],
+		});
+
+		const result = resolveProjectConfig(project, rootConfig, tree, allDirectories);
+
+		expect(result.projects).toStrictEqual([
+			"ReplicatedStorage/Client",
+			"ReplicatedStorage/Shared",
+			"ServerScriptService/Server",
+		]);
+		expect(result.rojoMounts).toStrictEqual([
+			{ dataModelPath: "ReplicatedStorage/Client", fsPath: "src/Client" },
+			{ dataModelPath: "ReplicatedStorage/Shared", fsPath: "src/Shared" },
+			{ dataModelPath: "ServerScriptService/Server", fsPath: "src/Server" },
+		]);
+	});
+
+	it("should respect segment boundaries during auto-expand", () => {
+		expect.assertions(1);
+
+		const tree = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				Client: { $path: "src/Client" },
+			},
+		} satisfies RojoTreeNode;
+
+		const project = makeProject({
+			displayName: "cli-only",
+			// src/Cli must NOT match $path src/Client.
+			include: ["src/Cli/**/*.spec.luau"],
+		});
+
+		expect(() =>
+			resolveProjectConfig(project, rootConfig, tree, allDirectories),
+		).toThrowWithMessage(
+			ConfigError,
+			/include root "src\/Cli" did not match any Rojo \$path entry/,
 		);
 	});
 
-	it("should throw with object displayName when multiple roots and no outDir", () => {
+	it("should skip file-valued $path entries during auto-expand", () => {
+		expect.assertions(1);
+
+		const tree = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				Constants: { $path: "src/shared/Constants.luau" },
+				shared: { $path: "src/shared" },
+			},
+		} satisfies RojoTreeNode;
+
+		const project = makeProject({
+			displayName: "shared",
+			include: ["src/shared/**/*.spec.luau"],
+		});
+
+		const classify = makeClassifier({
+			"src/shared": "directory",
+			"src/shared/Constants.luau": "file",
+		});
+
+		const result = resolveProjectConfig(project, rootConfig, tree, classify);
+
+		// The file-valued Constants.luau is not eligible; the exact-lookup
+		// match on src/shared wins.
+		expect(result.rojoMounts).toStrictEqual([
+			{ dataModelPath: "ReplicatedStorage/shared", fsPath: "src/shared" },
+		]);
+	});
+
+	it("should skip missing paths during auto-expand without throwing", () => {
+		expect.assertions(1);
+
+		const tree = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				Client: { $path: "src/Client" },
+				Stale: { $path: "src/Stale" },
+			},
+		} satisfies RojoTreeNode;
+
+		const project = makeProject({
+			displayName: "partial",
+			include: ["src/**/*.spec.luau"],
+		});
+
+		const classify = makeClassifier({
+			"src/Client": "directory",
+		});
+
+		const result = resolveProjectConfig(project, rootConfig, tree, classify);
+
+		expect(result.rojoMounts).toStrictEqual([
+			{ dataModelPath: "ReplicatedStorage/Client", fsPath: "src/Client" },
+		]);
+	});
+
+	it("should prune descendant mounts when ancestor is present", () => {
+		expect.assertions(1);
+
+		const tree = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				Client: {
+					$path: "src/Client",
+					Systems: { $path: "src/Client/Systems" },
+				},
+			},
+		} satisfies RojoTreeNode;
+
+		const project = makeProject({
+			displayName: "client",
+			include: ["src/Client/**/*.spec.luau"],
+		});
+
+		const result = resolveProjectConfig(project, rootConfig, tree, allDirectories);
+
+		expect(result.rojoMounts).toStrictEqual([
+			{ dataModelPath: "ReplicatedStorage/Client", fsPath: "src/Client" },
+		]);
+	});
+
+	it("should dedupe mounts when two include roots expand to the same mount", () => {
+		expect.assertions(1);
+
+		const tree = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				Shared: { $path: "src/Shared" },
+			},
+		} satisfies RojoTreeNode;
+
+		const project = makeProject({
+			displayName: "shared",
+			// Both roots expand to the same mount under src/Shared.
+			include: ["src/**/*.spec.luau", "src/Shared/**/*.test.luau"],
+		});
+
+		const result = resolveProjectConfig(project, rootConfig, tree, allDirectories);
+
+		expect(result.rojoMounts).toStrictEqual([
+			{ dataModelPath: "ReplicatedStorage/Shared", fsPath: "src/Shared" },
+		]);
+	});
+
+	it("should produce deterministic order across roots that expand to disjoint mounts", () => {
+		expect.assertions(1);
+
+		const tree = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				A: { $path: "src/a" },
+				B: { $path: "src/b" },
+			},
+		} satisfies RojoTreeNode;
+
+		const project = makeProject({
+			displayName: "ordered",
+			include: ["src/a/**/*.spec.luau", "src/b/**/*.spec.luau"],
+		});
+
+		const result = resolveProjectConfig(project, rootConfig, tree, allDirectories);
+
+		expect(result.projects).toStrictEqual(["ReplicatedStorage/A", "ReplicatedStorage/B"]);
+	});
+
+	it("should use exact lookup when outDir is set even with multiple include roots", () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			displayName: "pinned",
+			include: ["src/client/**/*.spec.ts", "src/server/**/*.spec.ts"],
+			outDir: "out/client",
+		});
+
+		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories);
+
+		expect(result.rojoMounts).toHaveLength(1);
+		expect(result.rojoMounts).toStrictEqual([
+			{ dataModelPath: "ReplicatedStorage/client", fsPath: "out/client" },
+		]);
+	});
+
+	it("should throw when outDir is set but maps to no DataModel path", () => {
 		expect.assertions(1);
 
 		const project = makeProject({
-			displayName: { name: "multi-root", color: "cyan" },
-			include: ["src/client/**/*.spec.ts", "src/server/**/*.spec.ts"],
+			displayName: "bad-outdir",
+			include: ["src/client/**/*.spec.ts"],
+			outDir: "out/nonexistent",
 		});
 
-		expect(() => resolveProjectConfig(project, rootConfig, simpleRojoTree)).toThrowWithMessage(
-			Error,
-			/Project "multi-root" has multiple include roots but no outDir/,
-		);
+		expect(() =>
+			resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories),
+		).toThrowWithMessage(ConfigError, /No Rojo tree mapping found for path: out\/nonexistent/);
+	});
+
+	it("should apply project root before extracting include roots", () => {
+		expect.assertions(1);
+
+		const tree = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				Client: { $path: "packages/friends/src/Client" },
+			},
+		} satisfies RojoTreeNode;
+
+		const project = makeProject({
+			displayName: "friends",
+			include: ["src/Client/**/*.spec.luau"],
+			root: "packages/friends",
+		});
+
+		const result = resolveProjectConfig(project, rootConfig, tree, allDirectories);
+
+		expect(result.rojoMounts).toStrictEqual([
+			{
+				dataModelPath: "ReplicatedStorage/Client",
+				fsPath: "packages/friends/src/Client",
+			},
+		]);
+	});
+
+	it("should throw with nearby $path suggestions when include root is unmappable", () => {
+		expect.assertions(1);
+
+		const tree = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				Client: { $path: "out/Client" },
+				Shared: { $path: "out/Shared" },
+			},
+		} satisfies RojoTreeNode;
+
+		const project = makeProject({
+			displayName: "lost",
+			include: ["ghost/**/*.spec.luau"],
+		});
+
+		expect(() =>
+			resolveProjectConfig(project, rootConfig, tree, allDirectories),
+		).toThrowWithMessage(ConfigError, /Available \$path entries: out\/Client, out\/Shared/);
+	});
+
+	it("should omit available-entries line when rojo tree has no $path entries", () => {
+		expect.assertions(1);
+
+		const emptyTree = { $className: "DataModel" } satisfies RojoTreeNode;
+
+		const project = makeProject({
+			displayName: "lost",
+			include: ["ghost/**/*.spec.luau"],
+		});
+
+		let caught: ConfigError | undefined;
+		try {
+			resolveProjectConfig(project, rootConfig, emptyTree, allDirectories);
+		} catch (err) {
+			caught = err as ConfigError;
+		}
+
+		expect(caught?.message).not.toContain("Available $path entries");
+	});
+
+	it("should hint about outDir when unmappable root starts with src/", () => {
+		expect.assertions(2);
+
+		const tree = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				Client: { $path: "out/client" },
+			},
+		} satisfies RojoTreeNode;
+
+		const project = makeProject({
+			displayName: "hint-me",
+			include: ["src/ghost/**/*.spec.ts"],
+		});
+
+		let caught: ConfigError | undefined;
+		try {
+			resolveProjectConfig(project, rootConfig, tree, allDirectories);
+		} catch (err) {
+			caught = err as ConfigError;
+		}
+
+		expect(caught).toBeInstanceOf(ConfigError);
+		expect(caught?.hint).toMatch(/set "outDir"/);
 	});
 
 	it("should resolve includes from cwd when root is not set", () => {
@@ -644,7 +956,7 @@ describe(resolveProjectConfig, () => {
 			outDir: "out/client",
 		});
 
-		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree);
+		const result = resolveProjectConfig(project, rootConfig, simpleRojoTree, allDirectories);
 
 		expect(result.include).toStrictEqual(["src/client/**/*.spec.ts"]);
 	});
@@ -1170,5 +1482,76 @@ describe(resolveAllProjects, () => {
 		await expect(
 			resolveAllProjects(entries, DEFAULT_CONFIG, simpleRojoTree, "/project"),
 		).rejects.toThrow("Duplicate project displayName: client");
+	});
+});
+
+describe(createFsClassifier, () => {
+	it("should return 'directory' when statSync reports a directory", async () => {
+		expect.assertions(1);
+
+		const fs = await import("node:fs");
+		vi.spyOn(fs.default, "statSync").mockReturnValueOnce({
+			isDirectory: () => true,
+		} as unknown as ReturnType<typeof fs.statSync>);
+
+		const classify = createFsClassifier("/root");
+
+		expect(classify("some/directory")).toBe("directory");
+	});
+
+	it("should return 'file' when statSync reports a non-directory", async () => {
+		expect.assertions(1);
+
+		const fs = await import("node:fs");
+		vi.spyOn(fs.default, "statSync").mockReturnValueOnce({
+			isDirectory: () => false,
+		} as unknown as ReturnType<typeof fs.statSync>);
+
+		const classify = createFsClassifier("/root");
+
+		expect(classify("some/file.txt")).toBe("file");
+	});
+
+	it("should return 'missing' when statSync returns undefined", async () => {
+		expect.assertions(1);
+
+		const fs = await import("node:fs");
+		vi.spyOn(fs.default, "statSync").mockReturnValueOnce(
+			undefined as unknown as ReturnType<typeof fs.statSync>,
+		);
+
+		const classify = createFsClassifier("/root");
+
+		expect(classify("missing/path")).toBe("missing");
+	});
+
+	it("should resolve relative paths against the given root directory", async () => {
+		expect.assertions(1);
+
+		const fs = await import("node:fs");
+		const spy = vi.spyOn(fs.default, "statSync").mockReturnValueOnce({
+			isDirectory: () => true,
+		} as unknown as ReturnType<typeof fs.statSync>);
+
+		const classify = createFsClassifier("/workspace/root");
+		classify("src/Client");
+
+		expect(spy).toHaveBeenCalledWith(expect.stringMatching(/src[/\\]Client$/), {
+			throwIfNoEntry: false,
+		});
+	});
+
+	it("should pass absolute paths through without resolution", async () => {
+		expect.assertions(1);
+
+		const fs = await import("node:fs");
+		const spy = vi.spyOn(fs.default, "statSync").mockReturnValueOnce({
+			isDirectory: () => true,
+		} as unknown as ReturnType<typeof fs.statSync>);
+
+		const classify = createFsClassifier("/workspace/root");
+		classify("/absolute/path");
+
+		expect(spy).toHaveBeenCalledWith("/absolute/path", { throwIfNoEntry: false });
 	});
 });

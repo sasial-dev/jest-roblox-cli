@@ -24,7 +24,11 @@ import type {
 } from "./config/schema.ts";
 import { isValidBackend, ROOT_ONLY_KEYS, VALID_BACKENDS } from "./config/schema.ts";
 import { createSetupResolver } from "./config/setup-resolver.ts";
-import { generateProjectConfigs, syncStubsToShadowDirectory } from "./config/stubs.ts";
+import {
+	assertStubCollisionRule,
+	generateProjectConfigs,
+	syncStubsToShadowDirectory,
+} from "./config/stubs.ts";
 import { deriveCoverageFromIncludes } from "./coverage/derive-coverage-from.ts";
 import { mapCoverageToTypeScript } from "./coverage/mapper.ts";
 import { mergeRawCoverage } from "./coverage/merge-raw-coverage.ts";
@@ -836,18 +840,19 @@ function generateProjectStubs(projects: Array<ResolvedProjectConfig>, rootDirect
 	const entries: Array<{ config: ProjectTestConfig; outputPath: string }> = [];
 
 	for (const project of projects) {
-		if (project.outDir === undefined) {
-			continue;
-		}
+		assertStubCollisionRule(project, rootDirectory);
 
-		const outputPath = path.resolve(rootDirectory, project.outDir, "jest.config.lua");
 		const stubConfig: ProjectTestConfig = {
 			...buildStubConfig(project.config),
 			displayName: project.displayName,
 			include: [],
 			testMatch: project.testMatch,
 		};
-		entries.push({ config: stubConfig, outputPath });
+
+		for (const mount of project.rojoMounts) {
+			const outputPath = path.resolve(rootDirectory, mount.fsPath, "jest.config.lua");
+			entries.push({ config: stubConfig, outputPath });
+		}
 	}
 
 	generateProjectConfigs(entries);
