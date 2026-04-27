@@ -1,5 +1,3 @@
-/* cspell:words ocale */
-export { createOcaleRunner, createOcaleRunnerFromEnvironment, createStudioRunner } from "./auto.ts";
 export {
 	getCacheDirectory,
 	getCacheKey,

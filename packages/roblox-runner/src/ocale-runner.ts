@@ -1,4 +1,3 @@
-/* cspell:words ocale */
 import { type } from "arktype";
 import type buffer from "node:buffer";
 import * as fs from "node:fs";
