@@ -313,23 +313,8 @@ export class OpenCloudBackend implements Backend {
 	}
 }
 
-export function createOpenCloudBackend(): OpenCloudBackend {
-	const apiKey = process.env["ROBLOX_OPEN_CLOUD_API_KEY"];
-	if (apiKey === undefined) {
-		throw new Error("ROBLOX_OPEN_CLOUD_API_KEY environment variable is required");
-	}
-
-	const universeId = process.env["ROBLOX_UNIVERSE_ID"];
-	if (universeId === undefined) {
-		throw new Error("ROBLOX_UNIVERSE_ID environment variable is required");
-	}
-
-	const placeId = process.env["ROBLOX_PLACE_ID"];
-	if (placeId === undefined) {
-		throw new Error("ROBLOX_PLACE_ID environment variable is required");
-	}
-
-	return new OpenCloudBackend({ apiKey, placeId, universeId });
+export function createOpenCloudBackend(credentials: OpenCloudCredentials): OpenCloudBackend {
+	return new OpenCloudBackend(credentials);
 }
 
 function resolveOpenCloudBaseUrl(): string {

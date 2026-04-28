@@ -1,12 +1,17 @@
+import { resolveCredentials } from "@isentinel/roblox-runner";
+import type { RunnerCredentials } from "@isentinel/roblox-runner";
+
 import process from "node:process";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
 
-import type { ResolvedConfig } from "../config/schema.ts";
+import type { CliOptions, ResolvedConfig } from "../config/schema.ts";
 import { LuauScriptError } from "../reporter/parser.ts";
 import type { Backend, BackendOptions, BackendResult } from "./interface.ts";
 import { createOpenCloudBackend } from "./open-cloud.ts";
 import { createStudioBackend } from "./studio.ts";
+
+const ENV_PREFIX = "JEST_";
 
 export interface ProbeResult {
 	detected: false;
@@ -19,12 +24,14 @@ export interface ProbeDetected {
 }
 
 export class StudioWithFallback implements Backend {
+	private readonly credentials: RunnerCredentials;
 	private readonly studio: Backend;
 
 	public readonly kind = "studio" as const;
 
-	constructor(studio: Backend) {
+	constructor(studio: Backend, credentials: RunnerCredentials) {
 		this.studio = studio;
+		this.credentials = credentials;
 	}
 
 	public async close(): Promise<void> {
@@ -37,7 +44,7 @@ export class StudioWithFallback implements Backend {
 		} catch (err) {
 			if (isStudioBusyError(err)) {
 				process.stderr.write("Studio busy, falling back to Open Cloud\n");
-				return createOpenCloudBackend().runTests(options);
+				return createOpenCloudBackend(this.credentials).runTests(options);
 			}
 
 			throw err;
@@ -87,6 +94,7 @@ export async function probeStudioPlugin(
 }
 
 export async function resolveBackend(
+	cli: CliOptions,
 	config: ResolvedConfig,
 	probe: (
 		port: number,
@@ -98,9 +106,10 @@ export async function resolveBackend(
 	}
 
 	if (config.backend === "open-cloud") {
-		return createOpenCloudBackend();
+		return createOpenCloudBackend(buildCredentials(cli, config));
 	}
 
+	const credentials = tryBuildCredentials(cli, config);
 	const probeResult = await probe(config.port, 500);
 
 	if (probeResult.detected) {
@@ -110,27 +119,52 @@ export async function resolveBackend(
 			preConnected: { server: probeResult.server, socket: probeResult.socket },
 			timeout: config.timeout,
 		});
-		if (hasOpenCloudCredentials()) {
-			return new StudioWithFallback(studio);
+		if (credentials !== undefined) {
+			return new StudioWithFallback(studio, credentials);
 		}
 
 		return studio;
 	}
 
-	if (hasOpenCloudCredentials()) {
+	if (credentials !== undefined) {
 		process.stderr.write("Backend: open-cloud (no plugin, using Open Cloud)\n");
-		return createOpenCloudBackend();
+		return createOpenCloudBackend(credentials);
+	}
+
+	// User passed credential overrides via CLI but resolveCredentials still
+	// failed — they intend open-cloud but missed a field. Surface the precise
+	// resolver error rather than the generic "no backend" fallback.
+	if (hasUserOverrides(cli)) {
+		buildCredentials(cli, config);
 	}
 
 	throw new Error(
-		"No backend available: Studio plugin not detected and Open Cloud env vars (ROBLOX_OPEN_CLOUD_API_KEY, ROBLOX_UNIVERSE_ID, ROBLOX_PLACE_ID) are missing",
+		"No backend available: Studio plugin not detected and no Open Cloud " +
+			"credentials found. Set ROBLOX_OPEN_CLOUD_API_KEY, ROBLOX_UNIVERSE_ID, " +
+			"and ROBLOX_PLACE_ID (or pass --apiKey, --universeId, --placeId; " +
+			"or set universeId/placeId in jest.config.ts).",
 	);
 }
 
-function hasOpenCloudCredentials(): boolean {
-	return (
-		process.env["ROBLOX_OPEN_CLOUD_API_KEY"] !== undefined &&
-		process.env["ROBLOX_UNIVERSE_ID"] !== undefined &&
-		process.env["ROBLOX_PLACE_ID"] !== undefined
-	);
+function hasUserOverrides(cli: CliOptions): boolean {
+	return cli.apiKey !== undefined || cli.universeId !== undefined || cli.placeId !== undefined;
+}
+
+function buildCredentials(cli: CliOptions, config: ResolvedConfig): RunnerCredentials {
+	return resolveCredentials({
+		defaults: { placeId: config.placeId, universeId: config.universeId },
+		envPrefix: ENV_PREFIX,
+		overrides: { apiKey: cli.apiKey, placeId: cli.placeId, universeId: cli.universeId },
+	});
+}
+
+function tryBuildCredentials(
+	cli: CliOptions,
+	config: ResolvedConfig,
+): RunnerCredentials | undefined {
+	try {
+		return buildCredentials(cli, config);
+	} catch {
+		return undefined;
+	}
 }

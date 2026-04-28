@@ -1,4 +1,4 @@
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ResolvedConfig } from "./config/schema.ts";
 import { DEFAULT_CONFIG } from "./config/schema.ts";
@@ -105,9 +105,6 @@ describe(buildJestArgv, () => {
 		expect.assertions(1);
 
 		vi.stubEnv("TIMING", "1");
-		onTestFinished(() => {
-			vi.unstubAllEnvs();
-		});
 		const argv = buildJestArgv(createOptions());
 
 		expect(argv).toHaveProperty("_timing", true);

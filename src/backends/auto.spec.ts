@@ -4,7 +4,7 @@ import { assert, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 
 import { DEFAULT_CONFIG } from "../config/schema.ts";
-import type { ResolvedConfig } from "../config/schema.ts";
+import type { CliOptions, ResolvedConfig } from "../config/schema.ts";
 import { LuauScriptError } from "../reporter/parser.ts";
 import {
 	isStudioBusyError,
@@ -25,6 +25,10 @@ vi.mock(import("ws"), async () => fromPartial({ WebSocketServer: MockWebSocketSe
 
 function makeConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
 	return { ...DEFAULT_CONFIG, ...overrides };
+}
+
+function makeCli(overrides: Partial<CliOptions> = {}): CliOptions {
+	return overrides;
 }
 
 describe(probeStudioPlugin, () => {
@@ -96,14 +100,17 @@ describe(resolveBackend, () => {
 		vi.stubEnv("ROBLOX_OPEN_CLOUD_API_KEY", undefined);
 		vi.stubEnv("ROBLOX_UNIVERSE_ID", undefined);
 		vi.stubEnv("ROBLOX_PLACE_ID", undefined);
+		vi.stubEnv("JEST_ROBLOX_OPEN_CLOUD_API_KEY", undefined);
+		vi.stubEnv("JEST_ROBLOX_UNIVERSE_ID", undefined);
+		vi.stubEnv("JEST_ROBLOX_PLACE_ID", undefined);
 
-		const backend = await resolveBackend(makeConfig({ backend: "auto" }), async () =>
-			mockDetected(),
-		);
+		async function probe(): Promise<ProbeDetected> {
+			return mockDetected();
+		}
+
+		const backend = await resolveBackend(makeCli(), makeConfig({ backend: "auto" }), probe);
 
 		expect(backend).toBeInstanceOf(StudioBackend);
-
-		vi.unstubAllEnvs();
 	});
 
 	it("should fall back to open-cloud when plugin unavailable", async () => {
@@ -117,11 +124,28 @@ describe(resolveBackend, () => {
 			return mockNotDetected();
 		}
 
-		const backend = await resolveBackend(makeConfig({ backend: "auto" }), probe);
+		const backend = await resolveBackend(makeCli(), makeConfig({ backend: "auto" }), probe);
 
 		expect(backend).toBeInstanceOf(OpenCloudBackend);
+	});
 
-		vi.unstubAllEnvs();
+	it("should select open-cloud when only JEST_ROBLOX_* env vars are set", async () => {
+		expect.assertions(1);
+
+		vi.stubEnv("ROBLOX_OPEN_CLOUD_API_KEY", undefined);
+		vi.stubEnv("ROBLOX_UNIVERSE_ID", undefined);
+		vi.stubEnv("ROBLOX_PLACE_ID", undefined);
+		vi.stubEnv("JEST_ROBLOX_OPEN_CLOUD_API_KEY", "jest-key");
+		vi.stubEnv("JEST_ROBLOX_UNIVERSE_ID", "888");
+		vi.stubEnv("JEST_ROBLOX_PLACE_ID", "999");
+
+		async function probe(): Promise<ProbeResult> {
+			return mockNotDetected();
+		}
+
+		const backend = await resolveBackend(makeCli(), makeConfig({ backend: "auto" }), probe);
+
+		expect(backend).toBeInstanceOf(OpenCloudBackend);
 	});
 
 	it("should throw when auto mode has no OC env vars and no studio", async () => {
@@ -130,12 +154,15 @@ describe(resolveBackend, () => {
 		vi.stubEnv("ROBLOX_OPEN_CLOUD_API_KEY", undefined);
 		vi.stubEnv("ROBLOX_UNIVERSE_ID", undefined);
 		vi.stubEnv("ROBLOX_PLACE_ID", undefined);
+		vi.stubEnv("JEST_ROBLOX_OPEN_CLOUD_API_KEY", undefined);
+		vi.stubEnv("JEST_ROBLOX_UNIVERSE_ID", undefined);
+		vi.stubEnv("JEST_ROBLOX_PLACE_ID", undefined);
 
 		await expect(
-			resolveBackend(makeConfig({ backend: "auto" }), async () => mockNotDetected()),
+			resolveBackend(makeCli(), makeConfig({ backend: "auto" }), async () =>
+				mockNotDetected(),
+			),
 		).rejects.toThrowWithMessage(Error, /No backend available/);
-
-		vi.unstubAllEnvs();
 	});
 
 	it("should return studio backend for explicit studio config", async () => {
@@ -143,7 +170,7 @@ describe(resolveBackend, () => {
 
 		const probe =
 			vi.fn<(port: number, timeoutMs: number) => Promise<ProbeDetected | ProbeResult>>();
-		const backend = await resolveBackend(makeConfig({ backend: "studio" }), probe);
+		const backend = await resolveBackend(makeCli(), makeConfig({ backend: "studio" }), probe);
 
 		expect(backend).toBeInstanceOf(StudioBackend);
 	});
@@ -157,11 +184,32 @@ describe(resolveBackend, () => {
 
 		const probe =
 			vi.fn<(port: number, timeoutMs: number) => Promise<ProbeDetected | ProbeResult>>();
-		const backend = await resolveBackend(makeConfig({ backend: "open-cloud" }), probe);
+		const backend = await resolveBackend(
+			makeCli(),
+			makeConfig({ backend: "open-cloud" }),
+			probe,
+		);
 
 		expect(backend).toBeInstanceOf(OpenCloudBackend);
+	});
 
-		vi.unstubAllEnvs();
+	it("should throw precise resolver error when user supplies partial CLI overrides", async () => {
+		expect.assertions(1);
+
+		vi.stubEnv("ROBLOX_OPEN_CLOUD_API_KEY", undefined);
+		vi.stubEnv("ROBLOX_UNIVERSE_ID", undefined);
+		vi.stubEnv("ROBLOX_PLACE_ID", undefined);
+		vi.stubEnv("JEST_ROBLOX_OPEN_CLOUD_API_KEY", undefined);
+		vi.stubEnv("JEST_ROBLOX_UNIVERSE_ID", undefined);
+		vi.stubEnv("JEST_ROBLOX_PLACE_ID", undefined);
+
+		async function probe(): Promise<ProbeResult> {
+			return mockNotDetected();
+		}
+
+		await expect(
+			resolveBackend(makeCli({ apiKey: "key" }), makeConfig({ backend: "auto" }), probe),
+		).rejects.toThrowWithMessage(Error, /Missing: universeId, placeId/);
 	});
 
 	it("should wrap studio with fallback when OC credentials available", async () => {
@@ -171,13 +219,13 @@ describe(resolveBackend, () => {
 		vi.stubEnv("ROBLOX_UNIVERSE_ID", "123");
 		vi.stubEnv("ROBLOX_PLACE_ID", "456");
 
-		const backend = await resolveBackend(makeConfig({ backend: "auto" }), async () =>
-			mockDetected(),
-		);
+		async function probe(): Promise<ProbeDetected> {
+			return mockDetected();
+		}
+
+		const backend = await resolveBackend(makeCli(), makeConfig({ backend: "auto" }), probe);
 
 		expect(backend).toBeInstanceOf(StudioWithFallback);
-
-		vi.unstubAllEnvs();
 	});
 });
 
@@ -224,7 +272,11 @@ describe(StudioWithFallback, () => {
 				),
 		};
 
-		const fallback = new StudioWithFallback(studioBackend);
+		const fallback = new StudioWithFallback(studioBackend, {
+			apiKey: "test-key",
+			placeId: "456",
+			universeId: "123",
+		});
 
 		// Will throw because OC env vars are stubs, but it proves the fallback
 		// path runs
@@ -239,8 +291,6 @@ describe(StudioWithFallback, () => {
 				],
 			}),
 		).rejects.toThrow(/game\.rbxl/);
-
-		vi.unstubAllEnvs();
 	});
 
 	it("should delegate close() to the wrapped studio backend", async () => {
@@ -253,7 +303,11 @@ describe(StudioWithFallback, () => {
 			runTests: vi.fn<Backend["runTests"]>(),
 		};
 
-		const fallback = new StudioWithFallback(studioBackend);
+		const fallback = new StudioWithFallback(studioBackend, {
+			apiKey: "test-key",
+			placeId: "456",
+			universeId: "123",
+		});
 		await fallback.close();
 
 		expect(close).toHaveBeenCalledOnce();
@@ -267,7 +321,11 @@ describe(StudioWithFallback, () => {
 			runTests: vi.fn<Backend["runTests"]>().mockRejectedValue(new Error("some other error")),
 		};
 
-		const fallback = new StudioWithFallback(studioBackend);
+		const fallback = new StudioWithFallback(studioBackend, {
+			apiKey: "test-key",
+			placeId: "456",
+			universeId: "123",
+		});
 
 		await expect(
 			fallback.runTests({

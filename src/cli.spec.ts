@@ -556,6 +556,50 @@ describe(parseArgs, () => {
 
 		expect(() => parseArgs(["--parallel=xyz"])).toThrow("Invalid --parallel value");
 	});
+
+	it("should parse --apiKey option", () => {
+		expect.assertions(1);
+
+		const result = parseArgs(["--apiKey", "secret"]);
+
+		expect(result.apiKey).toBe("secret");
+	});
+
+	it("should parse --universeId option", () => {
+		expect.assertions(1);
+
+		const result = parseArgs(["--universeId", "123"]);
+
+		expect(result.universeId).toBe("123");
+	});
+
+	it("should parse --placeId option", () => {
+		expect.assertions(1);
+
+		const result = parseArgs(["--placeId", "456"]);
+
+		expect(result.placeId).toBe("456");
+	});
+
+	it("should parse all three credential flags together", () => {
+		expect.assertions(3);
+
+		const result = parseArgs(["--apiKey", "secret", "--universeId", "123", "--placeId", "456"]);
+
+		expect(result.apiKey).toBe("secret");
+		expect(result.universeId).toBe("123");
+		expect(result.placeId).toBe("456");
+	});
+
+	it("should leave credential fields undefined when flags are absent", () => {
+		expect.assertions(3);
+
+		const result = parseArgs([]);
+
+		expect(result.apiKey).toBeUndefined();
+		expect(result.universeId).toBeUndefined();
+		expect(result.placeId).toBeUndefined();
+	});
 });
 
 describe(run, () => {

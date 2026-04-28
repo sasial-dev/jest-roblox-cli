@@ -1,6 +1,5 @@
 import buffer from "node:buffer";
-import process from "node:process";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_CONFIG } from "../config/schema.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
@@ -136,11 +135,7 @@ describe(OpenCloudBackend, () => {
 	it("should honor JEST_ROBLOX_OPEN_CLOUD_BASE_URL for requests", async () => {
 		expect.assertions(2);
 
-		onTestFinished(
-			createTestEnvironment({
-				JEST_ROBLOX_OPEN_CLOUD_BASE_URL: "http://127.0.0.1:4010/custom/",
-			}),
-		);
+		vi.stubEnv("JEST_ROBLOX_OPEN_CLOUD_BASE_URL", "http://127.0.0.1:4010/custom/");
 
 		const http = createDispatchMock({
 			onCreateTask: () => {
@@ -1236,95 +1231,21 @@ describe(OpenCloudBackend, () => {
 	});
 });
 
-function createTestEnvironment(values: Record<string, string | undefined>): () => void {
-	const backup: Record<string, string | undefined> = {
-		JEST_ROBLOX_OPEN_CLOUD_BASE_URL: process.env["JEST_ROBLOX_OPEN_CLOUD_BASE_URL"],
-		ROBLOX_OPEN_CLOUD_API_KEY: process.env["ROBLOX_OPEN_CLOUD_API_KEY"],
-		ROBLOX_PLACE_ID: process.env["ROBLOX_PLACE_ID"],
-		ROBLOX_UNIVERSE_ID: process.env["ROBLOX_UNIVERSE_ID"],
-	};
-
-	for (const [key, value] of Object.entries(values)) {
-		if (value === undefined) {
-			delete process.env[key];
-		} else {
-			process.env[key] = value;
-		}
-	}
-
-	return () => {
-		for (const [key, value] of Object.entries(backup)) {
-			if (value === undefined) {
-				delete process.env[key];
-			} else {
-				process.env[key] = value;
-			}
-		}
-	};
-}
-
 describe(createOpenCloudBackend, () => {
-	it("should throw when ROBLOX_OPEN_CLOUD_API_KEY is missing", () => {
-		expect.assertions(1);
+	it("should construct an OpenCloudBackend from given credentials", () => {
+		expect.assertions(2);
 
-		onTestFinished(
-			createTestEnvironment({
-				ROBLOX_OPEN_CLOUD_API_KEY: undefined,
-				ROBLOX_PLACE_ID: undefined,
-				ROBLOX_UNIVERSE_ID: undefined,
-			}),
-		);
-
-		expect(() => createOpenCloudBackend()).toThrow(
-			"ROBLOX_OPEN_CLOUD_API_KEY environment variable is required",
-		);
-	});
-
-	it("should throw when ROBLOX_UNIVERSE_ID is missing", () => {
-		expect.assertions(1);
-
-		onTestFinished(
-			createTestEnvironment({
-				ROBLOX_OPEN_CLOUD_API_KEY: "key",
-				ROBLOX_PLACE_ID: undefined,
-				ROBLOX_UNIVERSE_ID: undefined,
-			}),
-		);
-
-		expect(() => createOpenCloudBackend()).toThrow(
-			"ROBLOX_UNIVERSE_ID environment variable is required",
-		);
-	});
-
-	it("should throw when ROBLOX_PLACE_ID is missing", () => {
-		expect.assertions(1);
-
-		onTestFinished(
-			createTestEnvironment({
-				ROBLOX_OPEN_CLOUD_API_KEY: "key",
-				ROBLOX_PLACE_ID: undefined,
-				ROBLOX_UNIVERSE_ID: "123",
-			}),
-		);
-
-		expect(() => createOpenCloudBackend()).toThrow(
-			"ROBLOX_PLACE_ID environment variable is required",
-		);
-	});
-
-	it("should create backend when all env vars are set", () => {
-		expect.assertions(1);
-
-		onTestFinished(
-			createTestEnvironment({
-				ROBLOX_OPEN_CLOUD_API_KEY: "key",
-				ROBLOX_PLACE_ID: "456",
-				ROBLOX_UNIVERSE_ID: "123",
-			}),
-		);
-
-		const backend = createOpenCloudBackend();
+		const backend = createOpenCloudBackend({
+			apiKey: "key",
+			placeId: "456",
+			universeId: "123",
+		});
 
 		expect(backend).toBeInstanceOf(OpenCloudBackend);
+		expect(Reflect.get(backend, "credentials")).toStrictEqual({
+			apiKey: "key",
+			placeId: "456",
+			universeId: "123",
+		});
 	});
 });

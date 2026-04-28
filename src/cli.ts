@@ -111,13 +111,22 @@ Options:
   --typecheck                       Enable type testing (*.test-d.ts, *.spec-d.ts)
   --typecheckOnly                   Run only type tests, skip runtime tests
   --typecheckTsconfig <path>        tsconfig for type testing
+  --apiKey <key>                    Roblox Open Cloud API key
+  --universeId <id>                 Target universe ID
+  --placeId <id>                    Target place ID
   --help                            Show this help message
   --version                         Show version number
 
-Environment Variables (open-cloud backend only):
-  ROBLOX_OPEN_CLOUD_API_KEY  API key for Roblox Open Cloud
-  ROBLOX_UNIVERSE_ID         Target universe ID
-  ROBLOX_PLACE_ID            Target place ID
+Open Cloud credentials (open-cloud backend only):
+  Sources, in precedence order:
+    1. CLI flags (--apiKey, --universeId, --placeId)
+    2. JEST_ROBLOX_* env vars (JEST_ROBLOX_OPEN_CLOUD_API_KEY,
+       JEST_ROBLOX_UNIVERSE_ID, JEST_ROBLOX_PLACE_ID)
+    3. ROBLOX_* env vars (ROBLOX_OPEN_CLOUD_API_KEY, ROBLOX_UNIVERSE_ID,
+       ROBLOX_PLACE_ID)
+    4. jest.config.ts (universeId, placeId — apiKey is CLI/env only)
+
+  --apiKey is visible in process listings; prefer env vars in CI.
 
 Examples:
   jest-roblox                         Run all tests (open-cloud)
@@ -155,6 +164,7 @@ export function parseArgs(args: Array<string>): CliOptions {
 		allowPositionals: true,
 		args: normalizeParallelFlag(args),
 		options: {
+			"apiKey": { type: "string" },
 			"backend": { type: "string" },
 			"cache": { type: "boolean" },
 			"collectCoverageFrom": { multiple: true, type: "string" },
@@ -172,6 +182,7 @@ export function parseArgs(args: Array<string>): CliOptions {
 			"outputFile": { type: "string" },
 			"parallel": { type: "string" },
 			"passWithNoTests": { type: "boolean" },
+			"placeId": { type: "string" },
 			"pollInterval": { type: "string" },
 			"port": { type: "string" },
 			"project": { multiple: true, type: "string" },
@@ -187,6 +198,7 @@ export function parseArgs(args: Array<string>): CliOptions {
 			"typecheck": { type: "boolean" },
 			"typecheckOnly": { type: "boolean" },
 			"typecheckTsconfig": { type: "string" },
+			"universeId": { type: "string" },
 			"updateSnapshot": { short: "u", type: "boolean" },
 			"verbose": { type: "boolean" },
 			"version": { default: false, type: "boolean" },
@@ -202,6 +214,7 @@ export function parseArgs(args: Array<string>): CliOptions {
 	const timeout = values.timeout !== undefined ? Number.parseInt(values.timeout, 10) : undefined;
 
 	return {
+		apiKey: values.apiKey,
 		backend: validateBackend(values.backend),
 		cache: values["no-cache"] === true ? false : values.cache,
 		collectCoverage: values.coverage,
@@ -217,6 +230,7 @@ export function parseArgs(args: Array<string>): CliOptions {
 		outputFile: values.outputFile,
 		parallel: parseParallelValue(values.parallel),
 		passWithNoTests: values.passWithNoTests,
+		placeId: values.placeId,
 		pollInterval,
 		port,
 		project: values.project,
@@ -232,6 +246,7 @@ export function parseArgs(args: Array<string>): CliOptions {
 		typecheck: values.typecheckOnly === true ? true : values.typecheck,
 		typecheckOnly: values.typecheckOnly,
 		typecheckTsconfig: values.typecheckTsconfig,
+		universeId: values.universeId,
 		updateSnapshot: values.updateSnapshot,
 		verbose: values.verbose,
 		version: values.version,
@@ -962,7 +977,7 @@ async function runMultiProject(
 	}
 
 	const { effectiveConfig, preCoverageMs } = prepareMultiProjectCoverage(rootConfig, projects);
-	const backend = await resolveBackend(effectiveConfig);
+	const backend = await resolveBackend(cli, effectiveConfig);
 	const parallel = effectiveParallelForBackend(effectiveConfig.parallel, backend);
 
 	interface PendingJob {
@@ -1097,6 +1112,7 @@ async function runMultiProject(
 }
 
 async function executeRuntimeTests(
+	cli: CliOptions,
 	config: ResolvedConfig,
 	testFiles: Array<string>,
 	totalFiles: number,
@@ -1109,7 +1125,7 @@ async function executeRuntimeTests(
 		);
 	}
 
-	const backend = await resolveBackend(config);
+	const backend = await resolveBackend(cli, config);
 
 	try {
 		return await execute({
@@ -1188,7 +1204,12 @@ async function runSingleProject(cli: CliOptions, config: ResolvedConfig): Promis
 
 	const runtimeResult =
 		runtimeTestFiles.length > 0
-			? await executeRuntimeTests(effectiveConfig, runtimeTestFiles, discovery.totalFiles)
+			? await executeRuntimeTests(
+					cli,
+					effectiveConfig,
+					runtimeTestFiles,
+					discovery.totalFiles,
+				)
 			: undefined;
 
 	return outputResults(effectiveConfig, typecheckResult, runtimeResult, preCoverageMs);

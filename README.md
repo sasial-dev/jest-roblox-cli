@@ -221,6 +221,8 @@ You need these environment variables:
 | `ROBLOX_UNIVERSE_ID` | The universe to run tests in |
 | `ROBLOX_PLACE_ID` | The place to run tests in |
 
+> Prefix any of the above with `JEST_` (e.g. `JEST_ROBLOX_PLACE_ID`) to override the unprefixed value. Use the `JEST_`-prefixed form when the generic names collide with other tooling.
+
 ### Studio (local)
 
 Connects to Roblox Studio over WebSocket. Faster than Open Cloud (no upload

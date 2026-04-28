@@ -38,6 +38,7 @@ export const ROOT_ONLY_KEYS: ReadonlySet<string> = new Set([
 	"luauRoots",
 	"parallel",
 	"placeFile",
+	"placeId",
 	"pollInterval",
 	"port",
 	"rojoProject",
@@ -48,6 +49,7 @@ export const ROOT_ONLY_KEYS: ReadonlySet<string> = new Set([
 	"typecheck",
 	"typecheckOnly",
 	"typecheckTsconfig",
+	"universeId",
 ]);
 
 export interface DisplayName {
@@ -113,6 +115,7 @@ export interface Config extends Except<
 	parallel?: "auto" | number;
 	passWithNoTests?: boolean;
 	placeFile?: string;
+	placeId?: string;
 	pollInterval?: number;
 	port?: number;
 	projects?: Array<ProjectEntry>;
@@ -129,6 +132,7 @@ export interface Config extends Except<
 	typecheck?: boolean;
 	typecheckOnly?: boolean;
 	typecheckTsconfig?: string;
+	universeId?: string;
 	updateSnapshot?: boolean;
 }
 
@@ -215,6 +219,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
 };
 
 export interface CliOptions {
+	apiKey?: string;
 	backend?: Backend;
 	cache?: boolean;
 	collectCoverage?: boolean;
@@ -231,6 +236,7 @@ export interface CliOptions {
 	outputFile?: string;
 	parallel?: "auto" | number;
 	passWithNoTests?: boolean;
+	placeId?: string;
 	pollInterval?: number;
 	port?: number;
 	project?: Array<string>;
@@ -247,6 +253,7 @@ export interface CliOptions {
 	typecheck?: boolean;
 	typecheckOnly?: boolean;
 	typecheckTsconfig?: string;
+	universeId?: string;
 	updateSnapshot?: boolean;
 	verbose?: boolean;
 	version?: boolean;
@@ -351,6 +358,7 @@ export const configSchema: Type<Config> = type({
 	"parallel?": type("'auto'").or("number.integer >= 1"),
 	"passWithNoTests?": "boolean",
 	"placeFile?": "string",
+	"placeId?": "string",
 	"pollInterval?": "number",
 	"port?": "number",
 	"preset?": "string",
@@ -386,6 +394,7 @@ export const configSchema: Type<Config> = type({
 	"typecheck?": "boolean",
 	"typecheckOnly?": "boolean",
 	"typecheckTsconfig?": "string",
+	"universeId?": "string",
 	"updateSnapshot?": "boolean",
 	"verbose?": "boolean",
 	"version?": "boolean",

@@ -13,8 +13,15 @@ export interface FakeOpenCloudTask {
 	pollsBeforeComplete?: number;
 }
 
+export interface FakeOpenCloudCall {
+	apiKey: string | undefined;
+	method: string;
+	url: string;
+}
+
 export interface FakeOpenCloudServer {
 	baseUrl: string;
+	calls: Array<FakeOpenCloudCall>;
 	requests: Array<typeof createTaskRequestSchema.infer>;
 	uploadCount: number;
 }
@@ -22,6 +29,7 @@ export interface FakeOpenCloudServer {
 export async function startFakeOpenCloudServer(
 	tasks: Array<FakeOpenCloudTask>,
 ): Promise<FakeOpenCloudServer> {
+	const calls: FakeOpenCloudServer["calls"] = [];
 	const requests: FakeOpenCloudServer["requests"] = [];
 	const taskQueue = [...tasks];
 	const taskResults = new Map<string, FakeOpenCloudTask>();
@@ -30,6 +38,13 @@ export async function startFakeOpenCloudServer(
 	let taskIndex = 0;
 
 	const server = createServer((request, response) => {
+		const apiKeyHeader = request.headers["x-api-key"];
+		calls.push({
+			apiKey: typeof apiKeyHeader === "string" ? apiKeyHeader : undefined,
+			method: request.method ?? "",
+			url: request.url ?? "",
+		});
+
 		void handleRequest({
 			pollCounts,
 			request,
@@ -76,6 +91,7 @@ export async function startFakeOpenCloudServer(
 
 	return {
 		baseUrl: `http://127.0.0.1:${address.port}`,
+		calls,
 		requests,
 		get uploadCount() {
 			return uploadCount;

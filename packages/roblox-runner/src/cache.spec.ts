@@ -29,9 +29,6 @@ describe("cache utilities", () => {
 			expect.assertions(1);
 
 			vi.stubEnv("XDG_CACHE_HOME", "/custom/cache");
-			onTestFinished(() => {
-				vi.unstubAllEnvs();
-			});
 
 			const directory = getCacheDirectory();
 
@@ -42,9 +39,6 @@ describe("cache utilities", () => {
 			expect.assertions(1);
 
 			vi.stubEnv("XDG_CACHE_HOME", "");
-			onTestFinished(() => {
-				vi.unstubAllEnvs();
-			});
 			const origPlatform = process.platform;
 			Object.defineProperty(process, "platform", { value: "linux" });
 			onTestFinished(() => {
@@ -64,9 +58,6 @@ describe("cache utilities", () => {
 			delete process.env["XDG_CACHE_HOME"];
 			/* cspell:disable-next-line */
 			vi.stubEnv("LOCALAPPDATA", "C:\\Users\\Test\\AppData\\Local");
-			onTestFinished(() => {
-				vi.unstubAllEnvs();
-			});
 			const origPlatform = process.platform;
 			Object.defineProperty(process, "platform", { value: "win32" });
 			onTestFinished(() => {
@@ -86,9 +77,6 @@ describe("cache utilities", () => {
 			delete process.env["XDG_CACHE_HOME"];
 			/* cspell:disable-next-line */
 			vi.stubEnv("LOCALAPPDATA", "");
-			onTestFinished(() => {
-				vi.unstubAllEnvs();
-			});
 			const origPlatform = process.platform;
 			Object.defineProperty(process, "platform", { value: "win32" });
 			onTestFinished(() => {
@@ -105,9 +93,6 @@ describe("cache utilities", () => {
 
 			vi.stubEnv("XDG_CACHE_HOME", "");
 			delete process.env["XDG_CACHE_HOME"];
-			onTestFinished(() => {
-				vi.unstubAllEnvs();
-			});
 			const origPlatform = process.platform;
 			Object.defineProperty(process, "platform", { value: "linux" });
 			onTestFinished(() => {

@@ -6,6 +6,8 @@ export {
 	readCache,
 	writeCache,
 } from "./cache.ts";
+export { resolveCredentials } from "./credentials.ts";
+export type { ResolveCredentialsInput } from "./credentials.ts";
 export { hashBuffer } from "./hash.ts";
 export { createFetchClient } from "./http-client.ts";
 export type { HttpClient, HttpResponse, RequestOptions } from "./http-client.ts";
