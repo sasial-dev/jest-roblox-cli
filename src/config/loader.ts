@@ -26,11 +26,19 @@ export function applySnapshotFormatDefaults(
 export function resolveConfig(config: Config): ResolvedConfig {
 	validateConfig(config);
 
-	const defined = Object.fromEntries(
-		Object.entries(config).filter(([, value]) => value !== undefined),
+	const { test, ...rest } = config;
+	const definedRest = Object.fromEntries(
+		Object.entries(rest).filter(([, value]) => value !== undefined),
 	);
+	const definedTest =
+		test === undefined
+			? {}
+			: Object.fromEntries(Object.entries(test).filter(([, value]) => value !== undefined));
 
-	return Object.assign({}, DEFAULT_CONFIG, defined);
+	// Flatten test: block onto resolved config so downstream consumers
+	// (executor, projects, test-script, formatters) see jest options at the
+	// top level. HAL-167: refactor consumers to read `config.test.*` directly.
+	return Object.assign({}, DEFAULT_CONFIG, definedTest, definedRest);
 }
 
 export async function loadConfig(
@@ -111,16 +119,73 @@ function merger(...sources: Array<Config | null | undefined>): Config {
 	return defuFn(...(sources.filter(Boolean) as [Config, ...Array<Config>]));
 }
 
-function isMergerFunction(value: unknown): value is (defaults: undefined) => unknown {
+const EMPTY_ARRAY_DEFAULT_KEYS = new Set([
+	"collectCoverageFrom",
+	"formatters",
+	"luauRoots",
+	"reporters",
+	"roots",
+	"selectProjects",
+	"setupFiles",
+	"setupFilesAfterEnv",
+	"snapshotSerializers",
+]);
+
+const EMPTY_OBJECT_DEFAULT_KEYS = new Set(["coverageThreshold", "snapshotFormat"]);
+
+const MERGEABLE_KEYS = new Set([
+	...EMPTY_ARRAY_DEFAULT_KEYS,
+	...EMPTY_OBJECT_DEFAULT_KEYS,
+	"coveragePathIgnorePatterns",
+	"coverageReporters",
+	"testMatch",
+	"testPathIgnorePatterns",
+]);
+
+function isMergerFunction(value: unknown): value is (defaults: unknown) => unknown {
 	return typeof value === "function";
 }
 
-function resolveFunctionValues(config: Config): Config {
-	const resolved: Record<string, unknown> = {};
+function shouldResolveMergerFunction(
+	key: string,
+	value: unknown,
+): value is (defaults: unknown) => unknown {
+	return isMergerFunction(value) && MERGEABLE_KEYS.has(key);
+}
 
-	for (const [key, value] of Object.entries(config)) {
-		resolved[key] = isMergerFunction(value) ? value(undefined) : value;
+function defaultForMergerKey(key: string): unknown {
+	const defaultValue = (DEFAULT_CONFIG as unknown as Record<string, unknown>)[key];
+	if (Array.isArray(defaultValue)) {
+		return [...defaultValue];
 	}
 
-	return resolved as Config;
+	if (EMPTY_ARRAY_DEFAULT_KEYS.has(key)) {
+		return [];
+	}
+
+	return {};
+}
+
+function resolveFunctionValues(config: Config): Config {
+	const { test, ...rest } = config;
+
+	const resolvedRest: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(rest)) {
+		resolvedRest[key] = shouldResolveMergerFunction(key, value)
+			? value(defaultForMergerKey(key))
+			: value;
+	}
+
+	if (test === undefined) {
+		return resolvedRest as Config;
+	}
+
+	const resolvedTest: Record<string, unknown> = {};
+	for (const [innerKey, innerValue] of Object.entries(test)) {
+		resolvedTest[innerKey] = shouldResolveMergerFunction(innerKey, innerValue)
+			? innerValue(defaultForMergerKey(innerKey))
+			: innerValue;
+	}
+
+	return { ...resolvedRest, test: resolvedTest } as Config;
 }

@@ -1,5 +1,3 @@
-import type { Argv } from "@rbxts/jest/src/config";
-
 import { type, type Type } from "arktype";
 import { createDefineConfig } from "c12";
 import type { ReportOptions } from "istanbul-reports";
@@ -23,64 +21,40 @@ export interface SnapshotFormatOptions {
 	printFunctionName?: boolean;
 }
 
-export const ROOT_ONLY_KEYS: ReadonlySet<string> = new Set([
-	"backend",
-	"cache",
-	"collectCoverage",
-	"collectCoverageFrom",
-	"coverageDirectory",
-	"coveragePathIgnorePatterns",
-	"coverageReporters",
-	"coverageThreshold",
-	"formatters",
-	"gameOutput",
-	"jestPath",
-	"luauRoots",
-	"parallel",
-	"placeFile",
-	"placeId",
-	"pollInterval",
-	"port",
-	"rojoProject",
-	"rootDir",
-	"showLuau",
-	"sourceMap",
-	"timeout",
-	"typecheck",
-	"typecheckOnly",
-	"typecheckTsconfig",
-	"universeId",
-]);
-
 export interface DisplayName {
 	name: string;
 	color: string;
 }
 
-export interface ProjectTestConfig {
+/** Jest-passthrough keys valid both at `test:` and per-project. */
+export interface SharedTestConfig {
 	automock?: boolean;
 	clearMocks?: boolean;
-	displayName: DisplayName | string;
-	exclude?: Array<string>;
-	include: Array<string>;
 	injectGlobals?: boolean;
 	mockDataModel?: boolean;
-	outDir?: string;
 	resetMocks?: boolean;
 	resetModules?: boolean;
 	restoreMocks?: boolean;
-	root?: string;
 	setupFiles?: Array<string>;
 	setupFilesAfterEnv?: Array<string>;
 	slowTestThreshold?: number;
 	snapshotFormat?: SnapshotFormatOptions;
 	snapshotSerializers?: Array<string>;
 	testEnvironment?: string;
-	testEnvironmentOptions?: Record<string, unknown>;
+	testEnvironmentOptions?: Record<string, unknown> | string;
 	testMatch?: Array<string>;
 	testPathIgnorePatterns?: Array<string>;
 	testRegex?: Array<string> | string;
 	testTimeout?: number;
+}
+
+/** Jest-passthrough keys valid only per-project (under `projects[N].test`). */
+export interface ProjectTestConfig extends SharedTestConfig {
+	displayName: DisplayName | string;
+	exclude?: Array<string>;
+	include: Array<string>;
+	outDir?: string;
+	root?: string;
 }
 
 export interface InlineProjectConfig {
@@ -89,15 +63,16 @@ export interface InlineProjectConfig {
 
 export type ProjectEntry = InlineProjectConfig | string;
 
-export interface Config extends Except<
-	Argv,
-	"projects" | "rootDir" | "setupFiles" | "setupFilesAfterEnv" | "testPathPattern"
-> {
-	backend?: Backend;
-	cache?: boolean;
+/** Jest-passthrough keys valid only at root `test:` (not per-project). */
+export interface GlobalTestConfig extends SharedTestConfig {
+	all?: boolean;
+	bail?: boolean | number;
+	changedSince?: string;
+	ci?: boolean;
+	clearCache?: boolean;
 	collectCoverage?: boolean;
 	collectCoverageFrom?: Array<string>;
-
+	coverage?: boolean;
 	coverageDirectory?: string;
 	coveragePathIgnorePatterns?: Array<string>;
 	coverageReporters?: Array<CoverageReporter>;
@@ -107,36 +82,68 @@ export interface Config extends Except<
 		lines?: number;
 		statements?: number;
 	};
+	debug?: boolean;
+	env?: string;
+	expand?: boolean;
+	globals?: string;
+	maxWorkers?: number | string;
+	noStackTrace?: boolean;
+	passWithNoTests?: boolean;
+	preset?: string;
+	projects?: Array<ProjectEntry>;
+	reporters?: Array<string>;
+	roots?: Array<string>;
+	runInBand?: boolean;
+	selectProjects?: Array<string>;
+	showConfig?: boolean;
+	silent?: boolean;
+	testFailureExitCode?: string;
+	testNamePattern?: string;
+	testPathPattern?: string;
+	timers?: string;
+	updateSnapshot?: boolean;
+	verbose?: boolean;
+}
+
+/**
+ * Root-level config: CLI/runner keys plus the `test:` block where all
+ * jest-passthrough options live.
+ */
+export interface Config {
+	backend?: Backend;
+	cache?: boolean;
+	color?: boolean;
 	extends?: Array<string> | string;
 	formatters?: Array<FormatterEntry>;
 	gameOutput?: string;
 	jestPath?: string;
 	luauRoots?: Array<string>;
+	outputFile?: string;
 	parallel?: "auto" | number;
-	passWithNoTests?: boolean;
 	placeFile?: string;
 	placeId?: string;
 	pollInterval?: number;
 	port?: number;
-	projects?: Array<ProjectEntry>;
-	reporters?: Array<string>;
 	rojoProject?: string;
 	rootDir?: string;
-	setupFiles?: Array<string>;
-	setupFilesAfterEnv?: Array<string>;
 	showLuau?: boolean;
-	snapshotFormat?: SnapshotFormatOptions;
 	sourceMap?: boolean;
-	testPathPattern?: string;
+	test?: GlobalTestConfig;
 	timeout?: number;
 	typecheck?: boolean;
 	typecheckOnly?: boolean;
 	typecheckTsconfig?: string;
 	universeId?: string;
-	updateSnapshot?: boolean;
 }
 
-export interface ResolvedConfig extends Except<Config, "projects"> {
+/**
+ * Resolved config flattens the root CLI keys with the `test:` jest options
+ * so downstream code (executor, projects, test-script, formatters) can read
+ * options uniformly. Refactoring those consumers to read `config.test.foo`
+ * is HAL-167 follow-up work; this shape lets the structural split land first.
+ */
+export interface ResolvedConfig
+	extends Except<Config, "test">, Except<GlobalTestConfig, "projects"> {
 	backend: Backend;
 	cache: boolean;
 	collectCoverage: boolean;
@@ -285,20 +292,14 @@ const displayNameSchema = type({
 	"color": "string",
 });
 
-const projectTestConfigSchema = type({
-	"+": "reject",
+const sharedTestSchemaShape = {
 	"automock?": "boolean",
 	"clearMocks?": "boolean",
-	"displayName": type("string").or(displayNameSchema),
-	"exclude?": "string[]",
-	"include": "string[]",
 	"injectGlobals?": "boolean",
 	"mockDataModel?": "boolean",
-	"outDir?": "string",
 	"resetMocks?": "boolean",
 	"resetModules?": "boolean",
 	"restoreMocks?": "boolean",
-	"root?": "string",
 	"setupFiles?": "string[]",
 	"setupFilesAfterEnv?": "string[]",
 	"slowTestThreshold?": "number",
@@ -310,6 +311,16 @@ const projectTestConfigSchema = type({
 	"testPathIgnorePatterns?": "string[]",
 	"testRegex?": type("string").or(type("string[]")),
 	"testTimeout?": "number",
+} as const;
+
+const projectTestConfigSchema = type({
+	"+": "reject",
+	...sharedTestSchemaShape,
+	"displayName": type("string").or(displayNameSchema),
+	"exclude?": "string[]",
+	"include": "string[]",
+	"outDir?": "string",
+	"root?": "string",
 });
 
 const inlineProjectSchema = type({
@@ -321,22 +332,16 @@ const formatterEntrySchema = type("string").or(type(["string", type("object")]))
 
 const projectEntrySchema = type("string").or(inlineProjectSchema);
 
-export const configSchema: Type<Config> = type({
+const globalTestConfigSchema = type({
 	"+": "reject",
+	...sharedTestSchemaShape,
 	"all?": "boolean",
-	"automock?": "boolean",
-	"backend?": type("'auto'|'open-cloud'|'studio'"),
 	"bail?": type("boolean").or(type("number")),
-	"cache?": "boolean",
 	"changedSince?": "string",
 	"ci?": "boolean",
 	"clearCache?": "boolean",
-	"clearMocks?": "boolean",
 	"collectCoverage?": "boolean",
 	"collectCoverageFrom?": "string[]",
-	"color?": "boolean",
-	"colors?": "boolean",
-	"config?": "string",
 	"coverage?": "boolean",
 	"coverageDirectory?": "string",
 	"coveragePathIgnorePatterns?": "string[]",
@@ -345,87 +350,227 @@ export const configSchema: Type<Config> = type({
 	"debug?": "boolean",
 	"env?": "string",
 	"expand?": "boolean",
-	"formatters?": formatterEntrySchema.array(),
-	"gameOutput?": "string",
 	"globals?": "string",
-	"init?": "boolean",
-	"injectGlobals?": "boolean",
-	"jestPath?": "string",
-	"luauRoots?": "string[]",
 	"maxWorkers?": type("number").or(type("string")),
 	"noStackTrace?": "boolean",
+	"passWithNoTests?": "boolean",
+	"preset?": "string",
+	"projects?": projectEntrySchema.array(),
+	"reporters?": "string[]",
+	"roots?": "string[]",
+	"runInBand?": "boolean",
+	"selectProjects?": "string[]",
+	"showConfig?": "boolean",
+	"silent?": "boolean",
+	"testFailureExitCode?": "string",
+	"testNamePattern?": "string",
+	"testPathPattern?": "string",
+	"timers?": "string",
+	"updateSnapshot?": "boolean",
+	"verbose?": "boolean",
+});
+
+export const configSchema: Type<Config> = type({
+	"+": "reject",
+	"backend?": type("'auto'|'open-cloud'|'studio'"),
+	"cache?": "boolean",
+	"color?": "boolean",
+	"config?": "string",
+	"extends?": type("string").or(type("string[]")),
+	"formatters?": formatterEntrySchema.array(),
+	"gameOutput?": "string",
+	"jestPath?": "string",
+	"luauRoots?": "string[]",
 	"outputFile?": "string",
 	"parallel?": type("'auto'").or("number.integer >= 1"),
-	"passWithNoTests?": "boolean",
 	"placeFile?": "string",
 	"placeId?": "string",
 	"pollInterval?": "number",
 	"port?": "number",
-	"preset?": "string",
-	"projects?": projectEntrySchema.array(),
-	"reporters?": "string[]",
-	"resetMocks?": "boolean",
-	"resetModules?": "boolean",
-	"restoreMocks?": "boolean",
 	"rojoProject?": "string",
 	"rootDir?": "string",
-	"roots?": "string[]",
-	"runInBand?": "boolean",
-	"selectProjects?": "string[]",
-	"setupFiles?": "string[]",
-	"setupFilesAfterEnv?": "string[]",
-	"showConfig?": "boolean",
 	"showLuau?": "boolean",
-	"silent?": "boolean",
-	"snapshotFormat?": snapshotFormatSchema,
-	"snapshotSerializers?": "string[]",
 	"sourceMap?": "boolean",
-	"testEnvironment?": "string",
-	"testEnvironmentOptions?": type("string").or(type("object")),
-	"testFailureExitCode?": "string",
-	"testMatch?": "string[]",
-	"testNamePattern?": "string",
-	"testPathIgnorePatterns?": "string[]",
-	"testPathPattern?": "string",
-	"testRegex?": type("string").or(type("string[]")),
-	"testTimeout?": "number",
+	"test?": globalTestConfigSchema,
 	"timeout?": "number",
-	"timers?": "string",
 	"typecheck?": "boolean",
 	"typecheckOnly?": "boolean",
 	"typecheckTsconfig?": "string",
 	"universeId?": "string",
-	"updateSnapshot?": "boolean",
-	"verbose?": "boolean",
-	"version?": "boolean",
 }).as<Config>();
 
-export interface ConfigInput extends Except<
-	Config,
+export type GlobalTestConfigInput = Except<GlobalTestConfig, MergeableTestKey> & {
+	[K in MergeableTestKey]?: Mergeable<NonNullable<GlobalTestConfig[K]>>;
+};
+
+export interface ConfigInput extends Except<Config, "formatters" | "luauRoots" | "test"> {
+	formatters?: Mergeable<Array<FormatterEntry>>;
+	luauRoots?: Mergeable<Array<string>>;
+	test?: GlobalTestConfigInput;
+}
+
+export type RootCliKey = Exclude<keyof Config, "test">;
+
+type MergeableTestKey =
 	| "collectCoverageFrom"
 	| "coveragePathIgnorePatterns"
 	| "coverageReporters"
-	| "formatters"
-	| "luauRoots"
+	| "coverageThreshold"
 	| "reporters"
+	| "roots"
+	| "selectProjects"
 	| "setupFiles"
 	| "setupFilesAfterEnv"
+	| "snapshotFormat"
+	| "snapshotSerializers"
 	| "testMatch"
-	| "testPathIgnorePatterns"
-> {
-	collectCoverageFrom?: Mergeable<Array<string>>;
-	coveragePathIgnorePatterns?: Mergeable<Array<string>>;
-	coverageReporters?: Mergeable<Array<CoverageReporter>>;
-	formatters?: Mergeable<Array<FormatterEntry>>;
-	luauRoots?: Mergeable<Array<string>>;
-	reporters?: Mergeable<Array<string>>;
-	setupFiles?: Mergeable<Array<string>>;
-	setupFilesAfterEnv?: Mergeable<Array<string>>;
-	testMatch?: Mergeable<Array<string>>;
-	testPathIgnorePatterns?: Mergeable<Array<string>>;
-}
+	| "testPathIgnorePatterns";
+
+type GlobalOnlyKey = Exclude<keyof GlobalTestConfig, keyof SharedTestConfig>;
+
+type SharedKey = keyof SharedTestConfig;
+
+export const ROOT_CLI_KEYS_LIST: ReadonlyArray<RootCliKey> = [
+	"backend",
+	"cache",
+	"color",
+	"extends",
+	"formatters",
+	"gameOutput",
+	"jestPath",
+	"luauRoots",
+	"outputFile",
+	"parallel",
+	"placeFile",
+	"placeId",
+	"pollInterval",
+	"port",
+	"rojoProject",
+	"rootDir",
+	"showLuau",
+	"sourceMap",
+	"timeout",
+	"typecheck",
+	"typecheckOnly",
+	"typecheckTsconfig",
+	"universeId",
+];
+
+const SHARED_TEST_KEYS_LIST = [
+	"automock",
+	"clearMocks",
+	"injectGlobals",
+	"mockDataModel",
+	"resetMocks",
+	"resetModules",
+	"restoreMocks",
+	"setupFiles",
+	"setupFilesAfterEnv",
+	"slowTestThreshold",
+	"snapshotFormat",
+	"snapshotSerializers",
+	"testEnvironment",
+	"testEnvironmentOptions",
+	"testMatch",
+	"testPathIgnorePatterns",
+	"testRegex",
+	"testTimeout",
+] as const satisfies ReadonlyArray<SharedKey>;
+
+const GLOBAL_ONLY_KEYS_LIST = [
+	"all",
+	"bail",
+	"changedSince",
+	"ci",
+	"clearCache",
+	"collectCoverage",
+	"collectCoverageFrom",
+	"coverage",
+	"coverageDirectory",
+	"coveragePathIgnorePatterns",
+	"coverageReporters",
+	"coverageThreshold",
+	"debug",
+	"env",
+	"expand",
+	"globals",
+	"maxWorkers",
+	"noStackTrace",
+	"passWithNoTests",
+	"preset",
+	"projects",
+	"reporters",
+	"roots",
+	"runInBand",
+	"selectProjects",
+	"showConfig",
+	"silent",
+	"testFailureExitCode",
+	"testNamePattern",
+	"testPathPattern",
+	"timers",
+	"updateSnapshot",
+	"verbose",
+] as const satisfies ReadonlyArray<GlobalOnlyKey>;
+
+export const SHARED_TEST_KEYS: ReadonlySet<string> = new Set<SharedKey>(SHARED_TEST_KEYS_LIST);
+
+/** Keys valid in `test:` (root) but not per-project (`projects[N].test`). */
+export const GLOBAL_TEST_KEYS: ReadonlySet<string> = new Set<GlobalOnlyKey>(GLOBAL_ONLY_KEYS_LIST);
+
+/** Root-level CLI/runner keys. The complement of `test:` jest-passthrough keys. */
+export const ROOT_CLI_KEYS: ReadonlySet<string> = new Set<RootCliKey>(ROOT_CLI_KEYS_LIST);
+
+/**
+ * Keys excluded from jest argv when building the test runner script. Includes
+ * all CLI/runner-level keys plus the coverage keys, which live under `test:`
+ * by config shape but are consumed by the runner's lute-based coverage layer
+ * (not jest itself).
+ */
+export const JEST_ARGV_EXCLUDED_KEYS: ReadonlySet<string> = new Set<string>([
+	...ROOT_CLI_KEYS_LIST,
+	"collectCoverage",
+	"collectCoverageFrom",
+	"coverageDirectory",
+	"coveragePathIgnorePatterns",
+	"coverageReporters",
+	"coverageThreshold",
+]);
+
+/**
+ * Source of truth for jest-passthrough vs CLI key partitioning.  Used by
+ * `validateConfig` to emit a migration error when jest options appear at
+ * config root.
+ */
+export const KEY_LOCATIONS: Readonly<Record<string, "root" | "test">> = (() => {
+	const result: Record<string, "root" | "test"> = {};
+	for (const key of ROOT_CLI_KEYS_LIST) {
+		result[key] = "root";
+	}
+
+	for (const key of SHARED_TEST_KEYS_LIST) {
+		result[key] = "test";
+	}
+
+	for (const key of GLOBAL_ONLY_KEYS_LIST) {
+		result[key] = "test";
+	}
+
+	return result;
+})();
 
 export function validateConfig(raw: unknown): Config {
+	if (typeof raw === "object" && raw !== null) {
+		const misplaced = Object.keys(raw)
+			.filter((key) => KEY_LOCATIONS[key] === "test")
+			.sort();
+		if (misplaced.length > 0) {
+			throw new Error(
+				`jest options must be wrapped in a \`test:\` block. Move these keys under \`test:\`: ${misplaced.join(", ")}`,
+			);
+		}
+	}
+
 	const result = configSchema(raw);
 	if (result instanceof type.errors) {
 		throw new Error(`Invalid config: ${result.summary}`);
@@ -436,5 +581,5 @@ export function validateConfig(raw: unknown): Config {
 
 export const defineConfig: (input: ConfigInput) => ConfigInput = createDefineConfig<ConfigInput>();
 
-export const defineProject: (input: ProjectTestConfig) => ProjectTestConfig =
-	createDefineConfig<ProjectTestConfig>();
+export const defineProject: (input: InlineProjectConfig) => InlineProjectConfig =
+	createDefineConfig<InlineProjectConfig>();

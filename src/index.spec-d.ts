@@ -60,7 +60,7 @@ describe("defineConfig", () => {
 
 	it("should accept nested optional properties", () => {
 		expectTypeOf(defineConfig).toBeCallableWith({
-			coverageThreshold: { branches: 80 },
+			test: { coverageThreshold: { branches: 80 } },
 		});
 	});
 

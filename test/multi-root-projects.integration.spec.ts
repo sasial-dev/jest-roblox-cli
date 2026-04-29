@@ -49,15 +49,17 @@ describe("multi-root project integration — friends-package layout", () => {
 		expect.assertions(2);
 
 		const project = defineProject({
-			displayName: "friends-package",
-			include: [
-				"packages/friends-package/src/**/*.spec.luau",
-				"packages/friends-package/test/**/*.spec.luau",
-			],
+			test: {
+				displayName: "friends-package",
+				include: [
+					"packages/friends-package/src/**/*.spec.luau",
+					"packages/friends-package/test/**/*.spec.luau",
+				],
+			},
 		});
 
 		const resolved = resolveProjectConfig(
-			project,
+			project.test,
 			rootConfig,
 			friendsPackageTree,
 			allDirectories,
@@ -113,18 +115,20 @@ describe("multi-root project integration — friends-package layout", () => {
 		expect.assertions(1);
 
 		const project = defineProject({
-			displayName: "friends-client-only",
-			include: [
-				"packages/friends-package/src/**/*.spec.luau",
-				"packages/friends-package/test/**/*.spec.luau",
-			],
-			// outDir pins the project to one DataModel mount regardless of
-			// how many include roots there are.
-			outDir: "packages/friends-package/src/Client/Components",
+			test: {
+				displayName: "friends-client-only",
+				include: [
+					"packages/friends-package/src/**/*.spec.luau",
+					"packages/friends-package/test/**/*.spec.luau",
+				],
+				// outDir pins the project to one DataModel mount regardless of
+				// how many include roots there are.
+				outDir: "packages/friends-package/src/Client/Components",
+			},
 		});
 
 		const resolved = resolveProjectConfig(
-			project,
+			project.test,
 			rootConfig,
 			friendsPackageTree,
 			allDirectories,
@@ -148,11 +152,18 @@ describe("multi-root project integration — friends-package layout", () => {
 		const classify = createFsClassifier("/workspace");
 
 		const project = defineProject({
-			displayName: "friends-test-only",
-			include: ["packages/friends-package/test/**/*.spec.luau"],
+			test: {
+				displayName: "friends-test-only",
+				include: ["packages/friends-package/test/**/*.spec.luau"],
+			},
 		});
 
-		const resolved = resolveProjectConfig(project, rootConfig, friendsPackageTree, classify);
+		const resolved = resolveProjectConfig(
+			project.test,
+			rootConfig,
+			friendsPackageTree,
+			classify,
+		);
 
 		expect(resolved.rojoMounts).toStrictEqual([
 			{

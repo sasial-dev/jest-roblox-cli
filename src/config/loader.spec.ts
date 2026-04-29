@@ -67,8 +67,10 @@ describe(resolveConfig, () => {
 		expect.assertions(2);
 
 		const config: Config = {
-			testMatch: ["**/*.test.ts"],
-			verbose: true,
+			test: {
+				testMatch: ["**/*.test.ts"],
+				verbose: true,
+			},
 		};
 		const result = resolveConfig(config);
 
@@ -161,7 +163,7 @@ describe(resolveConfig, () => {
 	it("should override coverageDirectory from config", () => {
 		expect.assertions(1);
 
-		const result = resolveConfig({ coverageDirectory: "my-coverage" });
+		const result = resolveConfig({ test: { coverageDirectory: "my-coverage" } });
 
 		expect(result.coverageDirectory).toBe("my-coverage");
 	});
@@ -184,7 +186,7 @@ describe(loadConfig, () => {
 
 		const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "config-test-"));
 		const configPath = path.join(temporaryDirectory, "custom.config.mjs");
-		fs.writeFileSync(configPath, "export default { verbose: true };");
+		fs.writeFileSync(configPath, "export default { test: { verbose: true } };");
 
 		const result = await loadConfig(configPath, temporaryDirectory);
 		fs.rmSync(temporaryDirectory, { force: true, recursive: true });
@@ -274,7 +276,7 @@ describe(loadConfig, () => {
 		const subDirectory = path.join(parentDirectory, "packages", "core");
 		fs.mkdirSync(subDirectory, { recursive: true });
 		const configPath = path.join(subDirectory, "jest.config.mjs");
-		fs.writeFileSync(configPath, "export default { verbose: true };");
+		fs.writeFileSync(configPath, "export default { test: { verbose: true } };");
 
 		const result = await loadConfig(configPath, parentDirectory);
 		fs.rmSync(parentDirectory, { force: true, recursive: true });
@@ -282,18 +284,23 @@ describe(loadConfig, () => {
 		expect(path.normalize(result.rootDir)).toBe(path.normalize(parentDirectory));
 	});
 
+	// TODO(HAL-167): rewrite result.setupFiles → result.test.setupFiles
+	// after the consumer refactor that drops the ResolvedConfig flattening.
 	describe("extends with defuFn merger", () => {
 		it("should replace parent array when child uses a function value", async () => {
 			expect.assertions(1);
 
 			const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "config-test-"));
 			const parentPath = path.join(temporaryDirectory, "parent.config.mjs");
-			fs.writeFileSync(parentPath, 'export default { setupFiles: ["parent-setup.luau"] };');
+			fs.writeFileSync(
+				parentPath,
+				'export default { test: { setupFiles: ["parent-setup.luau"] } };',
+			);
 
 			const childPath = path.join(temporaryDirectory, "jest.config.mjs");
 			fs.writeFileSync(
 				childPath,
-				'export default { extends: "./parent.config.mjs", setupFiles: () => ["child-setup.luau"] };',
+				'export default { extends: "./parent.config.mjs", test: { setupFiles: () => ["child-setup.luau"] } };',
 			);
 
 			const result = await loadConfig(childPath, temporaryDirectory);
@@ -309,13 +316,13 @@ describe(loadConfig, () => {
 			const parentPath = path.join(temporaryDirectory, "parent.config.mjs");
 			fs.writeFileSync(
 				parentPath,
-				'export default { setupFiles: ["keep.luau", "remove.luau"] };',
+				'export default { test: { setupFiles: ["keep.luau", "remove.luau"] } };',
 			);
 
 			const childPath = path.join(temporaryDirectory, "jest.config.mjs");
 			fs.writeFileSync(
 				childPath,
-				'export default { extends: "./parent.config.mjs", setupFiles: (defaults) => defaults.filter(f => !f.includes("remove")) };',
+				'export default { extends: "./parent.config.mjs", test: { setupFiles: (defaults) => defaults.filter(f => !f.includes("remove")) } };',
 			);
 
 			const result = await loadConfig(childPath, temporaryDirectory);
@@ -329,12 +336,15 @@ describe(loadConfig, () => {
 
 			const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "config-test-"));
 			const parentPath = path.join(temporaryDirectory, "parent.config.mjs");
-			fs.writeFileSync(parentPath, 'export default { setupFiles: ["parent-setup.luau"] };');
+			fs.writeFileSync(
+				parentPath,
+				'export default { test: { setupFiles: ["parent-setup.luau"] } };',
+			);
 
 			const childPath = path.join(temporaryDirectory, "jest.config.mjs");
 			fs.writeFileSync(
 				childPath,
-				'export default { extends: "./parent.config.mjs", setupFiles: ["child-setup.luau"] };',
+				'export default { extends: "./parent.config.mjs", test: { setupFiles: ["child-setup.luau"] } };',
 			);
 
 			const result = await loadConfig(childPath, temporaryDirectory);
@@ -348,7 +358,10 @@ describe(loadConfig, () => {
 
 			const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "config-test-"));
 			const parentPath = path.join(temporaryDirectory, "parent.config.mjs");
-			fs.writeFileSync(parentPath, "export default { verbose: true, timeout: 5000 };");
+			fs.writeFileSync(
+				parentPath,
+				"export default { test: { verbose: true }, timeout: 5000 };",
+			);
 
 			const childPath = path.join(temporaryDirectory, "jest.config.mjs");
 			fs.writeFileSync(
@@ -370,13 +383,13 @@ describe(loadConfig, () => {
 			const parentPath = path.join(temporaryDirectory, "parent.config.mjs");
 			fs.writeFileSync(
 				parentPath,
-				"export default { snapshotFormat: { indent: 4, min: false } };",
+				"export default { test: { snapshotFormat: { indent: 4, min: false } } };",
 			);
 
 			const childPath = path.join(temporaryDirectory, "jest.config.mjs");
 			fs.writeFileSync(
 				childPath,
-				'export default { extends: "./parent.config.mjs", snapshotFormat: { min: true } };',
+				'export default { extends: "./parent.config.mjs", test: { snapshotFormat: { min: true } } };',
 			);
 
 			const result = await loadConfig(childPath, temporaryDirectory);
@@ -392,13 +405,92 @@ describe(loadConfig, () => {
 			const configPath = path.join(temporaryDirectory, "jest.config.mjs");
 			fs.writeFileSync(
 				configPath,
-				'export default { setupFiles: () => ["standalone.luau"] };',
+				'export default { test: { setupFiles: () => ["standalone.luau"] } };',
 			);
 
 			const result = await loadConfig(configPath, temporaryDirectory);
 			fs.rmSync(temporaryDirectory, { force: true, recursive: true });
 
 			expect(result.setupFiles).toStrictEqual(["standalone.luau"]);
+		});
+
+		it("should pass empty defaults to standalone test merger functions", async () => {
+			expect.assertions(1);
+
+			const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "config-test-"));
+			const configPath = path.join(temporaryDirectory, "jest.config.mjs");
+			fs.writeFileSync(
+				configPath,
+				'export default { test: { setupFiles: defaults => [...defaults, "standalone.luau"] } };',
+			);
+
+			const result = await loadConfig(configPath, temporaryDirectory);
+			fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+
+			expect(result.setupFiles).toStrictEqual(["standalone.luau"]);
+		});
+
+		it("should pass configured defaults to standalone test merger functions", async () => {
+			expect.assertions(2);
+
+			const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "config-test-"));
+			const configPath = path.join(temporaryDirectory, "jest.config.mjs");
+			fs.writeFileSync(
+				configPath,
+				'export default { test: { testMatch: defaults => [...defaults, "**/*.custom.ts"] } };',
+			);
+
+			const result = await loadConfig(configPath, temporaryDirectory);
+			fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+
+			expect(result.testMatch).toContain("**/*.spec.ts");
+			expect(result.testMatch).toContain("**/*.custom.ts");
+		});
+
+		it("should pass object defaults to standalone test merger functions", async () => {
+			expect.assertions(1);
+
+			const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "config-test-"));
+			const configPath = path.join(temporaryDirectory, "jest.config.mjs");
+			fs.writeFileSync(
+				configPath,
+				"export default { test: { snapshotFormat: defaults => ({ ...defaults, min: true }) } };",
+			);
+
+			const result = await loadConfig(configPath, temporaryDirectory);
+			fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+
+			expect(result.snapshotFormat).toStrictEqual({ min: true });
+		});
+
+		it("should reject function values for non-mergeable keys", async () => {
+			expect.assertions(1);
+
+			const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "config-test-"));
+			const configPath = path.join(temporaryDirectory, "jest.config.mjs");
+			fs.writeFileSync(configPath, 'export default { backend: () => "studio" };');
+
+			await expect(loadConfig(configPath, temporaryDirectory)).rejects.toThrow(
+				"Invalid config",
+			);
+
+			fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+		});
+
+		it("should pass empty defaults to standalone root-level merger functions", async () => {
+			expect.assertions(1);
+
+			const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "config-test-"));
+			const configPath = path.join(temporaryDirectory, "jest.config.mjs");
+			fs.writeFileSync(
+				configPath,
+				'export default { luauRoots: defaults => [...defaults, "child-out"] };',
+			);
+
+			const result = await loadConfig(configPath, temporaryDirectory);
+			fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+
+			expect(result.luauRoots).toStrictEqual(["child-out"]);
 		});
 	});
 
@@ -414,7 +506,7 @@ describe(loadConfig, () => {
 		// emitting a non-extend warning during config load.
 		fs.writeFileSync(
 			configPath,
-			'console.warn("some other warning"); export default { verbose: true };',
+			'console.warn("some other warning"); export default { test: { verbose: true } };',
 		);
 
 		console.warn = (...args: Array<unknown>) => {
@@ -438,7 +530,7 @@ describe(loadConfig, () => {
 
 		const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "config-test-"));
 		const configPath = path.join(temporaryDirectory, "jest.config.json");
-		fs.writeFileSync(configPath, JSON.stringify({ verbose: true }));
+		fs.writeFileSync(configPath, JSON.stringify({ test: { verbose: true } }));
 
 		const result = await loadConfig(configPath, temporaryDirectory);
 		fs.rmSync(temporaryDirectory, { force: true, recursive: true });
@@ -453,7 +545,7 @@ describe(loadConfig, () => {
 
 		const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "config-test-"));
 		const configPath = path.join(temporaryDirectory, "jest.config.mjs");
-		fs.writeFileSync(configPath, "export default { verbose: true };");
+		fs.writeFileSync(configPath, "export default { test: { verbose: true } };");
 
 		const result = await loadConfig(configPath, temporaryDirectory);
 		fs.rmSync(temporaryDirectory, { force: true, recursive: true });
@@ -468,7 +560,7 @@ describe(loadConfig, () => {
 		const configPath = path.join(temporaryDirectory, "jest.config.mjs");
 		fs.writeFileSync(
 			configPath,
-			'export default { extends: "../../jest.shared", verbose: true };',
+			'export default { extends: "../../jest.shared", test: { verbose: true } };',
 		);
 
 		await expect(loadConfig(configPath, temporaryDirectory)).rejects.toThrowWithMessage(

@@ -10,7 +10,12 @@ import { resolveTsconfigDirectories } from "../executor.ts";
 import { stripTsExtension } from "../utils/extensions.ts";
 import { ConfigError } from "./errors.ts";
 import { findLuauConfigFile, loadLuauConfig } from "./luau-config-loader.ts";
-import type { ProjectEntry, ProjectTestConfig, ResolvedConfig } from "./schema.ts";
+import type {
+	InlineProjectConfig,
+	ProjectEntry,
+	ProjectTestConfig,
+	ResolvedConfig,
+} from "./schema.ts";
 
 export interface ResolvedProjectConfig {
 	config: ResolvedConfig;
@@ -208,7 +213,7 @@ export async function loadProjectConfigFile(
 
 	let result;
 	try {
-		result = await c12LoadConfig<ProjectTestConfig>({
+		result = await c12LoadConfig<InlineProjectConfig | ProjectTestConfig>({
 			name: "jest-project",
 			configFile: filePath,
 			configFileRequired: true,
@@ -226,7 +231,7 @@ export async function loadProjectConfigFile(
 		});
 	}
 
-	const { config } = result;
+	const config = unwrapProjectConfig(result.config);
 
 	const name =
 		typeof config.displayName === "string" ? config.displayName : config.displayName.name;
@@ -372,6 +377,23 @@ function resolveMounts(
 	}
 
 	return pruneAncestorMounts(dedupeMounts(allMounts));
+}
+
+function isInlineProjectConfig(config: unknown): config is InlineProjectConfig {
+	if (typeof config !== "object" || config === null || !("test" in config)) {
+		return false;
+	}
+
+	const { test } = config as { test?: unknown };
+	return typeof test === "object" && test !== null;
+}
+
+function unwrapProjectConfig(config: InlineProjectConfig | ProjectTestConfig): ProjectTestConfig {
+	if (isInlineProjectConfig(config)) {
+		return config.test;
+	}
+
+	return config;
 }
 
 function copyLuauOptionalFields(raw: Record<string, unknown>, config: ProjectTestConfig): void {

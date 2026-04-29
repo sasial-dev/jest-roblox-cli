@@ -22,7 +22,7 @@ import type {
 	ProjectTestConfig,
 	ResolvedConfig,
 } from "./config/schema.ts";
-import { isValidBackend, ROOT_ONLY_KEYS, VALID_BACKENDS } from "./config/schema.ts";
+import { isValidBackend, JEST_ARGV_EXCLUDED_KEYS, VALID_BACKENDS } from "./config/schema.ts";
 import { createSetupResolver } from "./config/setup-resolver.ts";
 import {
 	assertStubCollisionRule,
@@ -843,7 +843,7 @@ const STUB_SKIP_KEYS = new Set(["outDir", "projects", "root"]);
 function buildStubConfig(config: ResolvedConfig): Partial<ProjectTestConfig> {
 	const result: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(config)) {
-		if (!ROOT_ONLY_KEYS.has(key) && !STUB_SKIP_KEYS.has(key) && value !== undefined) {
+		if (!JEST_ARGV_EXCLUDED_KEYS.has(key) && !STUB_SKIP_KEYS.has(key) && value !== undefined) {
 			result[key] = value;
 		}
 	}

@@ -3,8 +3,8 @@ import type { Argv } from "@rbxts/jest/src/config";
 import process from "node:process";
 
 import {
+	JEST_ARGV_EXCLUDED_KEYS,
 	type ResolvedConfig,
-	ROOT_ONLY_KEYS,
 	type SnapshotFormatOptions,
 } from "./config/schema.ts";
 import template from "./test-runner.bundled.luau";
@@ -22,7 +22,7 @@ export interface JestArgvInput {
 export function buildJestArgv(options: JestArgvInput): JestArgv {
 	const argv: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(options.config)) {
-		if (!ROOT_ONLY_KEYS.has(key) && value !== undefined) {
+		if (!JEST_ARGV_EXCLUDED_KEYS.has(key) && value !== undefined) {
 			argv[key] = value;
 		}
 	}

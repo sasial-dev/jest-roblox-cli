@@ -56,16 +56,18 @@ function writeConfigWithCredentials(
 
 export default defineConfig({
 	placeId: "${credentials.placeId}",
-	projects: [
-		{
-			test: {
-				displayName: "rbxts-e2e",
-				include: ["src/**/*.spec.ts"],
-				outDir: "out",
-			},
-		},
-	],
 	rojoProject: "default.project.json",
+	test: {
+		projects: [
+			{
+				test: {
+					displayName: "rbxts-e2e",
+					include: ["src/**/*.spec.ts"],
+					outDir: "out",
+				},
+			},
+		],
+	},
 	universeId: "${credentials.universeId}",
 });
 `,

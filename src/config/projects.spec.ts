@@ -17,7 +17,7 @@ import {
 	validateProjects,
 } from "./projects.ts";
 import { DEFAULT_CONFIG } from "./schema.ts";
-import type { ProjectTestConfig, ResolvedConfig } from "./schema.ts";
+import type { InlineProjectConfig, ProjectTestConfig, ResolvedConfig } from "./schema.ts";
 
 function allDirectories(): PathKind {
 	return "directory";
@@ -973,6 +973,29 @@ describe(loadProjectConfigFile, () => {
 				displayName: "client",
 				include: ["src/client/**/*.spec.ts"],
 			} as ProjectTestConfig,
+			configFile: "jest-project.config.ts",
+			cwd: "/project",
+			layers: [],
+		});
+
+		const result = await loadProjectConfigFile("./client.config.ts", "/project");
+
+		expect(result.displayName).toBe("client");
+		expect(result.include).toStrictEqual(["src/client/**/*.spec.ts"]);
+	});
+
+	it("should unwrap project configs exported with defineProject shape", async () => {
+		expect.assertions(2);
+
+		const { loadConfig } = await import("c12");
+		const mockLoadConfig = vi.mocked(loadConfig);
+		mockLoadConfig.mockResolvedValueOnce({
+			config: {
+				test: {
+					displayName: "client",
+					include: ["src/client/**/*.spec.ts"],
+				},
+			} as InlineProjectConfig,
 			configFile: "jest-project.config.ts",
 			cwd: "/project",
 			layers: [],

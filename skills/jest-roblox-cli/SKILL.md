@@ -35,7 +35,7 @@ advice — jest-roblox is usable by both roblox-ts and Luau-only projects.
 | Type tests only | `jest-roblox --typecheckOnly` |
 | Enable type tests | `jest-roblox --typecheck` |
 | Custom tsconfig for types | `jest-roblox --typecheckTsconfig tsconfig.test.json` |
-| JSON output to file | `jest-roblox --json --outputFile results.json` |
+| JSON output to file | `jest-roblox --formatters json --outputFile results.json` |
 
 **Filtering options** — three ways to narrow what runs:
 

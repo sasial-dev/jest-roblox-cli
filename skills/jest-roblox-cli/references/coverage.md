@@ -29,10 +29,12 @@ its configured value:
 
 ```typescript
 const config = {
-	coverageThreshold: {
-		branches: 70,
-		functions: 80,
-		statements: 80,
+	test: {
+		coverageThreshold: {
+			branches: 70,
+			functions: 80,
+			statements: 80,
+		},
 	},
 };
 ```
@@ -40,6 +42,8 @@ const config = {
 Available metrics: `statements`, `branches`, `functions`, `lines`.
 
 ## Config Fields
+
+Put these under `test: { ... }`. Keep `luauRoots` at config root.
 
 | Field | Purpose | Default |
 |-------|---------|---------|
@@ -49,7 +53,6 @@ Available metrics: `statements`, `branches`, `functions`, `lines`.
 | `coverageThreshold` | Min percentages; fail if not met | — |
 | `coveragePathIgnorePatterns` | Globs to exclude from coverage | test files, node_modules, rbxts_include |
 | `collectCoverageFrom` | Globs for files to include in coverage | — |
-| `luauRoots` | Compiled Luau directories to instrument | auto from tsconfig `outDir` |
 
 ## Generated Files
 

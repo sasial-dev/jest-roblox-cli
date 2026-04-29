@@ -58,7 +58,9 @@ import { defineConfig } from "@isentinel/jest-roblox";
 
 export default defineConfig({
 	placeFile: "./game.rbxl",
-	projects: ["ReplicatedStorage/shared"],
+	test: {
+		projects: ["ReplicatedStorage/shared"],
+	},
 });
 ```
 
@@ -110,36 +112,52 @@ Configs can extend a shared base with `extends`:
 ```typescript
 export default defineConfig({
 	extends: "../../jest.shared.ts",
-	projects: ["ReplicatedStorage/shared"],
+	test: {
+		projects: ["ReplicatedStorage/shared"],
+	},
 });
 ```
 
 Precedence: CLI flags > config file > extended config > defaults.
 
-### Config fields
+### Root config fields
+
+Root fields control the CLI/runner. Jest passthrough fields live under `test:`.
 
 | Field | What it does | Default |
 |---|---|---|
-| `projects` | Where to look for tests in the DataModel | **required** |
 | `backend` | `"open-cloud"` or `"studio"` | — |
 | `placeFile` | Path to your `.rbxl` file | `"./game.rbxl"` |
 | `timeout` | Max time for tests to run (ms) | `300000` (5 min) |
 | `sourceMap` | Map Luau errors back to TypeScript (roblox-ts only) | `true` |
 | `port` | WebSocket port for Studio backend | `3001` |
-| `testMatch` | Glob patterns that find test files | `**/*.spec.ts`, `**/*.test.ts`, etc. |
-| `testPathIgnorePatterns` | Patterns to skip | `/node_modules/`, `/dist/`, `/out/` |
 | `rojoProject` | Path to your Rojo project file | auto |
 | `jestPath` | Where Jest lives in the DataModel | auto |
-| `setupFiles` | Scripts to run before the test environment loads | — |
-| `setupFilesAfterEnv` | Scripts to run after the test environment loads | — |
 | `formatters` | Output formatters (`"default"`, `"agent"`, `"json"`, `"github-actions"`) | `["default"]` |
 | `gameOutput` | Path to write game print/warn/error output | — |
 | `showLuau` | Show Luau code snippets in failure output | `true` |
 | `cache` | Cache place file uploads by content hash | `true` |
 | `pollInterval` | How often to poll for results in ms (Open Cloud) | `500` |
 | `parallel` | Number of concurrent Open Cloud sessions, or `"auto"` (= `min(jobs, 3)`) | — |
+| `luauRoots` | Where Luau files live for coverage instrumentation | auto from tsconfig `outDir` |
+
+### Test fields
+
+Put these under `test: { ... }`.
+
+| Field | What it does | Default |
+|---|---|---|
+| `projects` | Where to look for tests in the DataModel | **required** |
+| `testMatch` | Glob patterns that find test files | `**/*.spec.ts`, `**/*.test.ts`, etc. |
+| `testPathIgnorePatterns` | Patterns to skip | `/node_modules/`, `/dist/`, `/out/` |
+| `setupFiles` | Scripts to run before the test environment loads | — |
+| `setupFilesAfterEnv` | Scripts to run after the test environment loads | — |
+| `verbose` | Show individual test results | `false` |
+| `silent` | Suppress console output | `false` |
 
 ### Coverage fields
+
+Put these under `test: { ... }`.
 
 > [!IMPORTANT]
 > Coverage requires [Lute](https://github.com/luau-lang/lute) to be installed and
@@ -153,7 +171,6 @@ Precedence: CLI flags > config file > extended config > defaults.
 | `coverageThreshold` | Minimum coverage to pass | — |
 | `coveragePathIgnorePatterns` | Files to leave out of coverage | test files, `node_modules`, `rbxts_include` |
 | `collectCoverageFrom` | Globs for files to include in coverage | — |
-| `luauRoots` | Where Luau files live (auto from tsconfig `outDir` for roblox-ts, or set by hand for pure Luau) | auto |
 
 ### Project-level config
 
@@ -165,23 +182,25 @@ import { defineConfig, defineProject } from "@isentinel/jest-roblox";
 
 export default defineConfig({
 	placeFile: "./game.rbxl",
-	projects: [
-		{
-			test: defineProject({
-				displayName: { name: "client", color: "magenta" },
-				include: ["**/*.spec.ts"],
-				mockDataModel: true,
-				outDir: "out/src/client",
+	test: {
+		projects: [
+			defineProject({
+				test: {
+					displayName: { name: "client", color: "magenta" },
+					include: ["**/*.spec.ts"],
+					mockDataModel: true,
+					outDir: "out/src/client",
+				},
 			}),
-		},
-		{
-			test: defineProject({
-				displayName: { name: "server", color: "white" },
-				include: ["**/*.spec.ts"],
-				outDir: "out/src/server",
+			defineProject({
+				test: {
+					displayName: { name: "server", color: "white" },
+					include: ["**/*.spec.ts"],
+					outDir: "out/src/server",
+				},
 			}),
-		},
-	],
+		],
+	},
 });
 ```
 
@@ -192,15 +211,17 @@ import { defineConfig } from "@isentinel/jest-roblox";
 
 export default defineConfig({
 	backend: "open-cloud",
-	collectCoverage: true,
-	coverageThreshold: {
-		branches: 70,
-		functions: 80,
-		statements: 80,
-	},
 	jestPath: "ReplicatedStorage/Packages/Jest",
 	placeFile: "./game.rbxl",
-	projects: ["ReplicatedStorage/client", "ServerScriptService/server"],
+	test: {
+		collectCoverage: true,
+		coverageThreshold: {
+			branches: 70,
+			functions: 80,
+			statements: 80,
+		},
+		projects: ["ReplicatedStorage/client", "ServerScriptService/server"],
+	},
 	timeout: 60000,
 });
 ```

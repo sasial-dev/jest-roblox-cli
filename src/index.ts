@@ -9,14 +9,24 @@ export type {
 	Config,
 	ConfigInput,
 	FormatterEntry,
+	GlobalTestConfig,
 	ResolvedConfig,
 	CliOptions,
 	ProjectTestConfig,
 	InlineProjectConfig,
 	ProjectEntry,
 	DisplayName,
+	SharedTestConfig,
 } from "./config/schema.ts";
-export { DEFAULT_CONFIG, defineConfig, defineProject, ROOT_ONLY_KEYS } from "./config/schema.ts";
+export {
+	DEFAULT_CONFIG,
+	defineConfig,
+	defineProject,
+	GLOBAL_TEST_KEYS,
+	JEST_ARGV_EXCLUDED_KEYS,
+	ROOT_CLI_KEYS,
+	SHARED_TEST_KEYS,
+} from "./config/schema.ts";
 export { execute, formatExecuteOutput } from "./executor.ts";
 export type { ExecuteOptions, ExecuteResult, FormatOutputOptions } from "./executor.ts";
 
