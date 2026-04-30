@@ -16,6 +16,15 @@ const FIXTURE_DIR = path.resolve(import.meta.dirname);
 const SENTINEL = path.join(FIXTURE_DIR, "out", "shared", "example.luau");
 
 export default function setup(): void {
+	// Live tests themselves are gated on JEST_ROBLOX_LIVE=1 (see specs in
+	// test/e2e/{contract,project,workspace}). Skip the rbxtsc rebuild when
+	// live tests won't run — avoids requiring fixture deps in environments
+	// (e.g. the standalone repo's CI) where the fixture's package.json isn't
+	// part of the pnpm workspace.
+	if (process.env["JEST_ROBLOX_LIVE"] !== "1") {
+		return;
+	}
+
 	if (existsSync(SENTINEL)) {
 		return;
 	}
