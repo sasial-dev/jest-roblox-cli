@@ -3,6 +3,7 @@ out-tsc/
 /coverage/
 *.tsbuildinfo
 *.rbxl
+!test/e2e/fixtures/live-place/game.rbxl
 *.rbxl.lock
 *.tgz
 .DS_Store
