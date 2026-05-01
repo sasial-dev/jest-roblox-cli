@@ -372,7 +372,122 @@ describe("coverage-collector", () => {
 			expect(result.branches[0]?.arms).toHaveLength(2);
 			expect(result.implicitElseProbes).toHaveLength(1);
 			expect(result.implicitElseProbes[0]?.endLine).toBe(3);
-			// endColumn - 3 (length of "end")
+			expect(result.implicitElseProbes[0]?.endColumn).toBe(1);
+		});
+
+		it("should place implicit else probe at start of `end` when source has trailing semicolon", () => {
+			expect.assertions(2);
+
+			// Models: `if true then\n    local x = 1\nend;`
+			// Lute extends the if statement's location past the `;`:
+			//   ifStatement.endColumn = 5 (past `;`), but `end` starts at col 1.
+			// thenBlock.endColumn reliably marks the start of `end`.
+			const thenStatement = {
+				kind: "stat",
+				location: span(2, 5, 2, 16),
+				tag: "local",
+				values: [],
+				variables: [],
+			} satisfies AstStatLocal;
+			const thenBlock = {
+				kind: "stat",
+				location: span(1, 13, 3, 1),
+				statements: [thenStatement],
+				tag: "block",
+			} satisfies AstStatBlock;
+			const ifStatement = {
+				condition: {
+					kind: "expr",
+					location: span(1, 4, 1, 8),
+					tag: "boolean",
+					value: true,
+				},
+				elseifs: [],
+				kind: "stat",
+				location: span(1, 1, 3, 5),
+				tag: "conditional",
+				thenBlock,
+			} satisfies AstStatIf;
+			const root = {
+				kind: "stat",
+				location: span(1, 1, 3, 5),
+				statements: [ifStatement],
+				tag: "block",
+			} satisfies AstStatBlock;
+
+			const result = collectCoverage(root);
+
+			expect(result.implicitElseProbes[0]?.endLine).toBe(3);
+			expect(result.implicitElseProbes[0]?.endColumn).toBe(1);
+		});
+
+		it("should place implicit else probe at start of `end` for if/elseif with trailing semicolon", () => {
+			expect.assertions(2);
+
+			// Models: `if true then\n    local x = 1\nelseif false then\n
+			// local y = 2\nend;` ifStatement.endColumn = 5 (past `;`), last
+			// elseif's thenBlock.endColumn = 1 (start of `end`).
+			const thenBlock = {
+				kind: "stat",
+				location: span(1, 13, 3, 1),
+				statements: [
+					{
+						kind: "stat",
+						location: span(2, 5, 2, 16),
+						tag: "local",
+						values: [],
+						variables: [],
+					} satisfies AstStatLocal,
+				],
+				tag: "block",
+			} satisfies AstStatBlock;
+			const elseifBlock = {
+				kind: "stat",
+				location: span(3, 18, 5, 1),
+				statements: [
+					{
+						kind: "stat",
+						location: span(4, 5, 4, 16),
+						tag: "local",
+						values: [],
+						variables: [],
+					} satisfies AstStatLocal,
+				],
+				tag: "block",
+			} satisfies AstStatBlock;
+			const ifStatement = {
+				condition: {
+					kind: "expr",
+					location: span(1, 4, 1, 8),
+					tag: "boolean",
+					value: true,
+				},
+				elseifs: [
+					{
+						condition: {
+							kind: "expr",
+							location: span(3, 8, 3, 13),
+							tag: "boolean",
+							value: false,
+						} satisfies AstExprConstantBool,
+						thenBlock: elseifBlock,
+					},
+				],
+				kind: "stat",
+				location: span(1, 1, 5, 5),
+				tag: "conditional",
+				thenBlock,
+			} satisfies AstStatIf;
+			const root = {
+				kind: "stat",
+				location: span(1, 1, 5, 5),
+				statements: [ifStatement],
+				tag: "block",
+			} satisfies AstStatBlock;
+
+			const result = collectCoverage(root);
+
+			expect(result.implicitElseProbes[0]?.endLine).toBe(5);
 			expect(result.implicitElseProbes[0]?.endColumn).toBe(1);
 		});
 

@@ -29,8 +29,6 @@ const INSTRUMENTABLE_STATEMENT_TAGS: ReadonlySet<string> = new Set([
 	"while",
 ]);
 
-const END_KEYWORD_LENGTH = 3;
-
 export interface StatementInfo {
 	index: number;
 	location: LuauSpan;
@@ -194,6 +192,8 @@ export function collectCoverage(root: AstStatBlock): CollectorResult {
 		},
 
 		visitStatIf(node: AstStatIf): boolean {
+			const { elseBlock, elseifs, location: ifLocation, thenBlock } = node;
+
 			const branch: BranchInfo = {
 				arms: [],
 				branchType: "if",
@@ -201,15 +201,15 @@ export function collectCoverage(root: AstStatBlock): CollectorResult {
 			};
 
 			// then arm
-			const thenFirst = getBodyFirstStatement(node.thenBlock);
+			const thenFirst = getBodyFirstStatement(thenBlock);
 			branch.arms.push({
 				bodyFirstColumn: thenFirst.column,
 				bodyFirstLine: thenFirst.line,
-				location: { ...node.thenBlock.location },
+				location: { ...thenBlock.location },
 			});
 
 			// elseif arms
-			for (const elseif of node.elseifs) {
+			for (const elseif of elseifs) {
 				const elseifFirst = getBodyFirstStatement(elseif.thenBlock);
 				branch.arms.push({
 					bodyFirstColumn: elseifFirst.column,
@@ -221,7 +221,6 @@ export function collectCoverage(root: AstStatBlock): CollectorResult {
 			// else arm — treat empty `else end` as no else: roblox-ts never emits
 			// empty else blocks, and an empty else has no observable behavior to
 			// cover
-			const { elseBlock } = node;
 			const hasExplicitElse = elseBlock !== undefined && elseBlock.statements.length > 0;
 
 			if (hasExplicitElse) {
@@ -240,18 +239,24 @@ export function collectCoverage(root: AstStatBlock): CollectorResult {
 					bodyFirstColumn: 0,
 					bodyFirstLine: 0,
 					location: {
-						beginColumn: node.location.beginColumn,
-						beginLine: node.location.beginLine,
-						endColumn: node.location.beginColumn,
-						endLine: node.location.beginLine,
+						beginColumn: ifLocation.beginColumn,
+						beginLine: ifLocation.beginLine,
+						endColumn: ifLocation.beginColumn,
+						endLine: ifLocation.beginLine,
 					},
 				});
+
+				// Locate `end` via the last block's end position. The if
+				// statement's own location is unreliable here: Lute extends it
+				// past a trailing `;` if present.
+				const lastElseif = elseifs.at(-1);
+				const lastBlock = lastElseif ? lastElseif.thenBlock : thenBlock;
 
 				implicitElseProbes.push({
 					armIndex: branch.arms.length,
 					branchIndex,
-					endColumn: node.location.endColumn - END_KEYWORD_LENGTH,
-					endLine: node.location.endLine,
+					endColumn: lastBlock.location.endColumn,
+					endLine: lastBlock.location.endLine,
 				});
 			}
 
