@@ -304,21 +304,42 @@ describe(StudioBackend, () => {
 		expect((error as Error & { gameOutput?: string }).gameOutput).toBe(gameOutput);
 	});
 
-	it("should rethrow non-LuauScriptError exceptions from parseJestOutput unchanged", async () => {
-		expect.assertions(1);
+	it("should attach entry gameOutput to LuauScriptError thrown for ExecutionError payloads", async () => {
+		expect.assertions(2);
 
 		const executionError = JSON.stringify({
 			success: true,
 			value: { error: "runtime blew up", kind: "ExecutionError" },
 		});
+		const entryGameOutput = JSON.stringify([{ message: "boom", messageType: 1, timestamp: 1 }]);
 
 		const backend = new StudioBackend({ port: 0 });
 		const promise = backend.runTests(singleJobOptions);
 
 		const wss = getLastCreatedServer()!;
-		connectAndReply(wss, { entries: [{ jestOutput: executionError }] });
+		connectAndReply(wss, {
+			entries: [{ gameOutput: entryGameOutput, jestOutput: executionError }],
+		});
 
-		await expect(promise).rejects.toThrowWithMessage(Error, /Jest execution failed/);
+		const error = await promise.catch((err: unknown) => err);
+
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error & { gameOutput?: string }).gameOutput).toBe(entryGameOutput);
+	});
+
+	it("should rethrow non-LuauScriptError exceptions from parseJestOutput unchanged", async () => {
+		expect.assertions(2);
+
+		const backend = new StudioBackend({ port: 0 });
+		const promise = backend.runTests(singleJobOptions);
+
+		const wss = getLastCreatedServer()!;
+		connectAndReply(wss, { entries: [{ jestOutput: "no json here" }] });
+
+		const error = await promise.catch((err: unknown) => err);
+
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error & { gameOutput?: string }).gameOutput).toBeUndefined();
 	});
 
 	it("should rethrow syntax errors when jestOutput is not valid JSON", async () => {

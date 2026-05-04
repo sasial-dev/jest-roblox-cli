@@ -725,6 +725,32 @@ End of output
 		);
 	});
 
+	it("should throw a LuauScriptError on ExecutionError so backend can attach gameOutput", () => {
+		// Regression: prior to HAL-157 this branch threw a plain Error, so
+		// open-cloud's `err instanceof LuauScriptError` check skipped attaching
+		// gameOutput and the CLI banner showed nothing about which module
+		// failed.
+		expect.assertions(2);
+
+		const output = JSON.stringify({
+			success: true,
+			value: {
+				error: "Requested module experienced an error while loading",
+				kind: "ExecutionError",
+				parent: {
+					error: "DataController failed loading",
+					kind: "ExecutionError",
+				},
+			},
+		});
+
+		expect(() => parseJestOutput(output)).toThrow(LuauScriptError);
+		expect(() => parseJestOutput(output)).toThrowWithMessage(
+			LuauScriptError,
+			"Jest execution failed: DataController failed loading",
+		);
+	});
+
 	it("should traverse parent chain in ExecutionError", () => {
 		expect.assertions(1);
 

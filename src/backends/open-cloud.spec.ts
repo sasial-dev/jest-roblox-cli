@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_CONFIG } from "../config/schema.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
+import { LuauScriptError } from "../reporter/parser.ts";
 import type { HttpClient, HttpResponse } from "./http-client.ts";
 import type { BackendOptions, ProjectJob } from "./interface.ts";
 import { createOpenCloudBackend, OpenCloudBackend } from "./open-cloud.ts";
@@ -1124,6 +1125,57 @@ describe(OpenCloudBackend, () => {
 		expect((error as Error & { gameOutput?: string }).gameOutput).toBe(gameOutputData);
 	});
 
+	it("should attach entry gameOutput to LuauScriptError thrown for ExecutionError payloads", async () => {
+		// Regression: HAL-157. parseJestOutput's ExecutionError branch used to
+		// throw plain Error, so buildProjectResult skipped the
+		// `err instanceof LuauScriptError` attach and the CLI banner had no
+		// game output context for module-load failures.
+		expect.assertions(3);
+
+		const executionErrorPayload = JSON.stringify({
+			success: true,
+			value: {
+				error: "Requested module experienced an error while loading",
+				kind: "ExecutionError",
+				parent: {
+					error: "DataController failed loading",
+					kind: "ExecutionError",
+				},
+			},
+		});
+		const entryGameOutput = "[ERROR] DataController failed loading";
+
+		const http = createDispatchMock({
+			onCreateTask: () => {
+				return {
+					complete: completeResponse(
+						envelope([
+							{
+								gameOutput: entryGameOutput,
+								jestOutput: executionErrorPayload,
+							},
+						]),
+					),
+					taskPath: "task-execution-error",
+				};
+			},
+		});
+
+		const backend = new OpenCloudBackend(credentials, {
+			http,
+			readFile: () => buffer.Buffer.from("mock-rbxl"),
+			sleep: noSleep,
+		});
+
+		const error = await backend
+			.runTests(jobsOptions([job("alpha")]))
+			.catch((err: unknown) => err);
+
+		expect(error).toBeInstanceOf(LuauScriptError);
+		expect((error as LuauScriptError).message).toContain("Jest execution failed:");
+		expect((error as LuauScriptError).gameOutput).toBe(entryGameOutput);
+	});
+
 	it("should rethrow non-LuauScriptError exceptions from parseJestOutput", async () => {
 		expect.assertions(1);
 
@@ -1288,6 +1340,47 @@ describe(OpenCloudBackend, () => {
 		const { results } = await backend.runTests(jobsOptions([job("alpha")]));
 
 		expect(results[0]?.result.success).toBeTrue();
+	});
+
+	it("should map a multi-package envelope to per-package results in input order", async () => {
+		expect.assertions(4);
+
+		const http = createDispatchMock({
+			onCreateTask: () => {
+				return {
+					complete: completeResponse(
+						envelope([
+							{ jestOutput: successJest(), pkg: "@halcyon/foo" },
+							{
+								jestOutput: successJest({ numFailedTests: 1, success: false }),
+								pkg: "@halcyon/bar",
+							},
+							{ jestOutput: successJest(), pkg: "@halcyon/baz" },
+						]),
+					),
+					taskPath: "task-multi",
+				};
+			},
+		});
+
+		const backend = new OpenCloudBackend(credentials, {
+			http,
+			readFile: () => buffer.Buffer.from("mock"),
+			sleep: noSleep,
+		});
+
+		const { results } = await backend.runTests(
+			jobsOptions([job("@halcyon/foo"), job("@halcyon/bar"), job("@halcyon/baz")]),
+		);
+
+		expect(results.map((entry) => entry.displayName)).toStrictEqual([
+			"@halcyon/foo",
+			"@halcyon/bar",
+			"@halcyon/baz",
+		]);
+		expect(results[0]?.result.success).toBeTrue();
+		expect(results[1]?.result.success).toBeFalse();
+		expect(results[2]?.result.success).toBeTrue();
 	});
 });
 

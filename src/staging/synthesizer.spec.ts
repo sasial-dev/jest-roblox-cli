@@ -249,6 +249,62 @@ describe(synthesize, () => {
 		).toBe("Folder");
 	});
 
+	it("should isolate per-package service roots even when packages claim the same service", () => {
+		expect.assertions(2);
+
+		vol.reset();
+
+		const barProject = path.join(ROOT, "packages/bar/test.project.json");
+		vol.fromJSON({
+			[barProject]: projectJson({
+				name: "bar-test",
+				tree: {
+					$className: "DataModel",
+					ReplicatedStorage: { $className: "ReplicatedStorage", $path: "src" },
+				},
+			}),
+			[FOO_PROJECT]: projectJson({
+				name: "foo-test",
+				tree: {
+					$className: "DataModel",
+					ReplicatedStorage: { $className: "ReplicatedStorage", $path: "src" },
+				},
+			}),
+			[path.join(FOO_DIR, "src/init.luau")]: "",
+			[path.join(ROOT, "packages/bar/src/init.luau")]: "",
+		});
+
+		const result = synthesize({
+			packages: [
+				{
+					name: "@halcyon/bar",
+					packageDirectory: path.join(ROOT, "packages/bar"),
+					rojoProjectPath: barProject,
+				},
+				{
+					name: "@halcyon/foo",
+					packageDirectory: FOO_DIR,
+					rojoProjectPath: FOO_PROJECT,
+				},
+			],
+		});
+
+		const parsed = JSON.parse(result) as {
+			tree: {
+				ServerStorage: {
+					__pkg_stage: Record<string, { ReplicatedStorage: { $path: string } }>;
+				};
+			};
+		};
+
+		expect(parsed.tree.ServerStorage.__pkg_stage["@halcyon/bar"]?.ReplicatedStorage.$path).toBe(
+			path.join(ROOT, "packages/bar/src").replaceAll("\\", "/"),
+		);
+		expect(parsed.tree.ServerStorage.__pkg_stage["@halcyon/foo"]?.ReplicatedStorage.$path).toBe(
+			path.join(FOO_DIR, "src").replaceAll("\\", "/"),
+		);
+	});
+
 	it("should be byte-stable regardless of input package ordering", () => {
 		expect.assertions(1);
 

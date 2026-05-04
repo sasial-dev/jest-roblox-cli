@@ -143,6 +143,13 @@ function makeExecuteResult(overrides: Partial<ExecuteResult> = {}): ExecuteResul
 	};
 }
 
+function makeWorkspaceResult(
+	overrides: Partial<ExecuteResult> = {},
+	displayName = "@halcyon/foo",
+): Array<{ displayName: string; result: ExecuteResult }> {
+	return [{ displayName, result: makeExecuteResult(overrides) }];
+}
+
 function makeBackendResult(jobs: Array<ProjectJob>): BackendResult {
 	return {
 		results: jobs.map((job) => {
@@ -769,35 +776,106 @@ describe("--workspace mode", () => {
 		);
 	});
 
-	it("should error and exit 2 when --packages contains a comma", async () => {
-		expect.assertions(3);
-
-		const spies = setupOutputSpies();
-		setupDefaults();
-
-		const code = await run(["--workspace", "--packages=foo,bar"]);
-
-		expect(code).toBe(2);
-		expect(spies.stderr).toHaveBeenCalledWith(
-			expect.stringContaining("multiple packages not yet supported"),
-		);
-		expect(spies.stderr).toHaveBeenCalledWith(
-			expect.stringContaining("Use a single package name per invocation"),
-		);
-	});
-
-	it("should error and exit 2 when projects config is set", async () => {
+	it("should resolve every package in a comma-separated --packages list", async () => {
 		expect.assertions(2);
 
+		setupOutputSpies();
+		setupDefaults();
+		mocks.resolvePackage.mockImplementation((_, name) => {
+			return { name, packageDirectory: `/repo/packages/${name.replace("@halcyon/", "")}` };
+		});
+		mocks.runWorkspace.mockResolvedValue([
+			{ displayName: "@halcyon/foo", result: makeExecuteResult() },
+			{ displayName: "@halcyon/bar", result: makeExecuteResult() },
+			{ displayName: "@halcyon/baz", result: makeExecuteResult() },
+		]);
+
+		const code = await run([
+			"--workspace",
+			"--packages=@halcyon/foo,@halcyon/bar,@halcyon/baz",
+		]);
+
+		expect(code).toBe(0);
+		expect(
+			mocks.runWorkspace.mock.calls[0]?.[0].packageInfos.map((info) => info.name),
+		).toStrictEqual(["@halcyon/foo", "@halcyon/bar", "@halcyon/baz"]);
+	});
+
+	it("should exit 1 when any package in the multi-package list fails", async () => {
+		expect.assertions(1);
+
+		setupOutputSpies();
+		setupDefaults();
+		mocks.resolvePackage.mockImplementation((_, name) => {
+			return { name, packageDirectory: `/repo/packages/${name.replace("@halcyon/", "")}` };
+		});
+		mocks.runWorkspace.mockResolvedValue([
+			{ displayName: "@halcyon/foo", result: makeExecuteResult() },
+			{
+				displayName: "@halcyon/bar",
+				result: makeExecuteResult({
+					exitCode: 1,
+					result: makeJestResult({ numFailedTests: 1, success: false }),
+				}),
+			},
+		]);
+
+		const code = await run(["--workspace", "--packages=@halcyon/foo,@halcyon/bar"]);
+
+		expect(code).toBe(1);
+	});
+
+	it("should warn and continue when projects config is set", async () => {
+		expect.assertions(4);
+
 		const spies = setupOutputSpies();
-		setupDefaults({ projects: ["ReplicatedStorage/client"] });
+		setupDefaults({ projects: ["ReplicatedStorage/client", "ReplicatedStorage/server"] });
+		mocks.runWorkspace.mockResolvedValue([
+			{ displayName: "@halcyon/foo", result: makeExecuteResult() },
+		]);
 
 		const code = await run(["--workspace", "--packages=foo"]);
 
-		expect(code).toBe(2);
+		expect(code).toBe(0);
 		expect(spies.stderr).toHaveBeenCalledWith(
-			expect.stringContaining("projects config not supported with --workspace"),
+			expect.stringContaining("picking first project in the project list"),
 		);
+		expect(spies.stderr).toHaveBeenCalledWith(expect.stringContaining("ignoring 1 other"));
+		expect(mocks.runWorkspace).toHaveBeenCalledOnce();
+	});
+
+	it("should warn without ignored-other suffix when projects has a single entry", async () => {
+		expect.assertions(2);
+
+		const spies = setupOutputSpies();
+		setupDefaults({ projects: ["ReplicatedStorage/only"] });
+		mocks.runWorkspace.mockResolvedValue([
+			{ displayName: "@halcyon/foo", result: makeExecuteResult() },
+		]);
+
+		const code = await run(["--workspace", "--packages=foo"]);
+
+		expect(code).toBe(0);
+		expect(spies.stderr).toHaveBeenCalledWith(
+			expect.stringMatching(/picking first project in the project list\.\n$/),
+		);
+	});
+
+	it("should pass first projects entry through to runWorkspace", async () => {
+		expect.assertions(2);
+
+		setupOutputSpies();
+		setupDefaults({ projects: ["ReplicatedStorage/client", "ReplicatedStorage/server"] });
+		mocks.runWorkspace.mockResolvedValue([
+			{ displayName: "@halcyon/foo", result: makeExecuteResult() },
+		]);
+
+		const code = await run(["--workspace", "--packages=foo"]);
+
+		expect(code).toBe(0);
+		expect(mocks.runWorkspace.mock.calls[0]?.[0].config.projects).toStrictEqual([
+			"ReplicatedStorage/client",
+		]);
 	});
 
 	it("should error and exit 2 when --coverage is passed", async () => {
@@ -828,12 +906,26 @@ describe("--workspace mode", () => {
 		);
 	});
 
+	it("should error and exit 2 when --packages contains only commas", async () => {
+		expect.assertions(2);
+
+		const spies = setupOutputSpies();
+		setupDefaults();
+
+		const code = await run(["--workspace", "--packages=,,"]);
+
+		expect(code).toBe(2);
+		expect(spies.stderr).toHaveBeenCalledWith(
+			expect.stringContaining("--workspace requires --packages"),
+		);
+	});
+
 	it("should call runWorkspace and propagate exit code on success", async () => {
 		expect.assertions(2);
 
 		setupOutputSpies();
 		setupDefaults();
-		mocks.runWorkspace.mockResolvedValue(makeExecuteResult());
+		mocks.runWorkspace.mockResolvedValue(makeWorkspaceResult());
 
 		const code = await run(["--workspace", "--packages=@halcyon/foo"]);
 
@@ -841,7 +933,7 @@ describe("--workspace mode", () => {
 
 		const call = mocks.runWorkspace.mock.calls[0]?.[0];
 
-		expect(call?.packageInfo.name).toBe("@halcyon/foo");
+		expect(call?.packageInfos[0]?.name).toBe("@halcyon/foo");
 	});
 
 	it("should propagate non-zero exit code from runWorkspace", async () => {
@@ -850,7 +942,7 @@ describe("--workspace mode", () => {
 		setupOutputSpies();
 		setupDefaults();
 		mocks.runWorkspace.mockResolvedValue(
-			makeExecuteResult({
+			makeWorkspaceResult({
 				exitCode: 1,
 				result: makeJestResult({ numFailedTests: 1, success: false }),
 			}),
@@ -962,7 +1054,7 @@ describe("--workspace mode", () => {
 		setupDefaults();
 		const backend = makeMockBackend("open-cloud");
 		mocks.createOpenCloudBackend.mockReturnValue(fromAny(backend));
-		mocks.runWorkspace.mockResolvedValue(makeExecuteResult());
+		mocks.runWorkspace.mockResolvedValue(makeWorkspaceResult());
 
 		const code = await run(["--workspace", "--packages=@halcyon/foo"]);
 

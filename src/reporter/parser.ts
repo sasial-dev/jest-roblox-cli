@@ -297,7 +297,7 @@ function parseParsedOutput(parsed: Record<string, unknown>): ParseResult {
 
 	if (unwrapped["kind"] === "ExecutionError") {
 		const errorMessage = extractExecutionError(unwrapped);
-		throw new Error(`Jest execution failed: ${errorMessage}`);
+		throw new LuauScriptError(`Jest execution failed: ${errorMessage}`);
 	}
 
 	if (unwrapped["results"] !== undefined && typeof unwrapped["results"] === "object") {

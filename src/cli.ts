@@ -1226,6 +1226,31 @@ async function runSingleProject(cli: CliOptions, config: ResolvedConfig): Promis
 	return outputResults(effectiveConfig, typecheckResult, runtimeResult, preCoverageMs);
 }
 
+/**
+ * Workspace mode does not yet fan out per-project × per-package the way
+ * `runMultiProject` does (no stub generation, no per-project result attribution).
+ * If a package config declares `projects:`, keep only the first entry as a
+ * single-element `projects` array so Luau-side Jest still scopes test discovery
+ * to that DataModel subtree. Inline `{ test: {...} }` entries are flattened
+ * earlier during config resolution, so `ResolvedConfig.projects` is always
+ * `Array<string>`.
+ */
+function applyFirstProjectInWorkspace(packageConfig: ResolvedConfig): void {
+	const { projects } = packageConfig;
+	if (projects === undefined || projects.length === 0) {
+		return;
+	}
+
+	const ignored = projects.length - 1;
+	const suffix = ignored > 0 ? ` (ignoring ${String(ignored)} other)` : "";
+	process.stderr.write(
+		`Warning: multi-project not yet supported with --workspace; picking first project in the project list${suffix}.\n`,
+	);
+
+	// eslint-disable-next-line ts/no-non-null-assertion -- length checked above
+	packageConfig.projects = [projects[0]!];
+}
+
 function buildWorkspaceCredentials(cli: CliOptions, config: ResolvedConfig): RunnerCredentials {
 	return resolveCredentials({
 		defaults: { placeId: config.placeId, universeId: config.universeId },
@@ -1234,11 +1259,7 @@ function buildWorkspaceCredentials(cli: CliOptions, config: ResolvedConfig): Run
 	});
 }
 
-async function runWorkspaceMode(
-	cli: CliOptions,
-	config: ResolvedConfig,
-	rawProjects: Array<ProjectEntry> | undefined,
-): Promise<number> {
+async function runWorkspaceMode(cli: CliOptions, config: ResolvedConfig): Promise<number> {
 	if (cli.workspace !== true) {
 		process.stderr.write("Error: --packages requires --workspace.\n");
 		return 2;
@@ -1246,18 +1267,6 @@ async function runWorkspaceMode(
 
 	if (cli.packages === undefined || cli.packages.trim() === "") {
 		process.stderr.write("Error: --workspace requires --packages.\n");
-		return 2;
-	}
-
-	if (cli.packages.includes(",")) {
-		process.stderr.write(
-			"Error: multiple packages not yet supported. Use a single package name per invocation.\n",
-		);
-		return 2;
-	}
-
-	if (rawProjects !== undefined && rawProjects.length > 0) {
-		process.stderr.write("Error: projects config not supported with --workspace.\n");
 		return 2;
 	}
 
@@ -1283,18 +1292,35 @@ async function runWorkspaceMode(
 		return 2;
 	}
 
+	const packageNames = cli.packages
+		.split(",")
+		.map((name) => name.trim())
+		.filter((name) => name.length > 0);
+
+	if (packageNames.length === 0) {
+		process.stderr.write("Error: --workspace requires --packages.\n");
+		return 2;
+	}
+
 	let workspaceRoot: string;
-	let packageInfo;
+	let packageInfos;
 	try {
 		workspaceRoot = discoverWorkspaceRoot(process.cwd());
-		packageInfo = resolvePackage(workspaceRoot, cli.packages);
+		packageInfos = packageNames.map((name) => resolvePackage(workspaceRoot, name));
 	} catch (err) {
 		process.stderr.write(`Error: ${String(err)}\n`);
 		return 2;
 	}
 
-	const packageLoaded = await loadConfig(undefined, packageInfo.packageDirectory);
+	// All packages share the same root config; per-package config layering
+	// (each package's own jest.config.ts) is a follow-up. Use the first
+	// package's directory as the c12 search root for now.
+	// eslint-disable-next-line ts/no-non-null-assertion -- length checked above
+	const primary = packageInfos[0]!;
+	const packageLoaded = await loadConfig(undefined, primary.packageDirectory);
 	const packageConfig = mergeCliWithConfig(cli, packageLoaded);
+
+	applyFirstProjectInWorkspace(packageConfig);
 
 	let backend: BackendInstance;
 	try {
@@ -1304,12 +1330,12 @@ async function runWorkspaceMode(
 		return 2;
 	}
 
-	let runtimeResult;
+	let runtimeResults;
 	try {
-		runtimeResult = await runWorkspace({
+		runtimeResults = await runWorkspace({
 			backend,
 			config: packageConfig,
-			packageInfo,
+			packageInfos,
 			version: VERSION,
 			workspaceRoot,
 		});
@@ -1317,11 +1343,20 @@ async function runWorkspaceMode(
 		await backend.close?.();
 	}
 
-	if (runtimeResult === undefined) {
+	if (runtimeResults === undefined) {
 		return 2;
 	}
 
-	return outputResults(packageConfig, undefined, runtimeResult, 0);
+	if (runtimeResults.length === 1) {
+		// eslint-disable-next-line ts/no-non-null-assertion -- length checked
+		return outputResults(packageConfig, undefined, runtimeResults[0]!.result, 0);
+	}
+
+	const projectResults: Array<ProjectResult> = runtimeResults.map((entry) => {
+		return { displayName: entry.displayName, result: entry.result };
+	});
+
+	return outputMultiProjectResults(packageConfig, projectResults, undefined, 0);
 }
 
 async function runInner(args: Array<string>): Promise<number> {
@@ -1350,7 +1385,7 @@ async function runInner(args: Array<string>): Promise<number> {
 	const rawProjects = (config as unknown as { projects?: Array<ProjectEntry> }).projects;
 
 	if (cli.workspace === true || cli.packages !== undefined) {
-		return runWorkspaceMode(cli, config, rawProjects);
+		return runWorkspaceMode(cli, config);
 	}
 
 	if (rawProjects !== undefined && rawProjects.length > 0) {

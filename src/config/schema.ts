@@ -83,11 +83,15 @@ export interface GlobalTestConfig extends SharedTestConfig {
 		statements?: number;
 	};
 	debug?: boolean;
+	displayName?: DisplayName | string;
 	env?: string;
+	exclude?: Array<string>;
 	expand?: boolean;
 	globals?: string;
+	include?: Array<string>;
 	maxWorkers?: number | string;
 	noStackTrace?: boolean;
+	outDir?: string;
 	passWithNoTests?: boolean;
 	preset?: string;
 	projects?: Array<ProjectEntry>;
@@ -350,11 +354,15 @@ const globalTestConfigSchema = type({
 	"coverageReporters?": "string[]",
 	"coverageThreshold?": coverageThresholdSchema,
 	"debug?": "boolean",
+	"displayName?": type("string").or(displayNameSchema),
 	"env?": "string",
+	"exclude?": "string[]",
 	"expand?": "boolean",
 	"globals?": "string",
+	"include?": "string[]",
 	"maxWorkers?": type("number").or(type("string")),
 	"noStackTrace?": "boolean",
+	"outDir?": "string",
 	"passWithNoTests?": "boolean",
 	"preset?": "string",
 	"projects?": projectEntrySchema.array(),

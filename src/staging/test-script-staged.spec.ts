@@ -60,6 +60,17 @@ describe(generateMaterializerScript, () => {
 		expect(script).toContain("[==[");
 	});
 
+	it("should call materializer reset between packages", () => {
+		expect.assertions(1);
+
+		const script = generateMaterializerScript([
+			{ name: "@halcyon/foo", config: DEFAULT_CONFIG, testFiles: [] },
+			{ name: "@halcyon/bar", config: DEFAULT_CONFIG, testFiles: [] },
+		]);
+
+		expect(script).toMatch(/Materializer\.reset\(/);
+	});
+
 	it("should throw when serialized payload contains the long-string terminator", () => {
 		expect.assertions(1);
 

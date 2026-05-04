@@ -82,6 +82,42 @@ describe("workspace e2e — foundation pipeline", () => {
 		},
 	);
 
+	it.skipIf(!rojoOnPath())(
+		"should produce a buildable rbxl when synthesizing two packages together",
+		() => {
+			expect.assertions(2);
+
+			const sandbox = createFixtureSandbox(FIXTURE);
+			const fooDirectory = path.join(sandbox, "packages/foo");
+			const barDirectory = path.join(sandbox, "packages/bar");
+
+			const projectJson = synthesize({
+				packages: [
+					{
+						name: "@e2e/foo",
+						packageDirectory: fooDirectory,
+						rojoProjectPath: path.join(fooDirectory, "test.project.json"),
+					},
+					{
+						name: "@e2e/bar",
+						packageDirectory: barDirectory,
+						rojoProjectPath: path.join(barDirectory, "test.project.json"),
+					},
+				],
+			});
+
+			expect(projectJson).toContain("@e2e/foo");
+			expect(projectJson).toContain("@e2e/bar");
+
+			const cacheDirectory = path.join(sandbox, ".jest-roblox/workspace");
+			fs.mkdirSync(cacheDirectory, { recursive: true });
+			const synthProjectPath = path.join(cacheDirectory, "synthesized.project.json");
+			const synthRbxlPath = path.join(cacheDirectory, "synthesized.rbxl");
+			fs.writeFileSync(synthProjectPath, projectJson);
+			buildWithRojo(synthProjectPath, synthRbxlPath);
+		},
+	);
+
 	it("should report live OCALE credential availability", () => {
 		expect.assertions(1);
 

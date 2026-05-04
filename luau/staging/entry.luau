@@ -29,7 +29,11 @@ local payload: Payload = HttpService:JSONDecode([==[__CONFIG_JSON__]==]) :: Payl
 local entries = {}
 local gameOutputs = {}
 
-for _, pkgEntry in payload.packages do
+for index, pkgEntry in payload.packages do
+	if index > 1 then
+		Materializer.reset()
+	end
+
 	local t0 = os.clock()
 	local ok, jestOrError = pcall(runPackage, pkgEntry)
 	local elapsedMs = math.floor((os.clock() - t0) * 1000)
