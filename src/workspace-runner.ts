@@ -23,9 +23,12 @@ import {
 	type ExecuteResult,
 	processProjectResult,
 } from "./executor.ts";
+import type { MemoryStoreQueueClient } from "./memory-store/queue-client.ts";
+import { prepareWorkStealingQueue } from "./memory-store/work-stealing.ts";
 import { type PackageDescriptor, type StubMount, synthesize } from "./staging/synthesizer.ts";
 import {
 	generateMaterializerScript,
+	generateWorkStealingScript,
 	type MaterializerInput,
 } from "./staging/test-script-staged.ts";
 import type { RojoTreeNode } from "./types/rojo.ts";
@@ -45,6 +48,15 @@ export interface RunWorkspaceOptions {
 	cli: CliOptions;
 	config: ResolvedConfig;
 	packageInfos: Array<PackageInfo>;
+	/**
+	 * MemoryStore queue client used to coordinate work-stealing across
+	 * parallel OCALE tasks. When provided alongside `cli.parallel > 1`, the
+	 * workspace runner pushes every (pkg, project) onto a per-run UUID queue
+	 * and the backend fires N tasks all running the same materializer script.
+	 * Without it (or with parallel=1) the runner uses the existing
+	 * single-task embedded-entries path.
+	 */
+	queueClient?: MemoryStoreQueueClient;
 	version: string;
 	workspaceRoot: string;
 }
@@ -141,6 +153,7 @@ export async function runWorkspace(
 			config: { ...entry.projectConfig, placeFile: synthRbxlPath },
 			displayColor: entry.project.displayColor,
 			displayName: entry.project.displayName,
+			pkg: entry.pkg,
 			testFiles: entry.testFiles,
 		});
 	});
@@ -154,20 +167,62 @@ export async function runWorkspace(
 		};
 	});
 
-	const script = generateMaterializerScript(inputs);
-
-	const { results, timing: backendTiming } = await executeBackend(
+	const { queueClient } = options;
+	const { results, timing: backendTiming } = await dispatchWorkspace({
 		backend,
+		cli,
+		inputs,
 		jobs,
-		undefined,
-		script,
-	);
+		queueClient,
+	});
 
 	return mapBackendResults(results, pending, {
 		backendTiming,
 		startTime,
 		version,
 	});
+}
+
+const PER_PACKAGE_TIMEOUT_SECONDS = 60;
+
+async function dispatchWorkspace(input: {
+	backend: Backend;
+	cli: CliOptions;
+	inputs: Array<MaterializerInput>;
+	jobs: Array<ReturnType<typeof buildProjectJob>>;
+	queueClient: MemoryStoreQueueClient | undefined;
+}): Promise<{
+	results: Array<ProjectBackendResult>;
+	timing: BackendTiming;
+}> {
+	const { backend, cli, inputs, jobs, queueClient } = input;
+
+	const parallel = typeof cli.parallel === "number" ? cli.parallel : undefined;
+	const useWorkStealing = queueClient !== undefined && parallel !== undefined && parallel > 1;
+
+	if (useWorkStealing) {
+		const perPackageTimeoutSeconds = PER_PACKAGE_TIMEOUT_SECONDS;
+		const prepared = await prepareWorkStealingQueue({
+			packages: inputs.map((entry) => ({ pkg: entry.pkg, project: entry.project })),
+			perPackageTimeoutSeconds,
+			queueClient,
+		});
+		const script = generateWorkStealingScript(
+			inputs,
+			prepared.queueId,
+			prepared.invisibilityWindowSeconds,
+		);
+
+		return backend.runTests({
+			jobs,
+			parallel,
+			scriptOverride: script,
+			workStealing: true,
+		});
+	}
+
+	const script = generateMaterializerScript(inputs);
+	return executeBackend(backend, jobs, undefined, script);
 }
 
 async function loadPackages(input: {

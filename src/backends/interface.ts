@@ -7,6 +7,14 @@ export interface ProjectJob {
 	config: ResolvedConfig;
 	displayColor?: string;
 	displayName: string;
+	/**
+	 * Workspace-mode only: the npm package name (e.g. `@halcyon/foo`) that
+	 * owns this project. Combined with `displayName` it forms the lookup key
+	 * used by work-stealing to match Luau-emitted entries to jobs. Outside
+	 * workspace mode this is undefined and the lookup falls back to
+	 * `displayName` alone.
+	 */
+	pkg?: string;
 	testFiles: Array<string>;
 }
 
@@ -26,6 +34,15 @@ export interface BackendOptions {
 	 * backend stays unaware of the difference.
 	 */
 	scriptOverride?: string;
+	/**
+	 * Open-Cloud-only: when true, fire `parallel` tasks all running the SAME
+	 * `scriptOverride` (no static job-bucket split). Each task pulls work from
+	 * a MemoryStore queue (set up upstream) and returns whatever subset of
+	 * packages it processed. Backend aggregates entries across all task
+	 * envelopes and maps each to the matching `ProjectJob.displayName` by the
+	 * entry's `pkg` field. `scriptOverride` is required when this is true.
+	 */
+	workStealing?: boolean;
 }
 
 export interface BackendTiming {

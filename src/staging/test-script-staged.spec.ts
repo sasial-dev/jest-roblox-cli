@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_CONFIG } from "../config/schema.ts";
-import { generateMaterializerScript } from "./test-script-staged.ts";
+import { generateMaterializerScript, generateWorkStealingScript } from "./test-script-staged.ts";
 
 describe(generateMaterializerScript, () => {
 	it("should embed entry pkg and project in the substituted template", () => {
@@ -150,6 +150,58 @@ describe(generateMaterializerScript, () => {
 					testFiles: [],
 				},
 			]);
+		}).toThrow(/]==]/);
+	});
+});
+
+describe(generateWorkStealingScript, () => {
+	it("should embed queueId and invisibilityWindowSeconds alongside the entries", () => {
+		expect.assertions(3);
+
+		const script = generateWorkStealingScript(
+			[
+				{
+					config: DEFAULT_CONFIG,
+					pkg: "@halcyon/foo",
+					project: "core",
+					testFiles: ["src/foo.spec.ts"],
+				},
+			],
+			"queue-uuid-1",
+			90,
+		);
+
+		expect(script).toContain('"queueId":"queue-uuid-1"');
+		expect(script).toContain('"invisibilityWindowSeconds":90');
+		expect(script).toContain('"pkg":"@halcyon/foo"');
+	});
+
+	it("should preserve entries in input order", () => {
+		expect.assertions(1);
+
+		const script = generateWorkStealingScript(
+			[
+				{ config: DEFAULT_CONFIG, pkg: "@halcyon/foo", project: "alpha", testFiles: [] },
+				{ config: DEFAULT_CONFIG, pkg: "@halcyon/bar", project: "beta", testFiles: [] },
+			],
+			"queue-uuid-2",
+			60,
+		);
+
+		expect(script.indexOf('"pkg":"@halcyon/foo"')).toBeLessThan(
+			script.indexOf('"pkg":"@halcyon/bar"'),
+		);
+	});
+
+	it("should reject queueIds containing the long-string terminator", () => {
+		expect.assertions(1);
+
+		expect(() => {
+			return generateWorkStealingScript(
+				[{ config: DEFAULT_CONFIG, pkg: "@halcyon/foo", project: "core", testFiles: [] }],
+				"queue]==]bad",
+				60,
+			);
 		}).toThrow(/]==]/);
 	});
 });

@@ -15,7 +15,18 @@ export interface FakeOpenCloudTask {
 	errorMessage?: string;
 	gameOutput?: string;
 	jestOutput: string;
+	/**
+	 * Workspace-mode `pkg` field on the auto-wrapped entry. Required for
+	 * work-stealing aggregation to match entries back to jobs.
+	 */
+	pkg?: string;
 	pollsBeforeComplete?: number;
+	/**
+	 * Workspace-mode `project` field on the auto-wrapped entry. Combined
+	 * with `pkg` it forms the lookup key the backend uses to disambiguate
+	 * sibling projects within the same package.
+	 */
+	project?: string;
 	/**
 	 * Terminal state to return after `pollsBeforeComplete` is exhausted.
 	 * Defaults to `"COMPLETE"`. Set to `"FAILED"` to drive the failure
@@ -30,9 +41,16 @@ interface FakeOpenCloudCall {
 	url: string;
 }
 
+interface QueuedItem {
+	id: string;
+	value: unknown;
+}
+
 interface FakeOpenCloudServer {
 	baseUrl: string;
 	calls: Array<FakeOpenCloudCall>;
+	queueAdds: Array<{ queue: string; value: unknown }>;
+	queueDiscards: Array<{ id: string; queue: string }>;
 	requests: Array<typeof createTaskRequestSchema.infer>;
 	uploadCount: number;
 }
@@ -42,11 +60,15 @@ export async function startFakeOpenCloudServer(
 ): Promise<FakeOpenCloudServer> {
 	const calls: FakeOpenCloudServer["calls"] = [];
 	const requests: FakeOpenCloudServer["requests"] = [];
+	const queueAdds: FakeOpenCloudServer["queueAdds"] = [];
+	const queueDiscards: FakeOpenCloudServer["queueDiscards"] = [];
+	const queues = new Map<string, Array<QueuedItem>>();
 	const taskQueue = [...tasks];
 	const taskResults = new Map<string, FakeOpenCloudTask>();
 	const pollCounts = new Map<string, number>();
 	let uploadCount = 0;
 	let taskIndex = 0;
+	let itemSeq = 0;
 
 	const server = createServer((request, response) => {
 		const apiKeyHeader = request.headers["x-api-key"];
@@ -58,11 +80,18 @@ export async function startFakeOpenCloudServer(
 
 		void handleRequest({
 			pollCounts,
+			queueAdds,
+			queueDiscards,
+			queues,
 			request,
 			requests,
 			response,
 			taskQueue,
 			taskResults,
+			updateItemSeq: () => {
+				itemSeq += 1;
+				return itemSeq;
+			},
 			updateTaskIndex: () => {
 				taskIndex += 1;
 				return taskIndex;
@@ -103,6 +132,8 @@ export async function startFakeOpenCloudServer(
 	return {
 		baseUrl: `http://127.0.0.1:${address.port}`,
 		calls,
+		queueAdds,
+		queueDiscards,
 		requests,
 		get uploadCount() {
 			return uploadCount;
@@ -165,6 +196,8 @@ function handlePoll(options: {
 								elapsedMs: queuedTask.elapsedMs ?? 25,
 								gameOutput: queuedTask.gameOutput,
 								jestOutput: queuedTask.jestOutput,
+								pkg: queuedTask.pkg,
+								project: queuedTask.project,
 							},
 						],
 					}),
@@ -175,22 +208,142 @@ function handlePoll(options: {
 	);
 }
 
+function parseQueuePath(pathname: string): undefined | { queue: string; suffix: string } {
+	// /cloud/v2/universes/{universe}/memory-store/queues/{queue}{suffix}
+	const match = /\/memory-store\/queues\/([^/]+)(\/items(?::read|:discard)?)?$/.exec(pathname);
+	if (match === null) {
+		return undefined;
+	}
+
+	return { queue: match[1] ?? "", suffix: match[2] ?? "" };
+}
+
+function handleQueueAdd(options: {
+	parsed: unknown;
+	queue: string;
+	queueAdds: FakeOpenCloudServer["queueAdds"];
+	queues: Map<string, Array<QueuedItem>>;
+	response: ServerResponse;
+	updateItemSeq: () => number;
+}): void {
+	const { parsed, queue, queueAdds, queues, response, updateItemSeq } = options;
+	const itemValue = (parsed as { data?: unknown }).data;
+	queueAdds.push({ queue, value: itemValue });
+	const items = queues.get(queue) ?? [];
+	items.push({ id: `item-${updateItemSeq().toString()}`, value: itemValue });
+	queues.set(queue, items);
+	response.writeHead(200, { "content-type": JSON_CONTENT_TYPE });
+	response.end(JSON.stringify({ priority: 0 }));
+}
+
+function handleQueueRead(options: {
+	queue: string;
+	queues: Map<string, Array<QueuedItem>>;
+	response: ServerResponse;
+}): void {
+	const { queue, queues, response } = options;
+	const queued = queues.get(queue) ?? [];
+	const next = queued.shift();
+	queues.set(queue, queued);
+	response.writeHead(200, { "content-type": JSON_CONTENT_TYPE });
+	if (next === undefined) {
+		response.end(JSON.stringify({ id: "", items: [] }));
+		return;
+	}
+
+	response.end(JSON.stringify({ id: next.id, items: [next.value] }));
+}
+
+function handleQueueDiscard(options: {
+	parsed: unknown;
+	queue: string;
+	queueDiscards: FakeOpenCloudServer["queueDiscards"];
+	response: ServerResponse;
+}): void {
+	const { parsed, queue, queueDiscards, response } = options;
+	const id = (parsed as { readId?: string }).readId ?? "";
+	queueDiscards.push({ id, queue });
+	response.writeHead(200, { "content-type": JSON_CONTENT_TYPE });
+	response.end("{}");
+}
+
+async function handleQueueRequest(options: {
+	body: string;
+	queueAdds: FakeOpenCloudServer["queueAdds"];
+	queueDiscards: FakeOpenCloudServer["queueDiscards"];
+	queuePath: { queue: string; suffix: string };
+	queues: Map<string, Array<QueuedItem>>;
+	response: ServerResponse;
+	updateItemSeq: () => number;
+}): Promise<void> {
+	const { body, queueAdds, queueDiscards, queuePath, queues, response, updateItemSeq } = options;
+	const { queue, suffix } = queuePath;
+	const parsed: unknown = body === "" ? {} : JSON.parse(body);
+
+	switch (suffix) {
+		case "/items": {
+			handleQueueAdd({ parsed, queue, queueAdds, queues, response, updateItemSeq });
+			return;
+		}
+		case "/items:discard": {
+			handleQueueDiscard({ parsed, queue, queueDiscards, response });
+			return;
+		}
+		case "/items:read": {
+			handleQueueRead({ queue, queues, response });
+			return;
+		}
+	}
+
+	response.writeHead(404, { "content-type": JSON_CONTENT_TYPE });
+	response.end(JSON.stringify({ error: { message: `Unknown queue suffix: ${suffix}` } }));
+}
+
 async function handleRequest(options: {
 	pollCounts: Map<string, number>;
+	queueAdds: FakeOpenCloudServer["queueAdds"];
+	queueDiscards: FakeOpenCloudServer["queueDiscards"];
+	queues: Map<string, Array<QueuedItem>>;
 	request: IncomingMessage;
 	requests: FakeOpenCloudServer["requests"];
 	response: ServerResponse;
 	taskQueue: Array<FakeOpenCloudTask>;
 	taskResults: Map<string, FakeOpenCloudTask>;
+	updateItemSeq: () => number;
 	updateTaskIndex: () => number;
 	updateUploadCount: () => number;
 }): Promise<void> {
-	const { pollCounts, request, requests, response, taskQueue, taskResults } = options;
+	const {
+		pollCounts,
+		queueAdds,
+		queueDiscards,
+		queues,
+		request,
+		requests,
+		response,
+		taskQueue,
+		taskResults,
+	} = options;
 	const url = new URL(request.url ?? "/", "http://127.0.0.1");
 
 	if (request.method === "POST" && url.pathname.endsWith("/versions")) {
 		response.writeHead(200, { "content-type": JSON_CONTENT_TYPE });
 		response.end(JSON.stringify({ versionNumber: options.updateUploadCount() }));
+		return;
+	}
+
+	const queuePath = parseQueuePath(url.pathname);
+	const { updateItemSeq } = options;
+	if (request.method === "POST" && queuePath !== undefined) {
+		await handleQueueRequest({
+			body: await readBody(request),
+			queueAdds,
+			queueDiscards,
+			queuePath,
+			queues,
+			response,
+			updateItemSeq,
+		});
 		return;
 	}
 

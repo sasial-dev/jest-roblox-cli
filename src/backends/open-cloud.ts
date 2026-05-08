@@ -16,6 +16,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import process from "node:process";
 
+import type { ResolvedConfig } from "../config/schema.ts";
 import { LuauScriptError, parseJestOutput } from "../reporter/parser.ts";
 import { generateTestScript, type JestArgvInput } from "../test-script.ts";
 import type {
@@ -59,6 +60,7 @@ const entrySchema = type({
 	"gameOutput?": "string",
 	"jestOutput": "string",
 	"pkg?": "string",
+	"project?": "string",
 });
 
 const envelopeSchema = type({ entries: entrySchema.array() });
@@ -96,9 +98,13 @@ export class OpenCloudBackend implements Backend {
 	}
 
 	public async runTests(options: BackendOptions): Promise<BackendResult> {
-		const { jobs, parallel, scriptOverride } = options;
+		const { jobs, parallel, scriptOverride, workStealing } = options;
 		if (jobs.length === 0) {
 			throw new Error("OpenCloudBackend requires at least one job");
+		}
+
+		if (workStealing === true && scriptOverride === undefined) {
+			throw new Error("OpenCloudBackend work-stealing mode requires scriptOverride");
 		}
 
 		// Cache/timeout/pollInterval are picked from the first job. All jobs in
@@ -130,24 +136,13 @@ export class OpenCloudBackend implements Backend {
 
 		const uploadMs = Date.now() - uploadStart;
 
-		const buckets = bucketJobs(jobs, parallel);
-
 		const executionStart = Date.now();
-		const bucketResults = await Promise.all(
-			buckets.map(async (bucket) => this.runBucket(bucket, scriptOverride)),
-		);
+		const flattened =
+			workStealing === true
+				? // eslint-disable-next-line ts/no-non-null-assertion -- length checked above
+					await this.runWorkStealing(jobs, parallel, scriptOverride!, primary.config)
+				: await this.runStaticBuckets(jobs, parallel, scriptOverride);
 		const executionMs = Date.now() - executionStart;
-
-		// Flatten bucket results in original job order via the indices recorded
-		// at bucketing time. indices and results always share the same length
-		// because runBucket asserts that invariant before returning.
-		const flattened: Array<ProjectBackendResult> = Array.from({ length: jobs.length });
-		for (const { indices, results } of bucketResults) {
-			for (const [positionInBucket, originalIndex] of indices.entries()) {
-				// eslint-disable-next-line ts/no-non-null-assertion -- length invariant
-				flattened[originalIndex] = results[positionInBucket]!;
-			}
-		}
 
 		return {
 			results: flattened,
@@ -278,6 +273,98 @@ export class OpenCloudBackend implements Backend {
 		return { indices, results };
 	}
 
+	private async runStaticBuckets(
+		jobs: Array<ProjectJob>,
+		parallel: BackendOptions["parallel"],
+		scriptOverride?: string,
+	): Promise<Array<ProjectBackendResult>> {
+		const buckets = bucketJobs(jobs, parallel);
+		const bucketResults = await Promise.all(
+			buckets.map(async (bucket) => this.runBucket(bucket, scriptOverride)),
+		);
+
+		// Flatten bucket results in original job order via the indices recorded
+		// at bucketing time. indices and results always share the same length
+		// because runBucket asserts that invariant before returning.
+		const flattened: Array<ProjectBackendResult> = Array.from({ length: jobs.length });
+		for (const { indices, results } of bucketResults) {
+			for (const [positionInBucket, originalIndex] of indices.entries()) {
+				// eslint-disable-next-line ts/no-non-null-assertion -- length invariant
+				flattened[originalIndex] = results[positionInBucket]!;
+			}
+		}
+
+		return flattened;
+	}
+
+	private async runStealingTask(
+		script: string,
+		primaryConfig: ResolvedConfig,
+	): Promise<{ entries: Array<typeof entrySchema.infer>; gameOutput: string | undefined }> {
+		const taskPath = await this.createExecutionTask([], primaryConfig.timeout, script);
+		const { gameOutput, jestOutput } = await this.pollForCompletion(
+			taskPath,
+			primaryConfig.timeout,
+			primaryConfig.pollInterval,
+		);
+		return { entries: parseEnvelope(jestOutput), gameOutput };
+	}
+
+	private async runWorkStealing(
+		jobs: Array<ProjectJob>,
+		parallel: BackendOptions["parallel"],
+		scriptOverride: string,
+		primaryConfig: ResolvedConfig,
+	): Promise<Array<ProjectBackendResult>> {
+		const taskCount = resolveBucketCount(parallel, jobs.length);
+		const taskEnvelopes = await Promise.all(
+			Array.from({ length: taskCount }, async () =>
+				this.runStealingTask(scriptOverride, primaryConfig),
+			),
+		);
+
+		// Aggregate entries from all task envelopes. Map by pkg::project so
+		// multi-project packages don't collide on a shared `pkg`. The first
+		// observed entry per key wins; subsequent duplicates (from fault-
+		// recovery re-runs after invisibility timeout) are dropped.
+		const entryByKey = new Map<
+			string,
+			{ entry: typeof entrySchema.infer; gameOutput: string | undefined }
+		>();
+		for (const { entries, gameOutput } of taskEnvelopes) {
+			for (const entry of entries) {
+				if (entry.pkg !== undefined) {
+					const key = entryLookupKey(entry.pkg, entry.project);
+					if (!entryByKey.has(key)) {
+						entryByKey.set(key, { entry, gameOutput });
+					}
+				}
+			}
+		}
+
+		const missing: Array<string> = [];
+		const results: Array<ProjectBackendResult> = jobs.map((job) => {
+			const found = entryByKey.get(
+				entryLookupKey(job.pkg ?? job.displayName, job.displayName),
+			);
+			if (found === undefined) {
+				missing.push(job.displayName);
+				// Placeholder; runTests throws below before this is observed.
+				return undefined as unknown as ProjectBackendResult;
+			}
+
+			return buildProjectResult(found.entry, job, found.gameOutput);
+		});
+
+		if (missing.length > 0) {
+			throw new Error(
+				`Open Cloud work-stealing returned no entries for ${missing.length.toString()} package(s): ${missing.join(", ")}`,
+			);
+		}
+
+		return results;
+	}
+
 	private async uploadOrReuseCached({
 		cache,
 		cacheEnabled,
@@ -371,6 +458,10 @@ function bucketJobs(
 	}
 
 	return buckets;
+}
+
+function entryLookupKey(package_: string, project: string | undefined): string {
+	return project === undefined || project === package_ ? package_ : `${package_}::${project}`;
 }
 
 function parseEnvelope(jestOutput: string): Array<typeof entrySchema.infer> {

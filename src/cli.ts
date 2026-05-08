@@ -58,6 +58,7 @@ import {
 } from "./formatters/github-actions.ts";
 import { writeJsonFile } from "./formatters/json.ts";
 import { DEFAULT_MAX_FAILURES, findFormatterOptions } from "./formatters/utils.ts";
+import { MemoryStoreQueueClient } from "./memory-store/queue-client.ts";
 import { LuauScriptError } from "./reporter/parser.ts";
 import { combineSourceMappers, type SourceMapper } from "./source-mapper/index.ts";
 import { runTypecheck } from "./typecheck/runner.ts";
@@ -1225,11 +1226,6 @@ function validateWorkspaceFlags(cli: CliOptions, config: ResolvedConfig): number
 		return 2;
 	}
 
-	if (cli.parallel !== undefined) {
-		process.stderr.write("Error: --parallel not yet supported with --workspace.\n");
-		return 2;
-	}
-
 	if (cli.gameOutput !== undefined) {
 		process.stderr.write("Error: --gameOutput not yet supported with --workspace.\n");
 		return 2;
@@ -1289,8 +1285,14 @@ async function runWorkspaceMode(cli: CliOptions, config: ResolvedConfig): Promis
 	}
 
 	let backend: BackendInstance;
+	let queueClient: MemoryStoreQueueClient;
 	try {
-		backend = createOpenCloudBackend(buildWorkspaceCredentials(cli, config));
+		const credentials = buildWorkspaceCredentials(cli, config);
+		backend = createOpenCloudBackend(credentials);
+		queueClient = new MemoryStoreQueueClient({
+			apiKey: credentials.apiKey,
+			universeId: credentials.universeId,
+		});
 	} catch (err) {
 		process.stderr.write(`Error: ${String(err)}\n`);
 		return 2;
@@ -1303,6 +1305,7 @@ async function runWorkspaceMode(cli: CliOptions, config: ResolvedConfig): Promis
 			cli,
 			config,
 			packageInfos,
+			queueClient,
 			version: VERSION,
 			workspaceRoot,
 		});

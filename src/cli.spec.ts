@@ -1130,18 +1130,17 @@ describe("--workspace mode", () => {
 		expect(code).toBe(2);
 	});
 
-	it("should error and exit 2 when --parallel is set", async () => {
+	it("should pass --parallel through to runWorkspace and propagate exit code", async () => {
 		expect.assertions(2);
 
-		const spies = setupOutputSpies();
+		setupOutputSpies();
 		setupDefaults();
+		mocks.runWorkspace.mockResolvedValue(makeWorkspaceResult());
 
 		const code = await run(["--workspace", "--packages=@halcyon/foo", "--parallel=2"]);
 
-		expect(code).toBe(2);
-		expect(spies.stderr).toHaveBeenCalledWith(
-			expect.stringContaining("--parallel not yet supported with --workspace"),
-		);
+		expect(code).toBe(0);
+		expect(mocks.runWorkspace.mock.calls[0]?.[0].cli.parallel).toBe(2);
 	});
 
 	it("should error and exit 2 when workspace discovery throws", async () => {

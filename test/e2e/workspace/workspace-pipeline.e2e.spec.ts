@@ -1,7 +1,9 @@
+import * as cp from "node:child_process";
 import * as path from "node:path";
 import process from "node:process";
 import { describe, expect, it } from "vitest";
 
+import { startFakeOpenCloudServer } from "../cli/fake-open-cloud.ts";
 import { createFixtureSandbox, runCliAsync } from "../cli/helpers.ts";
 
 // Live multi-root workspace pipeline test. Gated on JEST_ROBLOX_LIVE=1 plus
@@ -16,9 +18,19 @@ import { createFixtureSandbox, runCliAsync } from "../cli/helpers.ts";
 // the assertion verifies the multi-root pipeline merges results across them.
 
 const LIVE_FIXTURE_PATH = path.resolve(__dirname, "../fixtures/live-place");
+const WORKSPACE_FIXTURE_PATH = path.resolve(__dirname, "../fixtures/workspace");
 const RUN_TIMEOUT_MS = 120_000;
 
 const isLive = process.env["JEST_ROBLOX_LIVE"] === "1";
+
+function rojoOnPath(): boolean {
+	try {
+		cp.execFileSync("rojo", ["--version"], { stdio: "pipe" });
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 describe("live workspace pipeline", () => {
 	it.runIf(isLive)(
@@ -45,6 +57,66 @@ describe("live workspace pipeline", () => {
 	);
 });
 
+// Workspace + --parallel exercises the work-stealing path: per-run MemoryStore
+// queue populated with every (pkg, project), N OCALE tasks all running the
+// same materializer script, and entries from all envelopes aggregated by
+// pkg::project. Driven through the fake Open Cloud server so the test stays
+// fast and runs without secrets.
+describe("workspace --parallel work-stealing", () => {
+	it.skipIf(!rojoOnPath())(
+		"should populate the MemoryStore queue and fan results across N parallel tasks",
+		async () => {
+			expect.assertions(5);
+
+			const sandbox = createFixtureSandbox(WORKSPACE_FIXTURE_PATH);
+
+			const server = await startFakeOpenCloudServer([
+				{ jestOutput: passingJestOutput(), pkg: "@e2e/foo", project: "@e2e/foo" },
+				{ jestOutput: passingJestOutput(), pkg: "@e2e/bar", project: "@e2e/bar" },
+			]);
+
+			const result = await runCliAsync(
+				[
+					"--workspace",
+					"--packages=@e2e/foo,@e2e/bar",
+					"--parallel=2",
+					"--backend",
+					"open-cloud",
+					"--no-cache",
+				],
+				{
+					cwd: sandbox,
+					env: {
+						JEST_ROBLOX_OPEN_CLOUD_BASE_URL: server.baseUrl,
+						ROBLOX_OPEN_CLOUD_API_KEY: "test-api-key",
+						ROBLOX_PLACE_ID: "456",
+						ROBLOX_UNIVERSE_ID: "123",
+					},
+					timeoutMs: 60_000,
+				},
+			);
+
+			expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
+			// Both packages get pushed onto the per-run queue.
+			expect(server.queueAdds.map((entry) => entry.value)).toIncludeAllMembers([
+				{ pkg: "@e2e/foo", project: "@e2e/foo" },
+				{ pkg: "@e2e/bar", project: "@e2e/bar" },
+			]);
+			// Two parallel tasks fired against the same shared queueId.
+			expect(server.requests).toHaveLength(2);
+
+			const queueIds = server.requests.map(
+				(request) => /"queueId":"([^"]+)"/.exec(request.script)?.[1] ?? "",
+			);
+
+			expect(new Set(queueIds).size).toBe(1);
+			// Single place upload regardless of --parallel.
+			expect(server.uploadCount).toBe(1);
+		},
+		60_000,
+	);
+});
+
 function liveEnvironment(): Record<string, string | undefined> {
 	return {
 		JEST_ROBLOX_LIVE: process.env["JEST_ROBLOX_LIVE"],
@@ -52,4 +124,17 @@ function liveEnvironment(): Record<string, string | undefined> {
 		ROBLOX_PLACE_ID: process.env["ROBLOX_PLACE_ID"],
 		ROBLOX_UNIVERSE_ID: process.env["ROBLOX_UNIVERSE_ID"],
 	};
+}
+
+function passingJestOutput(overrides: Record<string, unknown> = {}): string {
+	return JSON.stringify({
+		numFailedTests: 0,
+		numPassedTests: 1,
+		numPendingTests: 0,
+		numTotalTests: 1,
+		startTime: 0,
+		success: true,
+		testResults: [],
+		...overrides,
+	});
 }

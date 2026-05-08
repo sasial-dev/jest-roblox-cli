@@ -10,6 +10,7 @@ import type { Backend, BackendOptions, BackendResult } from "./backends/interfac
 import { loadConfig } from "./config/loader.ts";
 import type { CliOptions, ResolvedConfig } from "./config/schema.ts";
 import { DEFAULT_CONFIG } from "./config/schema.ts";
+import { MemoryStoreQueueClient } from "./memory-store/queue-client.ts";
 import { runWorkspace } from "./workspace-runner.ts";
 
 vi.mock(import("node:fs"), async () => {
@@ -867,5 +868,173 @@ describe(runWorkspace, () => {
 
 		expect(results).toBeUndefined();
 		expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/failed to parse rojoProject/));
+	});
+
+	describe("work-stealing", () => {
+		interface QueueAddCall {
+			options: { ttlSeconds: number };
+			queue: string;
+			value: { pkg: string; project: string };
+		}
+
+		function createQueueClientStub(): {
+			addCalls: Array<QueueAddCall>;
+			client: MemoryStoreQueueClient;
+		} {
+			const addCalls: Array<QueueAddCall> = [];
+			const client: MemoryStoreQueueClient = Object.create(MemoryStoreQueueClient.prototype);
+			vi.spyOn(client, "add").mockImplementation(
+				async (queue: string, value: unknown, options: { ttlSeconds: number }) => {
+					addCalls.push({ options, queue, value: value as QueueAddCall["value"] });
+				},
+			);
+			return { addCalls, client };
+		}
+
+		it("should push every (pkg, project) onto the queue and pass workStealing to backend when parallel>1", async () => {
+			expect.assertions(3);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				...seedPackage(BAR_DIR, {
+					name: "@halcyon/bar",
+					specFiles: { [path.join(BAR_DIR, "src/bar.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+
+			setLoadedConfigPerPackage({
+				[BAR_DIR]: { ...DEFAULT_CONFIG, rootDir: BAR_DIR },
+				[FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR },
+			});
+
+			const { addCalls, client } = createQueueClientStub();
+			const { backend, captured } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+				{ jestOutput: passingResult(), pkg: "@halcyon/bar" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli({ parallel: 2 }),
+				config: makeConfig(),
+				packageInfos: [FOO_INFO, BAR_INFO],
+				queueClient: client,
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(captured.options?.workStealing).toBeTrue();
+			expect(captured.options?.parallel).toBe(2);
+			expect(addCalls.map((call) => call.value)).toIncludeAllMembers([
+				{ pkg: "@halcyon/foo", project: "@halcyon/foo" },
+				{ pkg: "@halcyon/bar", project: "@halcyon/bar" },
+			]);
+		});
+
+		it("should embed the same queueId in the script as the queue pushes", async () => {
+			expect.assertions(1);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+			setLoadedConfigPerPackage({
+				[FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR },
+			});
+
+			const { addCalls, client } = createQueueClientStub();
+			const { backend, captured } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli({ parallel: 2 }),
+				config: makeConfig(),
+				packageInfos: [FOO_INFO],
+				queueClient: client,
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			const queueId = addCalls[0]?.queue ?? "";
+
+			expect(captured.options?.scriptOverride).toContain(`"queueId":"${queueId}"`);
+		});
+
+		it("should keep the existing single-task path when parallel is unset", async () => {
+			expect.assertions(2);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+			setLoadedConfigPerPackage({
+				[FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR },
+			});
+
+			const { addCalls, client } = createQueueClientStub();
+			const { backend, captured } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				config: makeConfig(),
+				packageInfos: [FOO_INFO],
+				queueClient: client,
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(captured.options?.workStealing).toBeUndefined();
+			expect(addCalls).toHaveLength(0);
+		});
+
+		it("should keep the existing path when queueClient is not provided even with parallel>1", async () => {
+			expect.assertions(2);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+			setLoadedConfigPerPackage({
+				[FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR },
+			});
+
+			const { backend, captured } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli({ parallel: 4 }),
+				config: makeConfig(),
+				packageInfos: [FOO_INFO],
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(captured.options?.workStealing).toBeUndefined();
+			expect(captured.options?.scriptOverride).not.toContain('"queueId"');
+		});
 	});
 });

@@ -92,9 +92,19 @@ function successJest(overrides: Record<string, unknown> = {}): string {
 }
 
 function envelope(
-	entries: Array<{ elapsedMs?: number; gameOutput?: string; jestOutput: string; pkg?: string }>,
+	entries: Array<{
+		elapsedMs?: number;
+		gameOutput?: string;
+		jestOutput: string;
+		pkg?: string;
+		project?: string;
+	}>,
 ): string {
 	return JSON.stringify({ entries });
+}
+
+function packageEntry(packageName: string): { jestOutput: string; pkg: string } {
+	return { jestOutput: successJest(), pkg: packageName };
 }
 
 function completeResponse(jestOutput: string, gameOutput = "[]"): HttpResponse {
@@ -105,7 +115,11 @@ function completeResponse(jestOutput: string, gameOutput = "[]"): HttpResponse {
 	};
 }
 
-function job(displayName: string, overrides: Partial<ResolvedConfig> = {}): ProjectJob {
+function job(
+	displayName: string,
+	overrides: Partial<ResolvedConfig> = {},
+	package_?: string,
+): ProjectJob {
 	return {
 		config: {
 			...DEFAULT_CONFIG,
@@ -115,6 +129,7 @@ function job(displayName: string, overrides: Partial<ResolvedConfig> = {}): Proj
 		},
 		displayColor: `${displayName}-color`,
 		displayName,
+		pkg: package_,
 		testFiles: [`${displayName}/test.spec.ts`],
 	};
 }
@@ -1381,6 +1396,282 @@ describe(OpenCloudBackend, () => {
 		expect(results[0]?.result.success).toBeTrue();
 		expect(results[1]?.result.success).toBeFalse();
 		expect(results[2]?.result.success).toBeTrue();
+	});
+
+	describe("work-stealing mode", () => {
+		it("should require scriptOverride when workStealing is true", async () => {
+			expect.assertions(1);
+
+			const backend = new OpenCloudBackend(credentials, {
+				http: createDispatchMock({
+					onCreateTask: () => {
+						return {
+							complete: completeResponse(envelope([{ jestOutput: successJest() }])),
+							taskPath: "task-no-override",
+						};
+					},
+				}),
+				readFile: () => buffer.Buffer.from("mock"),
+				sleep: noSleep,
+			});
+
+			await expect(
+				backend.runTests({ jobs: [job("alpha")], workStealing: true }),
+			).rejects.toThrow(/work-stealing mode requires scriptOverride/);
+		});
+
+		it("should fire N tasks all carrying the same scriptOverride and upload once", async () => {
+			expect.assertions(3);
+
+			const stealingScript = "-- work-stealing materializer\nreturn nil";
+			const capturedScripts: Array<string> = [];
+			const taskPkgs = [
+				["alpha", "delta"],
+				["beta", "epsilon"],
+				["gamma", "zeta"],
+			] as const;
+			const http = createDispatchMock({
+				onCreateTask: (body) => {
+					capturedScripts.push((body as { script: string }).script);
+					const taskIndex = capturedScripts.length - 1;
+					const handledPkgs = taskPkgs[taskIndex] ?? [];
+					return {
+						complete: completeResponse(envelope(handledPkgs.map(packageEntry))),
+						taskPath: `task-stealing-${taskIndex.toString()}`,
+					};
+				},
+			});
+
+			const backend = new OpenCloudBackend(credentials, {
+				http,
+				readFile: () => buffer.Buffer.from("mock"),
+				sleep: noSleep,
+			});
+
+			await backend.runTests({
+				jobs: [
+					job("alpha"),
+					job("beta"),
+					job("gamma"),
+					job("delta"),
+					job("epsilon"),
+					job("zeta"),
+				],
+				parallel: 3,
+				scriptOverride: stealingScript,
+				workStealing: true,
+			});
+
+			expect(http.createCallCount).toBe(3);
+			expect(capturedScripts).toStrictEqual([stealingScript, stealingScript, stealingScript]);
+			expect(http.calls.filter((call) => call.url.includes("/versions"))).toHaveLength(1);
+		});
+
+		it("should drop duplicate-pkg entries from fault-recovery and keep the first occurrence", async () => {
+			expect.assertions(3);
+
+			let createdCount = 0;
+			const http = createDispatchMock({
+				onCreateTask: () => {
+					const taskIndex = createdCount;
+					createdCount++;
+					// Both tasks return entry for "alpha" — task 0 succeeded,
+					// task 1 re-ran it after invisibility timeout. First one
+					// wins.
+					const entries =
+						taskIndex === 0
+							? [
+									{
+										jestOutput: successJest({ numPassedTests: 7 }),
+										pkg: "alpha",
+									},
+									{ jestOutput: successJest({ numPassedTests: 3 }), pkg: "beta" },
+								]
+							: [
+									{
+										jestOutput: successJest({
+											numFailedTests: 1,
+											numPassedTests: 0,
+											success: false,
+										}),
+										pkg: "alpha",
+									},
+								];
+					return {
+						complete: completeResponse(envelope(entries)),
+						taskPath: `task-recover-${taskIndex.toString()}`,
+					};
+				},
+			});
+
+			const backend = new OpenCloudBackend(credentials, {
+				http,
+				readFile: () => buffer.Buffer.from("mock"),
+				sleep: noSleep,
+			});
+
+			const { results } = await backend.runTests({
+				jobs: [job("alpha"), job("beta")],
+				parallel: 2,
+				scriptOverride: "stealing-script",
+				workStealing: true,
+			});
+
+			expect(results.map((entry) => entry.displayName)).toStrictEqual(["alpha", "beta"]);
+			// First occurrence (task 0) wins — that's the success case with 7
+			// passing.
+			expect(results[0]?.result.success).toBeTrue();
+			expect(results[0]?.result.numPassedTests).toBe(7);
+		});
+
+		it("should error when a job has no matching entry in any envelope", async () => {
+			expect.assertions(1);
+
+			const http = createDispatchMock({
+				onCreateTask: () => {
+					return {
+						complete: completeResponse(
+							envelope([{ jestOutput: successJest(), pkg: "alpha" }]),
+						),
+						taskPath: "task-missing",
+					};
+				},
+			});
+
+			const backend = new OpenCloudBackend(credentials, {
+				http,
+				readFile: () => buffer.Buffer.from("mock"),
+				sleep: noSleep,
+			});
+
+			await expect(
+				backend.runTests({
+					jobs: [job("alpha"), job("beta")],
+					parallel: 1,
+					scriptOverride: "stealing-script",
+					workStealing: true,
+				}),
+			).rejects.toThrow(/no entries for 1 package\(s\): beta/);
+		});
+
+		it("should aggregate entries from all task envelopes and map them to jobs in input order", async () => {
+			expect.assertions(2);
+
+			const taskPkgs = [
+				["alpha", "gamma"],
+				["beta", "delta"],
+			];
+			let createdCount = 0;
+			const http = createDispatchMock({
+				onCreateTask: () => {
+					const taskIndex = createdCount;
+					createdCount++;
+					const pkgs = taskPkgs[taskIndex] ?? [];
+					return {
+						complete: completeResponse(envelope(pkgs.map(packageEntry))),
+						taskPath: `task-agg-${taskIndex.toString()}`,
+					};
+				},
+			});
+
+			const backend = new OpenCloudBackend(credentials, {
+				http,
+				readFile: () => buffer.Buffer.from("mock"),
+				sleep: noSleep,
+			});
+
+			const { results } = await backend.runTests({
+				jobs: [job("alpha"), job("beta"), job("gamma"), job("delta")],
+				parallel: 2,
+				scriptOverride: "stealing-script",
+				workStealing: true,
+			});
+
+			expect(results.map((entry) => entry.displayName)).toStrictEqual([
+				"alpha",
+				"beta",
+				"gamma",
+				"delta",
+			]);
+			expect(results.every((entry) => entry.result.success)).toBeTrue();
+		});
+
+		it("should silently skip envelope entries that have no pkg field", async () => {
+			expect.assertions(2);
+
+			const http = createDispatchMock({
+				onCreateTask: () => {
+					return {
+						complete: completeResponse(
+							envelope([
+								{ jestOutput: successJest() },
+								{ jestOutput: successJest({ numPassedTests: 4 }), pkg: "alpha" },
+							]),
+						),
+						taskPath: "task-skip-no-pkg",
+					};
+				},
+			});
+
+			const backend = new OpenCloudBackend(credentials, {
+				http,
+				readFile: () => buffer.Buffer.from("mock"),
+				sleep: noSleep,
+			});
+
+			const { results } = await backend.runTests({
+				jobs: [job("alpha")],
+				parallel: 1,
+				scriptOverride: "stealing-script",
+				workStealing: true,
+			});
+
+			expect(results).toHaveLength(1);
+			expect(results[0]?.result.numPassedTests).toBe(4);
+		});
+
+		it("should match entries to jobs by pkg::project so multi-project packages don't collide", async () => {
+			expect.assertions(3);
+
+			const http = createDispatchMock({
+				onCreateTask: () => {
+					return {
+						complete: completeResponse(
+							envelope([
+								{
+									jestOutput: successJest({ numPassedTests: 5 }),
+									pkg: "@halcyon/foo",
+									project: "client",
+								},
+								{
+									jestOutput: successJest({ numPassedTests: 9 }),
+									pkg: "@halcyon/foo",
+									project: "server",
+								},
+							]),
+						),
+						taskPath: "task-multi-project",
+					};
+				},
+			});
+
+			const backend = new OpenCloudBackend(credentials, {
+				http,
+				readFile: () => buffer.Buffer.from("mock"),
+				sleep: noSleep,
+			});
+
+			const { results } = await backend.runTests({
+				jobs: [job("client", {}, "@halcyon/foo"), job("server", {}, "@halcyon/foo")],
+				parallel: 2,
+				scriptOverride: "stealing-script",
+				workStealing: true,
+			});
+
+			expect(results.map((entry) => entry.displayName)).toStrictEqual(["client", "server"]);
+			expect(results[0]?.result.numPassedTests).toBe(5);
+			expect(results[1]?.result.numPassedTests).toBe(9);
+		});
 	});
 });
 

@@ -228,6 +228,7 @@ export function buildProjectJob(parameters: {
 	config: ResolvedConfig;
 	displayColor?: string;
 	displayName?: string;
+	pkg?: string;
 	testFiles: Array<string>;
 }): ProjectJob {
 	const tsconfigMappings = resolveAllTsconfigMappings(parameters.config.rootDir);
@@ -237,6 +238,7 @@ export function buildProjectJob(parameters: {
 		config,
 		displayColor: parameters.displayColor,
 		displayName: parameters.displayName ?? "",
+		pkg: parameters.pkg,
 		testFiles: parameters.testFiles,
 	};
 }

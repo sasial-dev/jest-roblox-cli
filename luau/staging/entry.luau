@@ -1,5 +1,6 @@
 --!strict
 local HttpService = game:GetService("HttpService")
+local MemoryStoreService = game:GetService("MemoryStoreService")
 
 local InstanceResolver = require("../instance-resolver")
 local Materializer = require("./materializer")
@@ -18,6 +19,20 @@ type EntryPayload = {
 
 type Payload = {
 	entries: { EntryPayload },
+	queueId: string?,
+	invisibilityWindowSeconds: number?,
+}
+
+type QueueItem = {
+	pkg: string,
+	project: string,
+}
+
+type ResultEntry = {
+	pkg: string,
+	project: string,
+	elapsedMs: number,
+	jestOutput: string,
 }
 
 local function resolveSetupPaths(paths: { string }?): { Instance }?
@@ -55,34 +70,31 @@ local function runEntry(entry: EntryPayload): string
 	return HttpService:JSONEncode(result.results or result)
 end
 
-local payload: Payload = HttpService:JSONDecode([==[__CONFIG_JSON__]==]) :: Payload
-
-local results = {}
-local gameOutputs = {}
-local prevPkg: string? = nil
-
-for _, entry in payload.entries do
+local function executeEntry(
+	entry: EntryPayload,
+	prevPkg: string?
+): (ResultEntry, string)
 	if entry.pkg ~= prevPkg then
 		if prevPkg ~= nil then
 			Materializer.reset()
 		end
 		Materializer.materialize(entry.pkg)
-		prevPkg = entry.pkg
 	end
 
 	local t0 = os.clock()
 	local ok, jestOrError = pcall(runEntry, entry)
 	local elapsedMs = math.floor((os.clock() - t0) * 1000)
 
+	local result: ResultEntry
 	if ok then
-		table.insert(results, {
+		result = {
 			pkg = entry.pkg,
 			project = entry.project,
 			elapsedMs = elapsedMs,
 			jestOutput = jestOrError,
-		})
+		}
 	else
-		table.insert(results, {
+		result = {
 			pkg = entry.pkg,
 			project = entry.project,
 			elapsedMs = elapsedMs,
@@ -90,9 +102,101 @@ for _, entry in payload.entries do
 				success = false,
 				err = tostring(jestOrError),
 			}),
-		})
+		}
 	end
 
+	return result, entry.pkg
+end
+
+local function runEmbedded(payload: Payload): { ResultEntry }
+	local results: { ResultEntry } = {}
+	local prevPkg: string? = nil
+
+	for _, entry in payload.entries do
+		local result, pkg = executeEntry(entry, prevPkg)
+		table.insert(results, result)
+		prevPkg = pkg
+	end
+
+	if prevPkg ~= nil then
+		Materializer.reset()
+	end
+
+	return results
+end
+
+local function runWorkStealing(payload: Payload): { ResultEntry }
+	local queueId = payload.queueId :: string
+	local invisibility = payload.invisibilityWindowSeconds or 90
+
+	local entryByKey: { [string]: EntryPayload } = {}
+	for _, entry in payload.entries do
+		entryByKey[entry.pkg .. "::" .. entry.project] = entry
+	end
+
+	local queue = MemoryStoreService:GetQueue(queueId, invisibility)
+	local results: { ResultEntry } = {}
+	local prevPkg: string? = nil
+
+	while true do
+		-- waitTimeout=0: poll non-blocking. Invisibility is already set at
+		-- GetQueue time above; using the full window here would stall the
+		-- loop for ~invisibility seconds on the final empty read, adding
+		-- that as tail latency across every parallel worker.
+		local readOk, items, removeId = pcall(function()
+			return queue:ReadAsync(1, false, 0)
+		end)
+
+		if not readOk then
+			-- Surface the transient API error in game output instead of
+			-- silently breaking; the outer "no entries for N packages"
+			-- message wouldn't otherwise hint at the cause.
+			warn("[work-stealing] ReadAsync failed: " .. tostring(items))
+			break
+		end
+
+		if items == nil or #items == 0 then
+			break
+		end
+
+		local item = items[1] :: QueueItem
+		local key = item.pkg .. "::" .. item.project
+		local entry = entryByKey[key]
+		if entry == nil then
+			-- Foreign / stale queue item — discard and keep popping.
+			pcall(function()
+				queue:RemoveAsync(removeId)
+			end)
+			continue
+		end
+
+		local result, pkg = executeEntry(entry, prevPkg)
+		table.insert(results, result)
+		prevPkg = pkg
+
+		pcall(function()
+			queue:RemoveAsync(removeId)
+		end)
+	end
+
+	if prevPkg ~= nil then
+		Materializer.reset()
+	end
+
+	return results
+end
+
+local payload: Payload = HttpService:JSONDecode([==[__CONFIG_JSON__]==]) :: Payload
+
+local results: { ResultEntry }
+if payload.queueId ~= nil and payload.queueId ~= "" then
+	results = runWorkStealing(payload)
+else
+	results = runEmbedded(payload)
+end
+
+local gameOutputs = {}
+for _ = 1, #results do
 	table.insert(gameOutputs, "[]")
 end
 
