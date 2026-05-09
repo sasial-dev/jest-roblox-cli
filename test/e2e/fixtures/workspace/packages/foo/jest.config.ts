@@ -1,6 +1,4 @@
-import { defineConfig } from "@isentinel/jest-roblox";
-
-export default defineConfig({
+export default {
 	rojoProject: "test.project.json",
 	test: {
 		// Skip the workspace-mode placeholder spec when this fixture is run as
@@ -11,4 +9,4 @@ export default defineConfig({
 		passWithNoTests: true,
 		testPathIgnorePatterns: ["foo\\.spec\\.luau$"],
 	},
-});
+};
