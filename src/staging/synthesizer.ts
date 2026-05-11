@@ -60,13 +60,14 @@ const SERVICE_CLASSES = new Set([
 	"StarterPlayer",
 	"StarterPlayerScripts",
 	"Teams",
+	"TestService",
 	"TextChatService",
 	"TweenService",
 	"UserInputService",
 	"Workspace",
 ]);
 
-const SERVICE_PROPERTIES = new Set(["LoadStringEnabled"]);
+const SERVICE_PROPERTIES = new Set(["AutoRuns", "ExecuteWithStudioRun", "LoadStringEnabled"]);
 
 interface AbsolutizeOptions {
 	coverageRoots: Array<CoverageRoot> | undefined;

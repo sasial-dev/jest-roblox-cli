@@ -153,6 +153,47 @@ describe(synthesize, () => {
 		).toBeUndefined();
 	});
 
+	it("should drop TestService-only $properties when rewriting to Folder", () => {
+		expect.assertions(1);
+
+		vol.reset();
+
+		vol.fromJSON({
+			[FOO_PROJECT]: projectJson({
+				name: "foo-test",
+				tree: {
+					$className: "DataModel",
+					TestService: {
+						$className: "TestService",
+						$properties: { AutoRuns: false, ExecuteWithStudioRun: false },
+					},
+				},
+			}),
+		});
+
+		const result = synthesize({
+			packages: [
+				{
+					name: "@halcyon/foo",
+					packageDirectory: FOO_DIR,
+					rojoProjectPath: FOO_PROJECT,
+				},
+			],
+		});
+
+		const parsed = JSON.parse(result) as {
+			tree: {
+				ServerStorage: {
+					__pkg_stage: Record<string, { TestService: { $properties?: unknown } }>;
+				};
+			};
+		};
+
+		expect(
+			parsed.tree.ServerStorage.__pkg_stage["@halcyon/foo"]?.TestService.$properties,
+		).toBeUndefined();
+	});
+
 	it("should drop service-only $properties from inlined trees", () => {
 		expect.assertions(1);
 
@@ -212,6 +253,12 @@ describe(synthesize, () => {
 		"MaterialService",
 		"MessagingService",
 		"UserInputService",
+		"TestService",
+		"Lighting",
+		"SoundService",
+		"StarterPlayer",
+		"StarterPlayerScripts",
+		"Workspace",
 	])("should rewrite service class %s to Folder when nested", (serviceClass) => {
 		expect.assertions(1);
 
