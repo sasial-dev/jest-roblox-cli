@@ -190,6 +190,34 @@ function stableStringify(value: unknown): string {
 	return String(JSON.stringify(sortKeys(value), undefined, 2));
 }
 
+function demoteAutoMountToExplicit(parent: RojoTreeNode, parentPath: string): void {
+	const entries = fs.readdirSync(parentPath, { withFileTypes: true });
+	for (const entry of entries) {
+		if (entry.name.startsWith("$")) {
+			continue;
+		}
+
+		if (parent[entry.name] !== undefined) {
+			continue;
+		}
+
+		// Non-directory entries (loose files) are skipped because rojo only
+		// `$path`-mounts a fixed set of known source extensions. Feeding rojo
+		// an unsupported extension (e.g. `tsconfig.tsbuildinfo`) via `$path`
+		// hard-errors at build time. Directories cover every real use we've
+		// seen of nested project mounts.
+		if (!entry.isDirectory()) {
+			continue;
+		}
+
+		const entryPath = path.posix.join(parentPath, entry.name);
+		parent[entry.name] = { $path: normalizeWindowsPath(entryPath) };
+	}
+
+	delete parent.$path;
+	parent.$className ??= "Folder";
+}
+
 function virtualizePathChild(parent: RojoTreeNode, segment: string): RojoTreeNode | undefined {
 	const parentPath = parent.$path;
 	if (typeof parentPath !== "string") {
@@ -202,7 +230,19 @@ function virtualizePathChild(parent: RojoTreeNode, segment: string): RojoTreeNod
 		return undefined;
 	}
 
-	return { $path: normalizeWindowsPath(childPath) };
+	// Rojo does not merge a `$path` auto-mount with explicit children sharing
+	// the same name — adding `segment` alongside the parent's `$path` produces
+	// a duplicate sibling at build time, and `FindFirstChild` lookups in the
+	// runtime hit the auto-mounted twin (without our stub injection) first.
+	// Demote the parent by enumerating disk directories at `parentPath`,
+	// promoting each to an explicit `$path` child, and dropping the parent's
+	// `$path`. The result is the same set of Instances rojo would have built
+	// from the auto-mount, but each child is now reachable by the synthesizer
+	// for stub injection.
+	demoteAutoMountToExplicit(parent, parentPath);
+
+	const child = parent[segment];
+	return isTreeNode(child) ? child : undefined;
 }
 
 function walkToLeaf(root: RojoTreeNode, dataModelPath: string): RojoTreeNode {

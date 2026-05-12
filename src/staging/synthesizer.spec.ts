@@ -781,6 +781,301 @@ describe(synthesize, () => {
 		expect(fooTests?.src["jest.config"].$path).toBe(stubPath.replaceAll("\\", "/"));
 	});
 
+	it("should demote $path-mounted parent so rojo does not auto-mount duplicate siblings", () => {
+		expect.assertions(4);
+
+		vol.reset();
+
+		const stubPath = path.join(ROOT, ".cache/foo/jest.config.luau");
+		vol.fromJSON({
+			[FOO_PROJECT]: projectJson({
+				name: "foo-test",
+				tree: {
+					$className: "DataModel",
+					ReplicatedStorage: {
+						"$className": "ReplicatedStorage",
+						"foo:tests": { $path: "out-test" },
+					},
+				},
+			}),
+			[path.join(FOO_DIR, "out-test/src/init.luau")]: "",
+			[path.join(FOO_DIR, "out-test/test/init.luau")]: "",
+			[stubPath]: "return {}",
+		});
+
+		const result = synthesize({
+			packages: [
+				{
+					name: "@halcyon/foo",
+					packageDirectory: FOO_DIR,
+					rojoProjectPath: FOO_PROJECT,
+					stubMounts: [
+						{ absStubPath: stubPath, dataModelPath: "ReplicatedStorage/foo:tests/src" },
+					],
+				},
+			],
+		});
+
+		const parsed = JSON.parse(result) as {
+			tree: {
+				ServerStorage: {
+					__pkg_stage: Record<
+						string,
+						{
+							ReplicatedStorage: {
+								"foo:tests": {
+									$className?: string;
+									$path?: string;
+									src: { "$path"?: string; "jest.config"?: { $path: string } };
+									test: { $path?: string };
+								};
+							};
+						}
+					>;
+				};
+			};
+		};
+
+		const fooTests =
+			parsed.tree.ServerStorage.__pkg_stage["@halcyon/foo"]?.ReplicatedStorage["foo:tests"];
+
+		// Parent must not retain `$path` — rojo would auto-mount a duplicate
+		// `src`/`test` sibling alongside the explicit overlay.
+		expect(fooTests?.$path).toBeUndefined();
+		expect(fooTests?.$className).toBe("Folder");
+		// Every on-disk sibling at the parent's $path becomes an explicit child
+		// so rojo's auto-mount behaviour is preserved despite the $path
+		// removal.
+		expect(fooTests?.test.$path).toBe(
+			normalizeWindowsPath(path.join(FOO_DIR, "out-test/test")),
+		);
+		expect(fooTests?.src["jest.config"]?.$path).toBe(stubPath.replaceAll("\\", "/"));
+	});
+
+	it("should skip non-directory siblings during demotion", () => {
+		expect.assertions(2);
+
+		vol.reset();
+
+		const stubPath = path.join(ROOT, ".cache/foo/jest.config.luau");
+		vol.fromJSON({
+			[FOO_PROJECT]: projectJson({
+				name: "foo-test",
+				tree: {
+					$className: "DataModel",
+					ReplicatedStorage: {
+						$className: "ReplicatedStorage",
+						Tests: { $path: "out-test" },
+					},
+				},
+			}),
+			[path.join(FOO_DIR, "out-test/loose.luau")]: "return {}",
+			[path.join(FOO_DIR, "out-test/src/init.luau")]: "",
+			[stubPath]: "return {}",
+		});
+
+		const result = synthesize({
+			packages: [
+				{
+					name: "@halcyon/foo",
+					packageDirectory: FOO_DIR,
+					rojoProjectPath: FOO_PROJECT,
+					stubMounts: [
+						{ absStubPath: stubPath, dataModelPath: "ReplicatedStorage/Tests/src" },
+					],
+				},
+			],
+		});
+
+		const parsed = JSON.parse(result) as {
+			tree: {
+				ServerStorage: {
+					__pkg_stage: Record<
+						string,
+						{
+							ReplicatedStorage: {
+								Tests: Record<string, unknown>;
+							};
+						}
+					>;
+				};
+			};
+		};
+
+		const tests =
+			parsed.tree.ServerStorage.__pkg_stage["@halcyon/foo"]?.ReplicatedStorage.Tests;
+
+		// Loose file siblings (which rojo cannot $path-mount as Instances of
+		// arbitrary class) are not promoted to explicit children during
+		// demotion.
+		expect(tests?.["loose.luau"]).toBeUndefined();
+		expect(tests?.["src"]).toBeDefined();
+	});
+
+	it("should preserve existing explicit children during demotion", () => {
+		expect.assertions(2);
+
+		vol.reset();
+
+		const stubPath = path.join(ROOT, ".cache/foo/jest.config.luau");
+		vol.fromJSON({
+			[FOO_PROJECT]: projectJson({
+				name: "foo-test",
+				tree: {
+					$className: "DataModel",
+					ReplicatedStorage: {
+						$className: "ReplicatedStorage",
+						Tests: {
+							$path: "out-test",
+							keep: { $path: "../other/extra" },
+						},
+					},
+				},
+			}),
+			[path.join(FOO_DIR, "out-test/keep/init.luau")]: "",
+			[path.join(FOO_DIR, "out-test/src/init.luau")]: "",
+			[path.join(ROOT, "packages/other/extra/init.luau")]: "",
+			[stubPath]: "return {}",
+		});
+
+		const result = synthesize({
+			packages: [
+				{
+					name: "@halcyon/foo",
+					packageDirectory: FOO_DIR,
+					rojoProjectPath: FOO_PROJECT,
+					stubMounts: [
+						{ absStubPath: stubPath, dataModelPath: "ReplicatedStorage/Tests/src" },
+					],
+				},
+			],
+		});
+
+		const parsed = JSON.parse(result) as {
+			tree: {
+				ServerStorage: {
+					__pkg_stage: Record<
+						string,
+						{
+							ReplicatedStorage: {
+								Tests: { keep: { $path: string } };
+							};
+						}
+					>;
+				};
+			};
+		};
+
+		const tests =
+			parsed.tree.ServerStorage.__pkg_stage["@halcyon/foo"]?.ReplicatedStorage.Tests;
+
+		// Explicit `keep` already pointed at `../other/extra` — demotion must
+		// not overwrite it with the same-named on-disk `out-test/keep`
+		// directory.
+		expect(tests?.keep.$path).toBe(
+			normalizeWindowsPath(path.join(ROOT, "packages/other/extra")),
+		);
+		expect(tests?.keep.$path).not.toContain("out-test/keep");
+	});
+
+	it("should throw ConfigError when virtualization target segment starts with $", () => {
+		expect.assertions(1);
+
+		vol.reset();
+
+		vol.fromJSON({
+			[FOO_PROJECT]: projectJson({
+				name: "foo-test",
+				tree: {
+					$className: "DataModel",
+					ReplicatedStorage: {
+						$className: "ReplicatedStorage",
+						Tests: { $path: "out-test" },
+					},
+				},
+			}),
+			[path.join(FOO_DIR, "out-test/$weird/init.luau")]: "",
+		});
+
+		expect(() => {
+			synthesize({
+				packages: [
+					{
+						name: "@halcyon/foo",
+						packageDirectory: FOO_DIR,
+						rojoProjectPath: FOO_PROJECT,
+						stubMounts: [
+							{
+								absStubPath: "/cache/stub.lua",
+								dataModelPath: "ReplicatedStorage/Tests/$weird",
+							},
+						],
+					},
+				],
+			});
+		}).toThrow(ConfigError);
+	});
+
+	it("should skip dollar-prefixed disk siblings during demotion", () => {
+		expect.assertions(2);
+
+		vol.reset();
+
+		const stubPath = path.join(ROOT, ".cache/foo/jest.config.luau");
+		vol.fromJSON({
+			[FOO_PROJECT]: projectJson({
+				name: "foo-test",
+				tree: {
+					$className: "DataModel",
+					ReplicatedStorage: {
+						$className: "ReplicatedStorage",
+						Tests: { $path: "out-test" },
+					},
+				},
+			}),
+			[path.join(FOO_DIR, "out-test/$weird/init.luau")]: "",
+			[path.join(FOO_DIR, "out-test/src/init.luau")]: "",
+			[stubPath]: "return {}",
+		});
+
+		const result = synthesize({
+			packages: [
+				{
+					name: "@halcyon/foo",
+					packageDirectory: FOO_DIR,
+					rojoProjectPath: FOO_PROJECT,
+					stubMounts: [
+						{ absStubPath: stubPath, dataModelPath: "ReplicatedStorage/Tests/src" },
+					],
+				},
+			],
+		});
+
+		const parsed = JSON.parse(result) as {
+			tree: {
+				ServerStorage: {
+					__pkg_stage: Record<
+						string,
+						{
+							ReplicatedStorage: {
+								Tests: Record<string, unknown>;
+							};
+						}
+					>;
+				};
+			};
+		};
+
+		const tests =
+			parsed.tree.ServerStorage.__pkg_stage["@halcyon/foo"]?.ReplicatedStorage.Tests;
+
+		// `$`-prefixed names collide with rojo's reserved project.json keys
+		// (`$path`, `$className`, …) so they must not be added as explicit
+		// children even when present on disk.
+		expect(tests?.["$weird"]).toBeUndefined();
+		expect(tests?.["src"]).toBeDefined();
+	});
+
 	it("should virtualize multiple consecutive $path-mounted segments", () => {
 		expect.assertions(1);
 
@@ -1007,7 +1302,8 @@ describe(synthesize, () => {
 						{
 							ReplicatedStorage: {
 								Tests: {
-									$path: string;
+									$className?: string;
+									$path?: string;
 									src: { "$path": string; "jest.config": { $path: string } };
 								};
 							};
@@ -1020,7 +1316,10 @@ describe(synthesize, () => {
 		const tests =
 			parsed.tree.ServerStorage.__pkg_stage["@halcyon/foo"]?.ReplicatedStorage.Tests;
 
-		expect(tests?.$path).toBe(shadowOut);
+		// Parent demoted (no $path) so rojo doesn't auto-mount a duplicate `src`
+		// alongside the explicit overlay; the shadowed prefix is carried on the
+		// explicit child instead.
+		expect(tests?.$path).toBeUndefined();
 		expect(tests?.src.$path).toBe(`${shadowOut}/src`);
 	});
 
