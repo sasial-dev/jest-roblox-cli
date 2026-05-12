@@ -1,5 +1,6 @@
 {
 	"name": "@e2e/bar",
 	"version": "0.0.0",
-	"private": true
+	"private": true,
+	"type": "module"
 }

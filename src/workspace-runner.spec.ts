@@ -10,8 +10,14 @@ import type { Backend, BackendOptions, BackendResult } from "./backends/interfac
 import { loadConfig } from "./config/loader.ts";
 import type { CliOptions, ResolvedConfig } from "./config/schema.ts";
 import { DEFAULT_CONFIG } from "./config/schema.ts";
-import { MemoryStoreQueueClient } from "./memory-store/queue-client.ts";
+import { prepareWorkStealingQueue } from "./memory-store/work-stealing.ts";
 import { runWorkspace } from "./workspace-runner.ts";
+
+vi.mock(import("./memory-store/work-stealing.ts"), () => {
+	return {
+		prepareWorkStealingQueue: vi.fn<typeof prepareWorkStealingQueue>(),
+	};
+});
 
 vi.mock(import("node:fs"), async () => {
 	const memfs = await vi.importActual<typeof import("memfs")>("memfs");
@@ -1108,24 +1114,13 @@ describe(runWorkspace, () => {
 	});
 
 	describe("work-stealing", () => {
-		interface QueueAddCall {
-			options: { ttlSeconds: number };
-			queue: string;
-			value: { pkg: string; project: string };
-		}
+		const testCredentials = { apiKey: "test-key", universeId: "u-123" };
 
-		function createQueueClientStub(): {
-			addCalls: Array<QueueAddCall>;
-			client: MemoryStoreQueueClient;
-		} {
-			const addCalls: Array<QueueAddCall> = [];
-			const client: MemoryStoreQueueClient = Object.create(MemoryStoreQueueClient.prototype);
-			vi.spyOn(client, "add").mockImplementation(
-				async (queue: string, value: unknown, options: { ttlSeconds: number }) => {
-					addCalls.push({ options, queue, value: value as QueueAddCall["value"] });
-				},
-			);
-			return { addCalls, client };
+		function mockPreparedQueue(queueId: string): void {
+			vi.mocked(prepareWorkStealingQueue).mockResolvedValue({
+				invisibilityWindowSeconds: 90,
+				queueId,
+			});
 		}
 
 		it("should push every (pkg, project) onto the queue and pass workStealing to backend when parallel>1", async () => {
@@ -1149,7 +1144,7 @@ describe(runWorkspace, () => {
 				[FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR },
 			});
 
-			const { addCalls, client } = createQueueClientStub();
+			mockPreparedQueue("queue-1");
 			const { backend, captured } = createStubBackend([
 				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
 				{ jestOutput: passingResult(), pkg: "@halcyon/bar" },
@@ -1160,14 +1155,17 @@ describe(runWorkspace, () => {
 				cli: makeCli({ parallel: 2 }),
 				config: makeConfig(),
 				packageInfos: [FOO_INFO, BAR_INFO],
-				queueClient: client,
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
+				workStealingCredentials: testCredentials,
 			});
 
 			expect(captured.options?.workStealing).toBeTrue();
 			expect(captured.options?.parallel).toBe(2);
-			expect(addCalls.map((call) => call.value)).toIncludeAllMembers([
+
+			const prepareCall = vi.mocked(prepareWorkStealingQueue).mock.calls[0]?.[0];
+
+			expect(prepareCall?.packages).toIncludeAllMembers([
 				{ pkg: "@halcyon/foo", project: "@halcyon/foo" },
 				{ pkg: "@halcyon/bar", project: "@halcyon/bar" },
 			]);
@@ -1188,7 +1186,7 @@ describe(runWorkspace, () => {
 				[FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR },
 			});
 
-			const { addCalls, client } = createQueueClientStub();
+			mockPreparedQueue("specific-queue-id");
 			const { backend, captured } = createStubBackend([
 				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
 			]);
@@ -1198,14 +1196,12 @@ describe(runWorkspace, () => {
 				cli: makeCli({ parallel: 2 }),
 				config: makeConfig(),
 				packageInfos: [FOO_INFO],
-				queueClient: client,
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
+				workStealingCredentials: testCredentials,
 			});
 
-			const queueId = addCalls[0]?.queue ?? "";
-
-			expect(captured.options?.scriptOverride).toContain(`"queueId":"${queueId}"`);
+			expect(captured.options?.scriptOverride).toContain('"queueId":"specific-queue-id"');
 		});
 
 		it("should keep the existing single-task path when parallel is unset", async () => {
@@ -1223,7 +1219,6 @@ describe(runWorkspace, () => {
 				[FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR },
 			});
 
-			const { addCalls, client } = createQueueClientStub();
 			const { backend, captured } = createStubBackend([
 				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
 			]);
@@ -1233,16 +1228,16 @@ describe(runWorkspace, () => {
 				cli: makeCli(),
 				config: makeConfig(),
 				packageInfos: [FOO_INFO],
-				queueClient: client,
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
+				workStealingCredentials: testCredentials,
 			});
 
 			expect(captured.options?.workStealing).toBeUndefined();
-			expect(addCalls).toHaveLength(0);
+			expect(vi.mocked(prepareWorkStealingQueue)).not.toHaveBeenCalled();
 		});
 
-		it("should keep the existing path when queueClient is not provided even with parallel>1", async () => {
+		it("should keep the existing path when workStealingCredentials is not provided even with parallel>1", async () => {
 			expect.assertions(2);
 
 			vol.reset();
@@ -1272,6 +1267,41 @@ describe(runWorkspace, () => {
 
 			expect(captured.options?.workStealing).toBeUndefined();
 			expect(captured.options?.scriptOverride).not.toContain('"queueId"');
+		});
+
+		it("should forward workStealingCredentials.baseUrl into prepareWorkStealingQueue", async () => {
+			expect.assertions(1);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+			setLoadedConfigPerPackage({
+				[FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR },
+			});
+
+			mockPreparedQueue("queue-base-url");
+			const { backend } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli({ parallel: 2 }),
+				config: makeConfig(),
+				packageInfos: [FOO_INFO],
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+				workStealingCredentials: { ...testCredentials, baseUrl: "http://127.0.0.1:4010" },
+			});
+
+			expect(vi.mocked(prepareWorkStealingQueue).mock.calls[0]?.[0]?.baseUrl).toBe(
+				"http://127.0.0.1:4010",
+			);
 		});
 	});
 });

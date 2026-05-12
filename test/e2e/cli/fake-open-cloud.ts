@@ -1,3 +1,10 @@
+import {
+	validDequeueBody,
+	validInProgressTaskBody,
+	validPublishResponseBody,
+	validQueueItemBody,
+} from "@bedrock-rbx/ocale/testing";
+
 import { type } from "arktype";
 import { Buffer } from "node:buffer";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -43,13 +50,13 @@ interface FakeOpenCloudCall {
 
 interface QueuedItem {
 	id: string;
-	value: unknown;
+	value: Exclude<JSONValue, null>;
 }
 
 interface FakeOpenCloudServer {
 	baseUrl: string;
 	calls: Array<FakeOpenCloudCall>;
-	queueAdds: Array<{ queue: string; value: unknown }>;
+	queueAdds: Array<{ queue: string; value: Exclude<JSONValue, null> }>;
 	queueDiscards: Array<{ id: string; queue: string }>;
 	requests: Array<typeof createTaskRequestSchema.infer>;
 	uploadCount: number;
@@ -170,41 +177,52 @@ function handlePoll(options: {
 	if (remainingPolls > 0) {
 		pollCounts.set(taskPath, remainingPolls - 1);
 		response.writeHead(200, { "content-type": JSON_CONTENT_TYPE });
-		response.end(JSON.stringify({ state: "PROCESSING" }));
+		response.end(
+			JSON.stringify(validInProgressTaskBody({ path: taskPath, state: "PROCESSING" })),
+		);
 		return;
 	}
 
 	if (queuedTask.state === "FAILED") {
 		response.writeHead(200, { "content-type": JSON_CONTENT_TYPE });
 		response.end(
-			JSON.stringify({
-				error: { message: queuedTask.errorMessage ?? "Execution failed" },
-				state: "FAILED",
-			}),
+			JSON.stringify(
+				validInProgressTaskBody({
+					error: {
+						code: "SCRIPT_ERROR",
+						message: queuedTask.errorMessage ?? "Execution failed",
+					},
+					path: taskPath,
+					state: "FAILED",
+				}),
+			),
 		);
 		return;
 	}
 
 	response.writeHead(200, { "content-type": JSON_CONTENT_TYPE });
 	response.end(
-		JSON.stringify({
-			output: {
-				results: [
-					JSON.stringify({
-						entries: [
-							{
-								elapsedMs: queuedTask.elapsedMs ?? 25,
-								gameOutput: queuedTask.gameOutput,
-								jestOutput: queuedTask.jestOutput,
-								pkg: queuedTask.pkg,
-								project: queuedTask.project,
-							},
-						],
-					}),
-				],
-			},
-			state: "COMPLETE",
-		}),
+		JSON.stringify(
+			validInProgressTaskBody({
+				output: {
+					results: [
+						JSON.stringify({
+							entries: [
+								{
+									elapsedMs: queuedTask.elapsedMs ?? 25,
+									gameOutput: queuedTask.gameOutput,
+									jestOutput: queuedTask.jestOutput,
+									pkg: queuedTask.pkg,
+									project: queuedTask.project,
+								},
+							],
+						}),
+					],
+				},
+				path: taskPath,
+				state: "COMPLETE",
+			}),
+		),
 	);
 }
 
@@ -227,13 +245,22 @@ function handleQueueAdd(options: {
 	updateItemSeq: () => number;
 }): void {
 	const { parsed, queue, queueAdds, queues, response, updateItemSeq } = options;
-	const itemValue = (parsed as { data?: unknown }).data;
+	const itemValue = (parsed as { data: Exclude<JSONValue, null> }).data;
 	queueAdds.push({ queue, value: itemValue });
+	const itemId = `item-${updateItemSeq().toString()}`;
 	const items = queues.get(queue) ?? [];
-	items.push({ id: `item-${updateItemSeq().toString()}`, value: itemValue });
+	items.push({ id: itemId, value: itemValue });
 	queues.set(queue, items);
 	response.writeHead(200, { "content-type": JSON_CONTENT_TYPE });
-	response.end(JSON.stringify({ priority: 0 }));
+	response.end(
+		JSON.stringify(
+			validQueueItemBody({
+				data: itemValue,
+				path: `cloud/v2/universes/123/memory-store/queues/${queue}/items/${itemId}`,
+				priority: 0,
+			}),
+		),
+	);
 }
 
 function handleQueueRead(options: {
@@ -247,11 +274,24 @@ function handleQueueRead(options: {
 	queues.set(queue, queued);
 	response.writeHead(200, { "content-type": JSON_CONTENT_TYPE });
 	if (next === undefined) {
-		response.end(JSON.stringify({ id: "", items: [] }));
+		response.end(JSON.stringify(validDequeueBody({ id: "read-empty", queueItems: [] })));
 		return;
 	}
 
-	response.end(JSON.stringify({ id: next.id, items: [next.value] }));
+	response.end(
+		JSON.stringify(
+			validDequeueBody({
+				id: `read-${next.id}`,
+				queueItems: [
+					validQueueItemBody({
+						data: next.value,
+						path: `cloud/v2/universes/123/memory-store/queues/${queue}/items/${next.id}`,
+						priority: 0,
+					}),
+				],
+			}),
+		),
+	);
 }
 
 function handleQueueDiscard(options: {
@@ -328,7 +368,11 @@ async function handleRequest(options: {
 
 	if (request.method === "POST" && url.pathname.endsWith("/versions")) {
 		response.writeHead(200, { "content-type": JSON_CONTENT_TYPE });
-		response.end(JSON.stringify({ versionNumber: options.updateUploadCount() }));
+		response.end(
+			JSON.stringify(
+				validPublishResponseBody({ versionNumber: options.updateUploadCount() }),
+			),
+		);
 		return;
 	}
 
@@ -367,15 +411,16 @@ async function handleRequest(options: {
 			return;
 		}
 
-		const taskPath = `mock/tasks/${options.updateTaskIndex()}`;
+		const taskIndex = options.updateTaskIndex();
+		const taskPath = `universes/123/places/456/versions/1/luau-execution-sessions/session-${String(taskIndex)}/tasks/task-${String(taskIndex)}`;
 		taskResults.set(taskPath, nextTask);
 		pollCounts.set(taskPath, nextTask.pollsBeforeComplete ?? 0);
 		response.writeHead(200, { "content-type": JSON_CONTENT_TYPE });
-		response.end(JSON.stringify({ path: taskPath }));
+		response.end(JSON.stringify(validInProgressTaskBody({ path: taskPath })));
 		return;
 	}
 
-	if (request.method === "GET" && url.pathname.startsWith("/cloud/v2/mock/tasks/")) {
+	if (request.method === "GET" && url.pathname.startsWith("/cloud/v2/universes/")) {
 		handlePoll({ pollCounts, response, taskResults, url });
 		return;
 	}

@@ -1,13 +1,25 @@
-import { createFetchClient } from "@isentinel/roblox-runner";
-import type { HttpClient } from "@isentinel/roblox-runner";
-
 import { type } from "arktype";
+import buffer from "node:buffer";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import process from "node:process";
 import { describe, expect, it } from "vitest";
 
 import { type FakeOpenCloudTask, startFakeOpenCloudServer } from "../cli/fake-open-cloud.ts";
+
+interface HttpResponse {
+	body: unknown;
+	ok: boolean;
+	status: number;
+}
+
+interface HttpClient {
+	request(
+		method: string,
+		url: string,
+		options?: { body?: unknown; headers?: Record<string, string> },
+	): Promise<HttpResponse>;
+}
 
 // The contract suite asserts the response shapes the OpenCloudBackend reads
 // from the wire (`src/backends/open-cloud.ts:176-177, 207-225, 257-279`).
@@ -166,7 +178,32 @@ describe.for(cases)("open Cloud contract ($name)", ({ testCase }) => {
 });
 
 function createHttpClient(apiKey: string): HttpClient {
-	return createFetchClient({ "x-api-key": apiKey });
+	return {
+		async request(method, url, options) {
+			const headers: Record<string, string> = {
+				"x-api-key": apiKey,
+				...options?.headers,
+			};
+
+			const fetchOptions: RequestInit = { headers, method };
+			if (options?.body !== undefined) {
+				if (options.body instanceof buffer.Buffer) {
+					fetchOptions.body = options.body;
+				} else {
+					fetchOptions.body = JSON.stringify(options.body);
+					headers["Content-Type"] = "application/json";
+				}
+			}
+
+			const response = await fetch(url, fetchOptions);
+			const contentType = response.headers.get("content-type") ?? "";
+			const body = contentType.includes("application/json")
+				? await response.json()
+				: await response.text();
+
+			return { body, ok: response.ok, status: response.status };
+		},
+	};
 }
 
 function resolveLiveCase(): ContractCase | undefined {

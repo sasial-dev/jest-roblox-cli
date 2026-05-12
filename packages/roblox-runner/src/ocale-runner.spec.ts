@@ -1,638 +1,374 @@
+import {
+	createFakeHttpClient,
+	createFakeSleep,
+	type FakeHttpClient,
+} from "@bedrock-rbx/ocale/testing";
+
 import buffer from "node:buffer";
 import { describe, expect, it, vi } from "vitest";
 
-import type { HttpClient, HttpResponse } from "./http-client.ts";
 import { OcaleRunner } from "./ocale-runner.ts";
 
-const LUAU_EXEC_TASKS_PATH = "/luau-execution-session-tasks";
+const RBXL_SIGNATURE = new Uint8Array([
+	0x3c, 0x72, 0x6f, 0x62, 0x6c, 0x6f, 0x78, 0x21, 0x89, 0xff, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
 
-function createMockHttpClient(
-	responses: Map<string, Array<HttpResponse> | HttpResponse>,
-): HttpClient & { calls: Array<{ body?: unknown; method: string; url: string }> } {
-	const calls: Array<{ body?: unknown; method: string; url: string }> = [];
-	const indexes = new Map<string, number>();
+interface TaskBodyOverrides {
+	error?: { code: string; message: string };
+	output?: { results: ReadonlyArray<unknown> };
+	path?: string;
+	state?: "CANCELLED" | "COMPLETE" | "FAILED" | "PROCESSING" | "QUEUED";
+}
 
+function taskBody(overrides: TaskBodyOverrides = {}): Record<string, unknown> {
 	return {
-		calls,
-		async request(method, url, options) {
-			calls.push({ body: options?.body, method, url });
-
-			for (const [pattern, response] of responses) {
-				if (url.includes(pattern)) {
-					if (!Array.isArray(response)) {
-						return response;
-					}
-
-					const index = indexes.get(pattern) ?? 0;
-					indexes.set(pattern, index + 1);
-
-					return response[Math.min(index, response.length - 1)]!;
-				}
-			}
-
-			return { body: { error: "Not found" }, ok: false, status: 404 };
-		},
+		createTime: "2026-01-01T00:00:00Z",
+		path:
+			overrides.path ??
+			"universes/123/places/456/versions/1/luau-execution-sessions/session-1/tasks/task-1",
+		state: overrides.state ?? "QUEUED",
+		updateTime: "2026-01-01T00:00:30Z",
+		user: "user-1",
+		...(overrides.error !== undefined ? { error: overrides.error } : {}),
+		...(overrides.output !== undefined ? { output: overrides.output } : {}),
 	};
 }
 
-async function noSleep() {}
+function rbxlBuffer(): buffer.Buffer {
+	return buffer.Buffer.from(RBXL_SIGNATURE);
+}
 
-const UPLOAD_OK: HttpResponse = { body: { versionNumber: 1 }, ok: true, status: 200 };
-const TASK_CREATED: HttpResponse = { body: { path: "task-path" }, ok: true, status: 200 };
-const TASK_CREATED_WITH_ID: HttpResponse = {
-	body: { path: "universes/123/places/456/luau-execution-session-tasks/task-id" },
-	ok: true,
-	status: 200,
-};
-const PROCESSING: HttpResponse = { body: { state: "PROCESSING" }, ok: true, status: 200 };
-
-function completeResponse(results: Array<string>): HttpResponse {
-	return {
-		body: { output: { results }, state: "COMPLETE" },
-		ok: true,
-		status: 200,
-	};
+function makeRunner(httpClient: FakeHttpClient, readData: buffer.Buffer = rbxlBuffer()) {
+	return new OcaleRunner(
+		{ apiKey: "test-key", placeId: "456", universeId: "123" },
+		{
+			httpClient,
+			readFile: () => readData,
+			sleep: createFakeSleep(),
+		},
+	);
 }
 
 describe(OcaleRunner, () => {
-	const credentials = {
-		apiKey: "test-api-key",
-		placeId: "456",
-		universeId: "123",
-	};
-
 	describe("uploadPlace", () => {
-		it("should upload place file successfully", async () => {
+		it("should publish rbxl place and return versionNumber", async () => {
 			expect.assertions(3);
 
-			const mockHttp = createMockHttpClient(new Map([["/versions", UPLOAD_OK]]));
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: { versionNumber: 7 }, status: 200 });
 
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				readFile: () => buffer.Buffer.from("mock-rbxl"),
-				sleep: noSleep,
-			});
-
-			const result = await runner.uploadPlace({ placeFilePath: "./test.rbxl" });
+			const runner = makeRunner(http);
+			const result = await runner.uploadPlace({ placeFilePath: "/work/test.rbxl" });
 
 			expect(result.cached).toBeFalse();
-			expect(result.versionNumber).toBe(1);
-			expect(mockHttp.calls[0]!.url).toContain("/versions");
+			expect(result.versionNumber).toBe(7);
+			expect(http.requests[0]!.request.url).toContain("/places/456/versions");
 		});
 
-		it("should skip upload when cache hit", async () => {
+		it("should send rbxlx format when path extension is .rbxlx", async () => {
+			expect.assertions(1);
+
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: { versionNumber: 1 }, status: 200 });
+
+			const xmlBody = buffer.Buffer.from('<roblox version="4"></roblox>');
+			const runner = makeRunner(http, xmlBody);
+			await runner.uploadPlace({ placeFilePath: "/work/test.rbxlx" });
+
+			const captured = http.requests[0]!.request;
+			const headers = captured.headers ?? {};
+
+			expect(headers["Content-Type"] ?? headers["content-type"]).toMatch(/xml/i);
+		});
+
+		it("should reuse cached upload on second call with same file content", async () => {
 			expect.assertions(3);
 
-			const mockHttp = createMockHttpClient(new Map([["/versions", UPLOAD_OK]]));
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: { versionNumber: 1 }, status: 200 });
 
-			const uniqueContent = `cache-test-${Date.now()}`;
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				readFile: () => buffer.Buffer.from(uniqueContent),
-				sleep: noSleep,
-			});
+			const unique = buffer.Buffer.concat([
+				rbxlBuffer(),
+				buffer.Buffer.from(`cache-${Date.now()}-${Math.random()}`),
+			]);
+			const runner = makeRunner(http, unique);
 
-			const result1 = await runner.uploadPlace({ cache: true, placeFilePath: "./test.rbxl" });
+			const first = await runner.uploadPlace({ cache: true, placeFilePath: "/work/p.rbxl" });
+			const second = await runner.uploadPlace({ cache: true, placeFilePath: "/work/p.rbxl" });
 
-			expect(result1.cached).toBeFalse();
-
-			const result2 = await runner.uploadPlace({ cache: true, placeFilePath: "./test.rbxl" });
-
-			expect(result2.cached).toBeTrue();
-			expect(mockHttp.calls.filter((call) => call.url.includes("/versions"))).toHaveLength(1);
+			expect(first.cached).toBeFalse();
+			expect(second.cached).toBeTrue();
+			expect(http.requests).toHaveLength(1);
 		});
 
-		it("should not use cache when cache option is false", async () => {
-			expect.assertions(2);
-
-			const mockHttp = createMockHttpClient(new Map([["/versions", UPLOAD_OK]]));
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				readFile: () => buffer.Buffer.from("mock-rbxl"),
-				sleep: noSleep,
-			});
-
-			const result = await runner.uploadPlace({ cache: false, placeFilePath: "./test.rbxl" });
-
-			expect(result.cached).toBeFalse();
-			expect(mockHttp.calls.filter((call) => call.url.includes("/versions"))).toHaveLength(1);
-		});
-
-		it("should throw on upload failure", async () => {
+		it("should re-upload when cache option is false", async () => {
 			expect.assertions(1);
 
-			const mockHttp = createMockHttpClient(
-				new Map([
-					["/versions", { body: { error: "Unauthorized" }, ok: false, status: 401 }],
-				]),
-			);
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: { versionNumber: 1 }, status: 200 });
+			http.mockResponse({ body: { versionNumber: 2 }, status: 200 });
 
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				readFile: () => buffer.Buffer.from("mock"),
-				sleep: noSleep,
-			});
+			const runner = makeRunner(http);
 
-			await expect(runner.uploadPlace({ placeFilePath: "./test.rbxl" })).rejects.toThrow(
-				/Failed to upload place/,
-			);
+			await runner.uploadPlace({ cache: false, placeFilePath: "/work/p.rbxl" });
+			await runner.uploadPlace({ cache: false, placeFilePath: "/work/p.rbxl" });
+
+			expect(http.requests).toHaveLength(2);
 		});
 
-		it("should throw when response has no versionNumber", async () => {
+		it("should throw when publish returns an API error", async () => {
 			expect.assertions(1);
 
-			const mockHttp = createMockHttpClient(
-				new Map([["/versions", { body: {}, ok: true, status: 200 }]]),
+			const http = createFakeHttpClient();
+			http.mockApiError({ message: "Unauthorized", statusCode: 401 });
+
+			const runner = makeRunner(http);
+
+			await expect(runner.uploadPlace({ placeFilePath: "/work/p.rbxl" })).rejects.toThrow(
+				/Unauthorized/,
 			);
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				readFile: () => buffer.Buffer.from("mock"),
-				sleep: noSleep,
-			});
-
-			await expect(runner.uploadPlace({ placeFilePath: "./test.rbxl" })).rejects.toThrow(
-				"missing versionNumber",
-			);
-		});
-
-		it("should throw when response body is not an object", async () => {
-			expect.assertions(1);
-
-			const mockHttp = createMockHttpClient(
-				new Map([["/versions", { body: "ok", ok: true, status: 200 }]]),
-			);
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				readFile: () => buffer.Buffer.from("mock"),
-				sleep: noSleep,
-			});
-
-			await expect(runner.uploadPlace({ placeFilePath: "./test.rbxl" })).rejects.toThrow(
-				"missing versionNumber",
-			);
-		});
-
-		it("should throw when versionNumber is not numeric", async () => {
-			expect.assertions(1);
-
-			const mockHttp = createMockHttpClient(
-				new Map([["/versions", { body: { versionNumber: "abc" }, ok: true, status: 200 }]]),
-			);
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				readFile: () => buffer.Buffer.from("mock"),
-				sleep: noSleep,
-			});
-
-			await expect(runner.uploadPlace({ placeFilePath: "./test.rbxl" })).rejects.toThrow(
-				"missing versionNumber",
-			);
-		});
-
-		it("should default cache to false when option not provided", async () => {
-			expect.assertions(2);
-
-			const mockHttp = createMockHttpClient(new Map([["/versions", UPLOAD_OK]]));
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				readFile: () => buffer.Buffer.from("same-content"),
-				sleep: noSleep,
-			});
-
-			await runner.uploadPlace({ placeFilePath: "./test.rbxl" });
-			await runner.uploadPlace({ placeFilePath: "./test.rbxl" });
-
-			expect(mockHttp.calls.filter((call) => call.url.includes("/versions"))).toHaveLength(2);
-			expect(mockHttp.calls).toHaveLength(2);
 		});
 	});
 
 	describe("executeScript", () => {
-		it("should throw when timeout is zero or negative", async () => {
+		it("should throw when timeout is not positive", async () => {
 			expect.assertions(2);
 
-			const runner = new OcaleRunner(credentials, {
-				http: createMockHttpClient(new Map()),
-				sleep: noSleep,
-			});
+			const http = createFakeHttpClient();
+			const runner = makeRunner(http);
 
 			await expect(runner.executeScript({ script: "return 1", timeout: 0 })).rejects.toThrow(
 				"Timeout must be a positive number",
 			);
 			await expect(
-				runner.executeScript({ script: "return 1", timeout: -1000 }),
+				runner.executeScript({ script: "return 1", timeout: -100 }),
 			).rejects.toThrow("Timeout must be a positive number");
 		});
 
-		it("should create task and return outputs on success", async () => {
+		it("should submit, poll, and return string outputs", async () => {
 			expect.assertions(2);
 
-			const mockHttp = createMockHttpClient(
-				new Map([
-					["task-id", completeResponse(["result-1", "result-2"])],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED_WITH_ID],
-				]),
-			);
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: noSleep,
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: taskBody({ state: "QUEUED" }), status: 200 });
+			http.mockResponse({
+				body: taskBody({
+					output: { results: ["hello", "world"] },
+					state: "COMPLETE",
+				}),
+				status: 200,
 			});
 
-			const result = await runner.executeScript({
-				script: "return 'hello'",
-				timeout: 30_000,
-			});
+			const runner = makeRunner(http);
+			const result = await runner.executeScript({ script: "return 1", timeout: 30_000 });
 
-			expect(result.outputs).toStrictEqual(["result-1", "result-2"]);
+			expect(result.outputs).toStrictEqual(["hello", "world"]);
 			expect(result.durationMs).toBeGreaterThanOrEqual(0);
 		});
 
-		it("should poll until task is complete", async () => {
+		it("should return empty outputs when COMPLETE task has no results", async () => {
 			expect.assertions(1);
 
-			const mockHttp = createMockHttpClient(
-				new Map<string, Array<HttpResponse> | HttpResponse>([
-					["task-path", [PROCESSING, PROCESSING, completeResponse(["done"])]],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
-			);
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: noSleep,
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: taskBody({ state: "QUEUED" }), status: 200 });
+			http.mockResponse({
+				body: taskBody({ output: { results: [] }, state: "COMPLETE" }),
+				status: 200,
 			});
 
-			await runner.executeScript({ script: "return 1", timeout: 30_000 });
+			const runner = makeRunner(http);
+			const result = await runner.executeScript({ script: "return 1", timeout: 30_000 });
 
-			const pollCalls = mockHttp.calls.filter((call) => call.url.includes("task-path"));
-
-			expect(pollCalls).toHaveLength(3);
+			expect(result.outputs).toStrictEqual([]);
 		});
 
-		it("should throw on task creation failure", async () => {
+		it("should poll through PROCESSING until COMPLETE", async () => {
 			expect.assertions(1);
 
-			const mockHttp = createMockHttpClient(
-				new Map([
-					[
-						LUAU_EXEC_TASKS_PATH,
-						{ body: { error: "Bad request" }, ok: false, status: 400 },
-					],
-				]),
-			);
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: noSleep,
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: taskBody({ state: "QUEUED" }), status: 200 });
+			http.mockResponse({ body: taskBody({ state: "PROCESSING" }), status: 200 });
+			http.mockResponse({ body: taskBody({ state: "PROCESSING" }), status: 200 });
+			http.mockResponse({
+				body: taskBody({ output: { results: ["done"] }, state: "COMPLETE" }),
+				status: 200,
 			});
+
+			const runner = makeRunner(http);
+			const result = await runner.executeScript({ script: "return 1", timeout: 30_000 });
+
+			expect(result.outputs).toStrictEqual(["done"]);
+		});
+
+		it("should throw with task error message when task FAILS", async () => {
+			expect.assertions(1);
+
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: taskBody({ state: "QUEUED" }), status: 200 });
+			http.mockResponse({
+				body: taskBody({
+					error: { code: "SCRIPT_ERROR", message: "Script blew up" },
+					state: "FAILED",
+				}),
+				status: 200,
+			});
+
+			const runner = makeRunner(http);
 
 			await expect(
 				runner.executeScript({ script: "return 1", timeout: 30_000 }),
-			).rejects.toThrow("Failed to create execution task: 400");
+			).rejects.toThrow("Script blew up");
 		});
 
-		it("should throw on execution failure", async () => {
+		it("should throw 'Execution timed out' when pollUntilDone exhausts budget", async () => {
 			expect.assertions(1);
 
-			const mockHttp = createMockHttpClient(
-				new Map([
-					[
-						"task-path",
-						{
-							body: { error: { message: "Script error" }, state: "FAILED" },
-							ok: true,
-							status: 200,
-						},
-					],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
-			);
+			let clock = 1_000_000;
+			vi.spyOn(Date, "now").mockImplementation(() => clock);
+			async function advancingSleep(ms: number): Promise<void> {
+				clock += ms;
+			}
 
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: noSleep,
-			});
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: taskBody({ state: "QUEUED" }), status: 200 });
+			http.mockResponse({ body: taskBody({ state: "PROCESSING" }), status: 200 });
+
+			const runner = new OcaleRunner(
+				{ apiKey: "test-key", placeId: "456", universeId: "123" },
+				{ httpClient: http, readFile: () => rbxlBuffer(), sleep: advancingSleep },
+			);
 
 			await expect(
-				runner.executeScript({ script: "return 1", timeout: 30_000 }),
-			).rejects.toThrow("Script error");
+				runner.executeScript({ script: "return 1", timeout: 100 }),
+			).rejects.toThrow("Execution timed out");
 		});
 
-		it("should use fallback message when error has no message field", async () => {
+		it("should throw when task is CANCELLED", async () => {
 			expect.assertions(1);
 
-			const mockHttp = createMockHttpClient(
-				new Map([
-					["task-path", { body: { error: {}, state: "FAILED" }, ok: true, status: 200 }],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
-			);
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: taskBody({ state: "QUEUED" }), status: 200 });
+			http.mockResponse({ body: taskBody({ state: "CANCELLED" }), status: 200 });
 
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: noSleep,
-			});
-
-			await expect(
-				runner.executeScript({ script: "return 1", timeout: 30_000 }),
-			).rejects.toThrow("Execution failed");
-		});
-
-		it("should throw on CANCELLED task state", async () => {
-			expect.assertions(1);
-
-			const mockHttp = createMockHttpClient(
-				new Map([
-					["task-path", { body: { state: "CANCELLED" }, ok: true, status: 200 }],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
-			);
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: noSleep,
-			});
+			const runner = makeRunner(http);
 
 			await expect(
 				runner.executeScript({ script: "return 1", timeout: 30_000 }),
 			).rejects.toThrow("Execution was cancelled");
 		});
 
-		it("should throw when execution times out", async () => {
+		it("should throw when submit returns API error", async () => {
 			expect.assertions(1);
 
-			const mockHttp = createMockHttpClient(
-				new Map([
-					["task-path", PROCESSING],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
-			);
+			const http = createFakeHttpClient();
+			http.mockApiError({ message: "Bad request", statusCode: 400 });
 
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: noSleep,
-			});
-
-			await expect(runner.executeScript({ script: "return 1", timeout: 1 })).rejects.toThrow(
-				"Execution timed out",
-			);
-		});
-
-		it("should throw when poll response is not ok", async () => {
-			expect.assertions(1);
-
-			const mockHttp = createMockHttpClient(
-				new Map([
-					["task-path", { body: { error: "Internal error" }, ok: false, status: 500 }],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
-			);
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: noSleep,
-			});
+			const runner = makeRunner(http);
 
 			await expect(
 				runner.executeScript({ script: "return 1", timeout: 30_000 }),
-			).rejects.toThrow("Failed to poll task: 500");
+			).rejects.toThrow(/Bad request/);
 		});
 
-		it("should retry on 429 rate limit then succeed", async () => {
-			expect.assertions(2);
+		it("should coerce non-string output values via JSON serialization", async () => {
+			expect.assertions(1);
 
-			const mockHttp = createMockHttpClient(
-				new Map<string, Array<HttpResponse> | HttpResponse>([
-					[
-						"task-path",
-						[
-							{ body: {}, headers: { "retry-after": "1" }, ok: false, status: 429 },
-							completeResponse(["ok"]),
-						],
-					],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
-			);
-
-			const sleepCalls: Array<number> = [];
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: async (ms) => {
-					sleepCalls.push(ms);
-				},
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: taskBody({ state: "QUEUED" }), status: 200 });
+			http.mockResponse({
+				body: taskBody({
+					output: { results: [42, { nested: true }, "raw"] },
+					state: "COMPLETE",
+				}),
+				status: 200,
 			});
 
+			const runner = makeRunner(http);
 			const result = await runner.executeScript({ script: "return 1", timeout: 30_000 });
 
-			expect(result.outputs).toStrictEqual(["ok"]);
-			expect(sleepCalls[0]).toBe(1000);
+			expect(result.outputs).toStrictEqual(["42", '{"nested":true}', "raw"]);
 		});
 
-		it("should throw after exceeding max rate limit retries", async () => {
+		it("should pass pollInterval through to bedrock as pollDelay", async () => {
 			expect.assertions(1);
 
-			const mockHttp = createMockHttpClient(
-				new Map([
-					["task-path", { body: {}, headers: {}, ok: false, status: 429 }],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
+			const waits: Array<number> = [];
+			async function recordingSleep(ms: number): Promise<void> {
+				waits.push(ms);
+			}
+
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: taskBody({ state: "QUEUED" }), status: 200 });
+			http.mockResponse({ body: taskBody({ state: "PROCESSING" }), status: 200 });
+			http.mockResponse({
+				body: taskBody({ output: { results: [] }, state: "COMPLETE" }),
+				status: 200,
+			});
+
+			const runner = new OcaleRunner(
+				{ apiKey: "test-key", placeId: "456", universeId: "123" },
+				{ httpClient: http, readFile: () => rbxlBuffer(), sleep: recordingSleep },
 			);
 
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: noSleep,
-			});
-
-			await expect(
-				runner.executeScript({ script: "return 1", timeout: 30_000 }),
-			).rejects.toThrow("Rate limited by Open Cloud API after multiple retries");
-		});
-
-		it("should use default retry wait when retry-after is invalid", async () => {
-			expect.assertions(1);
-
-			const mockHttp = createMockHttpClient(
-				new Map<string, Array<HttpResponse> | HttpResponse>([
-					[
-						"task-path",
-						[
-							{
-								body: {},
-								headers: { "retry-after": "not-a-number" },
-								ok: false,
-								status: 429,
-							},
-							completeResponse(["ok"]),
-						],
-					],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
-			);
-
-			const sleepCalls: Array<number> = [];
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: async (ms) => {
-					sleepCalls.push(ms);
-				},
-			});
-
-			await runner.executeScript({ script: "return 1", timeout: 30_000 });
-
-			expect(sleepCalls[0]).toBe(5000);
-		});
-
-		it("should use default retry wait when retry-after header missing", async () => {
-			expect.assertions(1);
-
-			const mockHttp = createMockHttpClient(
-				new Map<string, Array<HttpResponse> | HttpResponse>([
-					["task-path", [{ body: {}, ok: false, status: 429 }, completeResponse(["ok"])]],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
-			);
-
-			const sleepCalls: Array<number> = [];
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: async (ms) => {
-					sleepCalls.push(ms);
-				},
-			});
-
-			await runner.executeScript({ script: "return 1", timeout: 30_000 });
-
-			expect(sleepCalls[0]).toBe(5000);
-		});
-
-		it("should use default poll interval when not specified", async () => {
-			expect.assertions(1);
-
-			const mockHttp = createMockHttpClient(
-				new Map<string, Array<HttpResponse> | HttpResponse>([
-					["task-path", [PROCESSING, completeResponse(["ok"])]],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
-			);
-
-			const sleepCalls: Array<number> = [];
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: async (ms) => {
-					sleepCalls.push(ms);
-				},
-			});
-
-			await runner.executeScript({ script: "return 1", timeout: 30_000 });
-
-			expect(sleepCalls[0]).toBe(2000);
-		});
-
-		it("should return empty outputs when COMPLETE but no results", async () => {
-			expect.assertions(1);
-
-			const mockHttp = createMockHttpClient(
-				new Map([
-					[
-						"task-path",
-						{ body: { output: {}, state: "COMPLETE" }, ok: true, status: 200 },
-					],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
-			);
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: noSleep,
-			});
-
-			const result = await runner.executeScript({ script: "return 1", timeout: 30_000 });
-
-			expect(result.outputs).toStrictEqual([]);
-		});
-
-		it("should use default sleep when no sleep option provided", async () => {
-			expect.assertions(1);
-
-			vi.useFakeTimers();
-
-			const mockHttp = createMockHttpClient(
-				new Map<string, Array<HttpResponse> | HttpResponse>([
-					["task-path", [PROCESSING, completeResponse(["ok"])]],
-					[LUAU_EXEC_TASKS_PATH, TASK_CREATED],
-				]),
-			);
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-			});
-
-			const promise = runner.executeScript({ script: "return 1", timeout: 30_000 });
-			await vi.advanceTimersByTimeAsync(10_000);
-
-			const result = await promise;
-
-			expect(result.outputs).toStrictEqual(["ok"]);
-
-			vi.useRealTimers();
-		});
-
-		it("should use default readFile when no readFile option provided", async () => {
-			expect.assertions(1);
-
-			const mockHttp = createMockHttpClient(new Map([["/versions", UPLOAD_OK]]));
-
-			const runner = new OcaleRunner(credentials, {
-				http: mockHttp,
-				sleep: noSleep,
-			});
-
-			await expect(
-				runner.uploadPlace({ placeFilePath: "./nonexistent-place-file.rbxl" }),
-			).rejects.toThrow(/ENOENT/);
-		});
-
-		it("should use default http client when no http option provided", async () => {
-			expect.assertions(1);
-
-			const pollBody = {
-				output: { results: ["default-client-works"] },
-				state: "COMPLETE",
-			};
-
-			const fetchMock = vi
-				.fn<typeof fetch>()
-				// First call: POST to create task
-				.mockResolvedValueOnce({
-					headers: new Headers({ "content-type": "application/json" }),
-					json: async () => ({ path: "task-path" }),
-					ok: true,
-					status: 200,
-				} as unknown as Response)
-				// Second call: GET to poll task
-				.mockResolvedValueOnce({
-					headers: new Headers({ "content-type": "application/json" }),
-					json: async () => pollBody,
-					ok: true,
-					status: 200,
-				} as unknown as Response);
-
-			vi.stubGlobal("fetch", fetchMock);
-
-			const runner = new OcaleRunner(credentials);
-
-			const result = await runner.executeScript({
+			await runner.executeScript({
+				pollInterval: 1337,
 				script: "return 1",
 				timeout: 30_000,
 			});
 
-			expect(result.outputs).toStrictEqual(["default-client-works"]);
+			expect(waits).toContain(1337);
+		});
+
+		it("should clamp task timeout to 300 seconds when caller asks for more", async () => {
+			expect.assertions(1);
+
+			const http = createFakeHttpClient();
+			http.mockResponse({ body: taskBody({ state: "QUEUED" }), status: 200 });
+			http.mockResponse({
+				body: taskBody({ output: { results: [] }, state: "COMPLETE" }),
+				status: 200,
+			});
+
+			const runner = makeRunner(http);
+			await runner.executeScript({ script: "return 1", timeout: 600_000 });
+
+			const submitBody = http.requests[0]!.request.body as Record<string, unknown>;
+
+			expect(submitBody["timeout"]).toBe("300s");
+		});
+	});
+
+	describe("default option fallbacks", () => {
+		it("should default readFile to fs.readFileSync when omitted", async () => {
+			expect.assertions(1);
+
+			const http = createFakeHttpClient();
+			const runner = new OcaleRunner(
+				{ apiKey: "k", placeId: "456", universeId: "123" },
+				{ httpClient: http, sleep: createFakeSleep() },
+			);
+
+			await expect(
+				runner.uploadPlace({ placeFilePath: "/nonexistent.rbxl" }),
+			).rejects.toThrow(/ENOENT/);
+		});
+
+		it("should accept a custom baseUrl option", () => {
+			expect.assertions(1);
+
+			const runner = new OcaleRunner(
+				{ apiKey: "k", placeId: "456", universeId: "123" },
+				{ baseUrl: "http://127.0.0.1:4010" },
+			);
+
+			expect(runner).toBeInstanceOf(OcaleRunner);
+		});
+
+		it("should construct a default fetch-backed http client when none provided", () => {
+			expect.assertions(1);
+
+			const runner = new OcaleRunner({ apiKey: "k", placeId: "456", universeId: "123" });
+
+			expect(runner).toBeInstanceOf(OcaleRunner);
 		});
 	});
 });

@@ -28,7 +28,6 @@ import {
 	type ExecuteResult,
 	processProjectResult,
 } from "./executor.ts";
-import type { MemoryStoreQueueClient } from "./memory-store/queue-client.ts";
 import { prepareWorkStealingQueue } from "./memory-store/work-stealing.ts";
 import { type PackageDescriptor, type StubMount, synthesize } from "./staging/synthesizer.ts";
 import {
@@ -53,17 +52,17 @@ export interface RunWorkspaceOptions {
 	cli: CliOptions;
 	config: ResolvedConfig;
 	packageInfos: Array<PackageInfo>;
-	/**
-	 * MemoryStore queue client used to coordinate work-stealing across
-	 * parallel OCALE tasks. When provided alongside `cli.parallel > 1`, the
-	 * workspace runner pushes every (pkg, project) onto a per-run UUID queue
-	 * and the backend fires N tasks all running the same materializer script.
-	 * Without it (or with parallel=1) the runner uses the existing
-	 * single-task embedded-entries path.
-	 */
-	queueClient?: MemoryStoreQueueClient;
 	version: string;
 	workspaceRoot: string;
+	/**
+	 * Credentials used to coordinate work-stealing across parallel OCALE
+	 * tasks via a memory-store queue. When provided alongside
+	 * `cli.parallel > 1`, the workspace runner pushes every (pkg, project)
+	 * onto a per-run UUID queue and the backend fires N tasks all running
+	 * the same materializer script. Without it (or with parallel=1) the
+	 * runner uses the existing single-task embedded-entries path.
+	 */
+	workStealingCredentials?: { apiKey: string; baseUrl?: string; universeId: string };
 }
 
 export interface WorkspaceProjectResult {
@@ -204,13 +203,13 @@ export async function runWorkspace(
 		};
 	});
 
-	const { queueClient } = options;
+	const { workStealingCredentials } = options;
 	const { results, timing: backendTiming } = await dispatchWorkspace({
 		backend,
 		cli,
 		inputs,
 		jobs,
-		queueClient,
+		workStealingCredentials,
 	});
 
 	return mapBackendResults(results, pending, {
@@ -239,21 +238,28 @@ async function dispatchWorkspace(input: {
 	cli: CliOptions;
 	inputs: Array<MaterializerInput>;
 	jobs: Array<ReturnType<typeof buildProjectJob>>;
-	queueClient: MemoryStoreQueueClient | undefined;
+	workStealingCredentials: undefined | { apiKey: string; baseUrl?: string; universeId: string };
 }): Promise<{
 	results: Array<ProjectBackendResult>;
 	timing: BackendTiming;
 }> {
-	const { backend, cli, inputs, jobs, queueClient } = input;
+	const { backend, cli, inputs, jobs, workStealingCredentials } = input;
 
 	const parallel = typeof cli.parallel === "number" ? cli.parallel : undefined;
-	const useWorkStealing = queueClient !== undefined && parallel !== undefined && parallel > 1;
+	const useWorkStealing =
+		workStealingCredentials !== undefined && parallel !== undefined && parallel > 1;
 
 	if (useWorkStealing) {
 		const prepared = await prepareWorkStealingQueue({
+			...(workStealingCredentials.baseUrl !== undefined
+				? { baseUrl: workStealingCredentials.baseUrl }
+				: {}),
+			credentials: {
+				apiKey: workStealingCredentials.apiKey,
+				universeId: workStealingCredentials.universeId,
+			},
 			packages: inputs.map((entry) => ({ pkg: entry.pkg, project: entry.project })),
 			perPackageTimeoutSeconds: PER_PACKAGE_TIMEOUT_SECONDS,
-			queueClient,
 		});
 		const script = generateWorkStealingScript(
 			inputs,

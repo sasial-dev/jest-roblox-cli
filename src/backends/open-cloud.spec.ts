@@ -1,82 +1,69 @@
-import buffer from "node:buffer";
+import type {
+	ExecuteScriptOptions,
+	RemoteRunner,
+	ScriptResult,
+	UploadPlaceOptions,
+	UploadPlaceResult,
+} from "@isentinel/roblox-runner";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_CONFIG } from "../config/schema.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import { LuauScriptError } from "../reporter/parser.ts";
-import type { HttpClient, HttpResponse } from "./http-client.ts";
 import type { BackendOptions, ProjectJob } from "./interface.ts";
 import { createOpenCloudBackend, OpenCloudBackend } from "./open-cloud.ts";
 
-const LUAU_EXEC_TASKS_PATH = "/luau-execution-session-tasks";
-
-interface MockCall {
-	body?: unknown;
-	method: string;
-	url: string;
+interface RunnerStubOptions {
+	uploadError?: Error;
+	uploadResult?: UploadPlaceResult;
 }
 
-type TaskHandler = (body: unknown) => {
-	complete: HttpResponse;
-	processing?: Array<HttpResponse>;
-	taskPath: string;
-};
+type ExecuteHandler = (options: ExecuteScriptOptions) => Promise<ScriptResult> | ScriptResult;
 
-interface DispatchMockOptions {
-	onCreateTask: TaskHandler;
-	uploadResponse?: HttpResponse;
+interface RunnerStub {
+	executeCalls: Array<ExecuteScriptOptions>;
+	runner: RemoteRunner;
+	setExecute: (handler: ExecuteHandler) => void;
+	uploadCalls: Array<UploadPlaceOptions>;
 }
 
-const UPLOAD_OK: HttpResponse = { body: { versionNumber: 1 }, ok: true, status: 200 };
+const DEFAULT_UPLOAD: UploadPlaceResult = { cached: false, uploadMs: 12, versionNumber: 1 };
 
-function createDispatchMock(options: DispatchMockOptions): HttpClient & {
-	calls: Array<MockCall>;
-	createCallCount: number;
-} {
-	const calls: Array<MockCall> = [];
-	// Each created task path gets its own queue of poll responses. Multiple
-	// parallel buckets issue distinct task paths and are polled independently.
-	const pollQueues = new Map<string, Array<HttpResponse>>();
-	let createCallCount = 0;
+function createRunnerStub(options: RunnerStubOptions = {}): RunnerStub {
+	const executeCalls: Array<ExecuteScriptOptions> = [];
+	const uploadCalls: Array<UploadPlaceOptions> = [];
+	async function defaultHandler(): Promise<ScriptResult> {
+		return { durationMs: 0, outputs: ["{}"] };
+	}
 
-	const client: HttpClient & { calls: Array<MockCall>; createCallCount: number } = {
-		calls,
-		createCallCount,
-		async request(method, url, requestOptions) {
-			calls.push({ body: requestOptions?.body, method, url });
+	let executeHandler: ExecuteHandler = defaultHandler;
 
-			if (url.includes("/versions")) {
-				return options.uploadResponse ?? UPLOAD_OK;
-			}
+	async function executeScript(executeOptions: ExecuteScriptOptions): Promise<ScriptResult> {
+		executeCalls.push(executeOptions);
+		return executeHandler(executeOptions);
+	}
 
-			if (url.includes(LUAU_EXEC_TASKS_PATH) && method === "POST") {
-				createCallCount++;
-				client.createCallCount = createCallCount;
-				const handled = options.onCreateTask(requestOptions?.body);
-				const queue = [...(handled.processing ?? []), handled.complete];
-				pollQueues.set(handled.taskPath, queue);
-				return { body: { path: handled.taskPath }, ok: true, status: 200 };
-			}
+	async function uploadPlace(uploadOptions: UploadPlaceOptions) {
+		uploadCalls.push(uploadOptions);
+		if (options.uploadError !== undefined) {
+			throw options.uploadError;
+		}
 
-			for (const [taskPath, queue] of pollQueues) {
-				if (url.includes(taskPath)) {
-					const next = queue.shift() ?? queue[queue.length - 1];
-					if (queue.length === 0 && next !== undefined) {
-						queue.push(next);
-					}
+		return options.uploadResult ?? DEFAULT_UPLOAD;
+	}
 
-					return next ?? { body: {}, ok: false, status: 500 };
-				}
-			}
+	function setExecute(handler: ExecuteHandler): void {
+		executeHandler = handler;
+	}
 
-			return { body: { error: "Not found" }, ok: false, status: 404 };
-		},
+	return {
+		executeCalls,
+		runner: { executeScript, uploadPlace },
+		setExecute,
+		uploadCalls,
 	};
-
-	return client;
 }
-
-async function noSleep(): Promise<void> {}
 
 function successJest(overrides: Record<string, unknown> = {}): string {
 	return JSON.stringify({
@@ -107,12 +94,8 @@ function packageEntry(packageName: string): { jestOutput: string; pkg: string } 
 	return { jestOutput: successJest(), pkg: packageName };
 }
 
-function completeResponse(jestOutput: string, gameOutput = "[]"): HttpResponse {
-	return {
-		body: { output: { results: [jestOutput, gameOutput] }, state: "COMPLETE" },
-		ok: true,
-		status: 200,
-	};
+function scriptResult(jestOutput: string, gameOutput = "[]"): ScriptResult {
+	return { durationMs: 5, outputs: [jestOutput, gameOutput] };
 }
 
 function job(
@@ -148,1306 +131,612 @@ const credentials = {
 };
 
 describe(OpenCloudBackend, () => {
-	it("should honor JEST_ROBLOX_OPEN_CLOUD_BASE_URL for requests", async () => {
-		expect.assertions(2);
+	describe("validation", () => {
+		it("should throw when the jobs array is empty", async () => {
+			expect.assertions(1);
 
-		vi.stubEnv("JEST_ROBLOX_OPEN_CLOUD_BASE_URL", "http://127.0.0.1:4010/custom/");
+			const { runner } = createRunnerStub();
+			const backend = new OpenCloudBackend(credentials, { runner });
 
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					taskPath: "mock/tasks/1",
-				};
-			},
+			await expect(backend.runTests({ jobs: [] })).rejects.toThrow(
+				"OpenCloudBackend requires at least one job",
+			);
 		});
 
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await backend.runTests(jobsOptions([job("alpha")], 1));
-
-		expect(http.calls[0]?.url).toBe(
-			"http://127.0.0.1:4010/custom/universes/v1/123/places/456/versions?versionType=Saved",
-		);
-		expect(http.calls[1]?.url).toBe(
-			"http://127.0.0.1:4010/custom/cloud/v2/universes/123/places/456/luau-execution-session-tasks",
-		);
-	});
-
-	it("should throw when the jobs array is empty", async () => {
-		expect.assertions(1);
-
-		const backend = new OpenCloudBackend(credentials, {
-			http: createDispatchMock({
-				onCreateTask: () => {
-					return {
-						complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-						taskPath: "task-empty",
-					};
-				},
-			}),
-			readFile: () => buffer.Buffer.from("mock"),
-			sleep: noSleep,
-		});
-
-		await expect(backend.runTests({ jobs: [] })).rejects.toThrow(
-			"OpenCloudBackend requires at least one job",
-		);
-	});
-
-	it("should default to a single session carrying every job in one configs array", async () => {
-		expect.assertions(4);
-
-		const capturedScripts: Array<string> = [];
-		const http = createDispatchMock({
-			onCreateTask: (body) => {
-				capturedScripts.push((body as { script: string }).script);
-				return {
-					complete: completeResponse(
-						envelope([
-							{ elapsedMs: 111, jestOutput: successJest({ numPassedTests: 1 }) },
-							{ elapsedMs: 222, jestOutput: successJest({ numPassedTests: 2 }) },
-							{ elapsedMs: 333, jestOutput: successJest({ numPassedTests: 3 }) },
-						]),
-					),
-					taskPath: "task-single",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		const { results } = await backend.runTests(
-			jobsOptions([
-				job("alpha", { testNamePattern: "alpha-pattern" }),
-				job("beta", { testNamePattern: "beta-pattern" }),
-				job("gamma", { testNamePattern: "gamma-pattern" }),
-			]),
-		);
-
-		const capturedPatterns = [
-			...(capturedScripts[0] ?? "").matchAll(/"testNamePattern":"([^"]+)"/g),
-		].map((match) => match[1]);
-
-		expect(http.createCallCount).toBe(1);
-		expect(capturedPatterns).toStrictEqual(["alpha-pattern", "beta-pattern", "gamma-pattern"]);
-		expect(results.map((entry) => entry.displayName)).toStrictEqual(["alpha", "beta", "gamma"]);
-		expect(results.map((entry) => entry.elapsedMs)).toStrictEqual([111, 222, 333]);
-	});
-
-	it("should preserve snapshotFormat per job inside the bundled configs array", async () => {
-		expect.assertions(2);
-
-		const capturedScripts: Array<string> = [];
-		const http = createDispatchMock({
-			onCreateTask: (body) => {
-				capturedScripts.push((body as { script: string }).script);
-				return {
-					complete: completeResponse(
-						envelope([{ jestOutput: successJest() }, { jestOutput: successJest() }]),
-					),
-					taskPath: "task-snapshot",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await backend.runTests(
-			jobsOptions([
-				job("alpha", {
-					snapshotFormat: { escapeString: true, printBasicPrototype: false },
-				}),
-				job("beta", { snapshotFormat: { escapeString: false, printBasicPrototype: true } }),
-			]),
-		);
-
-		expect(capturedScripts[0]).toContain('"escapeString":true');
-		expect(capturedScripts[0]).toContain('"escapeString":false');
-	});
-
-	it("should treat --parallel 1 identically to the default path", async () => {
-		expect.assertions(2);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(
-						envelope([
-							{ jestOutput: successJest() },
-							{ jestOutput: successJest() },
-							{ jestOutput: successJest() },
-						]),
-					),
-					taskPath: "task-parallel-one",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		const { results } = await backend.runTests(
-			jobsOptions([job("alpha"), job("beta"), job("gamma")], 1),
-		);
-
-		expect(http.createCallCount).toBe(1);
-		expect(results).toHaveLength(3);
-	});
-
-	it("should populate timing.executionMs on the BackendResult", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					taskPath: "task-timing",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		const { timing } = await backend.runTests(jobsOptions([job("")]));
-
-		expect(timing.executionMs).toBeGreaterThanOrEqual(0);
-	});
-
-	it("should fan --parallel 3 out to three concurrent POSTs, one bucket each", async () => {
-		expect.assertions(5);
-
-		const capturedScripts: Array<string> = [];
-		let inflight = 0;
-		let peakInflight = 0;
-
-		const http = createDispatchMock({
-			onCreateTask: (body) => {
-				capturedScripts.push((body as { script: string }).script);
-				inflight++;
-				peakInflight = Math.max(peakInflight, inflight);
-				const bucketIndex = capturedScripts.length - 1;
-				return {
-					complete: completeResponse(
-						envelope([
-							{
-								elapsedMs: bucketIndex * 10,
-								jestOutput: successJest({ numPassedTests: bucketIndex + 1 }),
-							},
-						]),
-					),
-					taskPath: `task-parallel-${bucketIndex.toString()}`,
-				};
-			},
-		});
-
-		// Wrap the http client to decrement inflight on poll completion so peak
-		// reflects concurrent task-creation calls.
-		const originalRequest = http.request.bind(http);
-		http.request = async (method, url, options) => {
-			const response = await originalRequest(method, url, options);
-			if (url.includes(LUAU_EXEC_TASKS_PATH) && method !== "POST") {
-				inflight--;
-			}
-
-			return response;
-		};
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		const { results } = await backend.runTests(
-			jobsOptions([job("alpha"), job("beta"), job("gamma")], 3),
-		);
-
-		expect(http.createCallCount).toBe(3);
-		expect(peakInflight).toBe(3);
-		expect(results).toHaveLength(3);
-		// Each bucket carries exactly one config.
-		expect(capturedScripts.every((script) => script.includes('"configs":['))).toBeTrue();
-		expect(results.map((entry) => entry.displayName)).toStrictEqual(["alpha", "beta", "gamma"]);
-	});
-
-	it("should round-robin 10 jobs into buckets of 4/3/3 and flatten in input order", async () => {
-		expect.assertions(5);
-
-		const bucketPatterns: Array<Array<string>> = [];
-		const http = createDispatchMock({
-			onCreateTask: (body) => {
-				const { script } = body as { script: string };
-				const patternMatches = [...script.matchAll(/"testNamePattern":"([^"]+)"/g)].map(
-					(match) => match[1]!,
-				);
-				bucketPatterns.push(patternMatches);
-				const bucketIndex = bucketPatterns.length - 1;
-				const entries = patternMatches.map((_, positionInBucket) => {
-					return {
-						jestOutput: successJest({
-							numPassedTests: bucketIndex * 10 + positionInBucket,
-						}),
-					};
-				});
-				return {
-					complete: completeResponse(envelope(entries)),
-					taskPath: `task-rr-${bucketIndex.toString()}`,
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		const jobs = Array.from({ length: 10 }, (_, index) => {
-			return job(`p${index.toString()}`, { testNamePattern: `pattern-${index.toString()}` });
-		});
-
-		const { results } = await backend.runTests(jobsOptions(jobs, 3));
-
-		expect(http.createCallCount).toBe(3);
-		// Round-robin: bucket 0 = [0,3,6,9], bucket 1 = [1,4,7], bucket 2 =
-		// [2,5,8]
-		expect(bucketPatterns[0]).toStrictEqual([
-			"pattern-0",
-			"pattern-3",
-			"pattern-6",
-			"pattern-9",
-		]);
-		expect(bucketPatterns[1]).toStrictEqual(["pattern-1", "pattern-4", "pattern-7"]);
-		expect(bucketPatterns[2]).toStrictEqual(["pattern-2", "pattern-5", "pattern-8"]);
-		expect(results.map((entry) => entry.displayName)).toStrictEqual([
-			"p0",
-			"p1",
-			"p2",
-			"p3",
-			"p4",
-			"p5",
-			"p6",
-			"p7",
-			"p8",
-			"p9",
-		]);
-	});
-
-	it("should resolve --parallel auto to min(jobs.length, 3)", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: (body) => {
-				const patterns = [
-					...(body as { script: string }).script.matchAll(/"testNamePattern":"([^"]+)"/g),
-				];
-				return {
-					complete: completeResponse(
-						envelope(patterns.map(() => ({ jestOutput: successJest() }))),
-					),
-					taskPath: `task-auto-${Math.random().toString()}`,
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		const jobs = Array.from({ length: 5 }, (_, index) => {
-			return job(`p${index.toString()}`, { testNamePattern: `auto-${index.toString()}` });
-		});
-
-		await backend.runTests(jobsOptions(jobs, "auto"));
-
-		expect(http.createCallCount).toBe(3);
-	});
-
-	it("should cap --parallel auto at jobs.length when jobs are fewer than the auto ceiling", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					taskPath: `task-auto-small-${Math.random().toString()}`,
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await backend.runTests(jobsOptions([job("alpha"), job("beta")], "auto"));
-
-		expect(http.createCallCount).toBe(2);
-	});
-
-	it("should cap --parallel n at jobs.length when n exceeds the job count", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					taskPath: `task-cap-${Math.random().toString()}`,
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await backend.runTests(jobsOptions([job("alpha"), job("beta")], 10));
-
-		expect(http.createCallCount).toBe(2);
-	});
-
-	it("should throw when --parallel is less than 1", async () => {
-		expect.assertions(1);
-
-		const backend = new OpenCloudBackend(credentials, {
-			http: createDispatchMock({
-				onCreateTask: () => {
-					return {
-						complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-						taskPath: "task-invalid",
-					};
-				},
-			}),
-			readFile: () => buffer.Buffer.from("mock"),
-			sleep: noSleep,
-		});
-
-		await expect(backend.runTests(jobsOptions([job("alpha")], 0))).rejects.toThrow(
-			/--parallel must be >= 1/,
-		);
-	});
-
-	it("should upload the place file exactly once regardless of bucket count", async () => {
-		expect.assertions(2);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					taskPath: `task-upload-${Math.random().toString()}`,
-				};
-			},
-		});
-
-		let readCalls = 0;
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => {
-				readCalls++;
-				return buffer.Buffer.from("mock-rbxl");
-			},
-			sleep: noSleep,
-		});
-
-		await backend.runTests(
-			jobsOptions([job("alpha"), job("beta"), job("gamma"), job("delta")], 4),
-		);
-
-		const uploadCalls = http.calls.filter((call) => call.url.includes("/versions"));
-
-		expect(uploadCalls).toHaveLength(1);
-		expect(readCalls).toBe(1);
-	});
-
-	it("should reject the whole call when any parallel bucket fails first", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				const bucketIndex = http.createCallCount;
-				if (bucketIndex === 2) {
-					return {
-						complete: {
-							body: { error: { message: "bucket two blew up" }, state: "FAILED" },
-							ok: true,
-							status: 200,
-						},
-						taskPath: `task-fail-${bucketIndex.toString()}`,
-					};
-				}
-
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					taskPath: `task-fail-${bucketIndex.toString()}`,
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await expect(
-			backend.runTests(jobsOptions([job("alpha"), job("beta"), job("gamma")], 3)),
-		).rejects.toThrowWithMessage(Error, "bucket two blew up");
-	});
-
-	it("should pass through per-entry gameOutput from the envelope", async () => {
-		expect.assertions(1);
-
-		const entryGameOutput = JSON.stringify([
-			{ message: "alpha log", messageType: 0, timestamp: 1 },
-		]);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(
-						envelope([{ gameOutput: entryGameOutput, jestOutput: successJest() }]),
-					),
-					taskPath: "task-game-output",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		const { results } = await backend.runTests(jobsOptions([job("alpha")]));
-
-		expect(results[0]!.gameOutput).toBe(entryGameOutput);
-	});
-
-	it("should fall back to the outer results[1] gameOutput when the entry omits one", async () => {
-		expect.assertions(1);
-
-		const fallback = JSON.stringify([{ message: "fallback", messageType: 0, timestamp: 0 }]);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }]), fallback),
-					taskPath: "task-fallback",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		const { results } = await backend.runTests(jobsOptions([job("alpha")]));
-
-		expect(results[0]!.gameOutput).toBe(fallback);
-	});
-
-	it("should convert _setup seconds into setupMs on the parsed result", async () => {
-		expect.assertions(1);
-
-		const jestOutput = JSON.stringify({
-			_setup: 0.321,
-			success: true,
-			value: {
-				numFailedTests: 0,
-				numPassedTests: 1,
-				numPendingTests: 0,
-				numTotalTests: 1,
-				startTime: 0,
-				success: true,
-				testResults: [],
-			},
-		});
-
-		const setupResponse = completeResponse(envelope([{ jestOutput }]));
-		const http = createDispatchMock({
-			onCreateTask: () => ({ complete: setupResponse, taskPath: "task-setup" }),
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		const { results } = await backend.runTests(jobsOptions([job("alpha")]));
-
-		expect(results[0]!.setupMs).toBe(321);
-	});
-
-	it("should return undefined setupMs when _setup is absent", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					taskPath: "task-no-setup",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		const { results } = await backend.runTests(jobsOptions([job("alpha")]));
-
-		expect(results[0]!.setupMs).toBeUndefined();
-	});
-
-	it("should poll until the task reports COMPLETE", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					processing: [
-						{ body: { state: "PROCESSING" }, ok: true, status: 200 },
-						{ body: { state: "PROCESSING" }, ok: true, status: 200 },
-					],
-					taskPath: "task-poll",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await backend.runTests(jobsOptions([job("alpha")]));
-
-		const pollCalls = http.calls.filter(
-			(call) => call.method === "GET" && call.url.includes("task-poll"),
-		);
-
-		expect(pollCalls).toHaveLength(3);
-	});
-
-	it("should use the default sleep implementation when none is provided", async () => {
-		expect.assertions(1);
-
-		vi.useFakeTimers();
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					processing: [{ body: { state: "PROCESSING" }, ok: true, status: 200 }],
-					taskPath: "task-default-sleep",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-		});
-
-		const promise = backend.runTests(jobsOptions([job("alpha")]));
+		it("should throw when --parallel is less than 1", async () => {
+			expect.assertions(1);
 
-		await vi.advanceTimersByTimeAsync(10_000);
+			const { runner } = createRunnerStub();
+			const backend = new OpenCloudBackend(credentials, { runner });
 
-		const { results } = await promise;
-
-		expect(results[0]!.result.success).toBeTrue();
-
-		vi.useRealTimers();
-	});
-
-	it("should retry on 429 and honor numeric retry-after", async () => {
-		expect.assertions(2);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					processing: [
-						{ body: {}, headers: { "retry-after": "1" }, ok: false, status: 429 },
-					],
-					taskPath: "task-429",
-				};
-			},
-		});
-
-		const sleepCalls: Array<number> = [];
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: async (ms) => {
-				sleepCalls.push(ms);
-			},
-		});
-
-		const { results } = await backend.runTests(jobsOptions([job("alpha")]));
-
-		expect(results[0]!.result.success).toBeTrue();
-		expect(sleepCalls[0]).toBe(1000);
-	});
-
-	it("should use the default retry wait when retry-after is not numeric", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					processing: [
-						{
-							body: {},
-							headers: { "retry-after": "not-a-number" },
-							ok: false,
-							status: 429,
-						},
-					],
-					taskPath: "task-retry-bad",
-				};
-			},
-		});
-
-		const sleepCalls: Array<number> = [];
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: async (ms) => {
-				sleepCalls.push(ms);
-			},
-		});
-
-		await backend.runTests(jobsOptions([job("alpha")]));
-
-		expect(sleepCalls[0]).toBe(5000);
-	});
-
-	it("should use the default retry wait when retry-after header is missing", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					processing: [{ body: {}, ok: false, status: 429 }],
-					taskPath: "task-retry-missing",
-				};
-			},
-		});
-
-		const sleepCalls: Array<number> = [];
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: async (ms) => {
-				sleepCalls.push(ms);
-			},
-		});
-
-		await backend.runTests(jobsOptions([job("alpha")]));
-
-		expect(sleepCalls[0]).toBe(5000);
-	});
-
-	it("should throw after exceeding max rate-limit retries", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: { body: {}, headers: {}, ok: false, status: 429 },
-					taskPath: "task-max-retries",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrow(
-			"Rate limited by Open Cloud API after multiple retries",
-		);
-	});
-
-	it("should throw when the place upload fails", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					taskPath: "task-upload-fail",
-				};
-			},
-			uploadResponse: { body: { error: "Unauthorized" }, ok: false, status: 401 },
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrowWithMessage(
-			Error,
-			/Failed to upload place/,
-		);
-	});
-
-	it("should throw when task creation fails", async () => {
-		expect.assertions(1);
-
-		const http: HttpClient = {
-			async request(method, url) {
-				if (url.includes("/versions")) {
-					return UPLOAD_OK;
-				}
-
-				if (url.includes(LUAU_EXEC_TASKS_PATH) && method === "POST") {
-					return { body: { error: "Bad request" }, ok: false, status: 400 };
-				}
-
-				return { body: {}, ok: false, status: 404 };
-			},
-		};
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrowWithMessage(
-			Error,
-			"Failed to create execution task: 400",
-		);
-	});
-
-	it("should throw when a poll response is not ok", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: { body: { error: "Internal error" }, ok: false, status: 500 },
-					taskPath: "task-poll-500",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrowWithMessage(
-			Error,
-			"Failed to poll task: 500",
-		);
-	});
-
-	it("should throw on FAILED task state using the error message", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: {
-						body: { error: { message: "Script error" }, state: "FAILED" },
-						ok: true,
-						status: 200,
-					},
-					taskPath: "task-failed",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrowWithMessage(
-			Error,
-			"Script error",
-		);
-	});
-
-	it("should fall back on a generic message when FAILED error has no message", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: { body: { error: {}, state: "FAILED" }, ok: true, status: 200 },
-					taskPath: "task-failed-generic",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrowWithMessage(
-			Error,
-			"Execution failed",
-		);
-	});
-
-	it("should throw on CANCELLED task state", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: { body: { state: "CANCELLED" }, ok: true, status: 200 },
-					taskPath: "task-cancelled",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrowWithMessage(
-			Error,
-			"Execution was cancelled",
-		);
-	});
-
-	it("should throw when COMPLETE output has no results", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: {
-						body: { output: { results: [] }, state: "COMPLETE" },
-						ok: true,
-						status: 200,
-					},
-					taskPath: "task-empty-output",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrowWithMessage(
-			Error,
-			/No test results in output/,
-		);
-	});
-
-	it("should throw when execution times out", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: { body: { state: "PROCESSING" }, ok: true, status: 200 },
-					taskPath: "task-timeout",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await expect(
-			backend.runTests(jobsOptions([job("alpha", { timeout: 1 })])),
-		).rejects.toThrowWithMessage(Error, "Execution timed out");
-	});
-
-	it("should attach fallback gameOutput to LuauScriptError from parseJestOutput", async () => {
-		expect.assertions(2);
-
-		const luauError = JSON.stringify({ err: "Luau script error", success: false });
-		const gameOutputData = JSON.stringify([
-			{ message: "error context", messageType: 0, timestamp: 1 },
-		]);
-
-		// Legacy-shaped payload (no entries wrapper) is rewrapped by
-		// parseEnvelope and parseJestOutput throws a LuauScriptError that picks
-		// up the outer gameOutput as fallback.
-		const luauResponse = completeResponse(luauError, gameOutputData);
-		const http = createDispatchMock({
-			onCreateTask: () => ({ complete: luauResponse, taskPath: "task-luau-err" }),
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		const error = await backend
-			.runTests(jobsOptions([job("alpha")]))
-			.catch((err: unknown) => err);
-
-		expect(error).toBeInstanceOf(Error);
-		expect((error as Error & { gameOutput?: string }).gameOutput).toBe(gameOutputData);
-	});
-
-	it("should attach entry gameOutput to LuauScriptError thrown for ExecutionError payloads", async () => {
-		// Regression: HAL-157. parseJestOutput's ExecutionError branch used to
-		// throw plain Error, so buildProjectResult skipped the
-		// `err instanceof LuauScriptError` attach and the CLI banner had no
-		// game output context for module-load failures.
-		expect.assertions(3);
-
-		const executionErrorPayload = JSON.stringify({
-			success: true,
-			value: {
-				error: "Requested module experienced an error while loading",
-				kind: "ExecutionError",
-				parent: {
-					error: "DataController failed loading",
-					kind: "ExecutionError",
-				},
-			},
-		});
-		const entryGameOutput = "[ERROR] DataController failed loading";
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(
-						envelope([
-							{
-								gameOutput: entryGameOutput,
-								jestOutput: executionErrorPayload,
-							},
-						]),
-					),
-					taskPath: "task-execution-error",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		const error = await backend
-			.runTests(jobsOptions([job("alpha")]))
-			.catch((err: unknown) => err);
-
-		expect(error).toBeInstanceOf(LuauScriptError);
-		expect((error as LuauScriptError).message).toContain("Jest execution failed:");
-		expect((error as LuauScriptError).gameOutput).toBe(entryGameOutput);
-	});
-
-	it("should rethrow non-LuauScriptError exceptions from parseJestOutput", async () => {
-		expect.assertions(1);
-
-		// Envelope-shaped payload whose entry jestOutput is invalid JSON now
-		// falls through mixed-output extraction and surfaces the parser's error.
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: "{bad json" }])),
-					taskPath: "task-bad-json",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrow(
-			/No valid Jest result JSON found/,
-		);
-	});
-
-	it("should throw when the bucket envelope length does not match the job count", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(
-						envelope([{ jestOutput: successJest() }, { jestOutput: successJest() }]),
-					),
-					taskPath: "task-mismatch",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock-rbxl"),
-			sleep: noSleep,
-		});
-
-		await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrow(
-			/Open Cloud backend returned 2 entries but bucket had 1 jobs/,
-		);
-	});
-
-	it("should reuse the upload cache across runs and mark uploadCached true", async () => {
-		expect.assertions(4);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					taskPath: `task-cache-${Math.random().toString()}`,
-				};
-			},
-		});
-
-		// A unique body guarantees this cache entry is not already present from
-		// earlier test runs.
-		const uniqueContent = `cache-test-${Date.now().toString()}-${Math.random().toString()}`;
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from(uniqueContent),
-			sleep: noSleep,
-		});
-
-		const first = await backend.runTests(jobsOptions([job("alpha", { cache: true })]));
-
-		expect(first.timing.uploadCached).toBeFalse();
-		expect(http.calls.filter((call) => call.url.includes("/versions"))).toHaveLength(1);
-
-		const second = await backend.runTests(jobsOptions([job("alpha", { cache: true })]));
-
-		expect(second.timing.uploadCached).toBeTrue();
-		// No second upload call — the first version call is still the only one.
-		expect(http.calls.filter((call) => call.url.includes("/versions"))).toHaveLength(1);
-	});
-
-	it("should return uploadCached false when cache is disabled", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-					taskPath: "task-no-cache",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("no-cache-test"),
-			sleep: noSleep,
-		});
-
-		const { timing } = await backend.runTests(jobsOptions([job("alpha")]));
-
-		expect(timing.uploadCached).toBeFalse();
-	});
-
-	it("should send scriptOverride when set instead of generating from inputs", async () => {
-		expect.assertions(2);
-
-		const customScript = "-- custom materializer script\nreturn nil";
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(
-						envelope([{ jestOutput: successJest(), pkg: "@halcyon/foo" }]),
-					),
-					taskPath: "task-override",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock"),
-			sleep: noSleep,
-		});
-
-		await backend.runTests({
-			jobs: [job("alpha")],
-			scriptOverride: customScript,
-		});
-
-		const taskCall = http.calls.find(
-			(call) => call.url.includes(LUAU_EXEC_TASKS_PATH) && call.method === "POST",
-		);
-		const requestBody = taskCall?.body as undefined | { script: string };
-
-		expect(requestBody?.script).toBe(customScript);
-		expect(requestBody?.script).not.toContain("Jest.runCLI");
-	});
-
-	it("should accept envelope entries with pkg field", async () => {
-		expect.assertions(1);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(
-						envelope([{ jestOutput: successJest(), pkg: "@halcyon/foo" }]),
-					),
-					taskPath: "task-pkg",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock"),
-			sleep: noSleep,
-		});
-
-		const { results } = await backend.runTests(jobsOptions([job("alpha")]));
-
-		expect(results[0]?.result.success).toBeTrue();
-	});
-
-	it("should map a multi-package envelope to per-package results in input order", async () => {
-		expect.assertions(4);
-
-		const http = createDispatchMock({
-			onCreateTask: () => {
-				return {
-					complete: completeResponse(
-						envelope([
-							{ jestOutput: successJest(), pkg: "@halcyon/foo" },
-							{
-								jestOutput: successJest({ numFailedTests: 1, success: false }),
-								pkg: "@halcyon/bar",
-							},
-							{ jestOutput: successJest(), pkg: "@halcyon/baz" },
-						]),
-					),
-					taskPath: "task-multi",
-				};
-			},
-		});
-
-		const backend = new OpenCloudBackend(credentials, {
-			http,
-			readFile: () => buffer.Buffer.from("mock"),
-			sleep: noSleep,
+			await expect(backend.runTests(jobsOptions([job("alpha")], 0))).rejects.toThrow(
+				/--parallel must be >= 1/,
+			);
 		});
-
-		const { results } = await backend.runTests(
-			jobsOptions([job("@halcyon/foo"), job("@halcyon/bar"), job("@halcyon/baz")]),
-		);
-
-		expect(results.map((entry) => entry.displayName)).toStrictEqual([
-			"@halcyon/foo",
-			"@halcyon/bar",
-			"@halcyon/baz",
-		]);
-		expect(results[0]?.result.success).toBeTrue();
-		expect(results[1]?.result.success).toBeFalse();
-		expect(results[2]?.result.success).toBeTrue();
-	});
 
-	describe("work-stealing mode", () => {
 		it("should require scriptOverride when workStealing is true", async () => {
 			expect.assertions(1);
 
-			const backend = new OpenCloudBackend(credentials, {
-				http: createDispatchMock({
-					onCreateTask: () => {
-						return {
-							complete: completeResponse(envelope([{ jestOutput: successJest() }])),
-							taskPath: "task-no-override",
-						};
-					},
-				}),
-				readFile: () => buffer.Buffer.from("mock"),
-				sleep: noSleep,
-			});
+			const { runner } = createRunnerStub();
+			const backend = new OpenCloudBackend(credentials, { runner });
 
 			await expect(
 				backend.runTests({ jobs: [job("alpha")], workStealing: true }),
 			).rejects.toThrow(/work-stealing mode requires scriptOverride/);
 		});
+	});
 
+	describe("bucketing", () => {
+		it("should default to a single executeScript carrying every job's config", async () => {
+			expect.assertions(4);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				return scriptResult(
+					envelope([
+						{ elapsedMs: 111, jestOutput: successJest({ numPassedTests: 1 }) },
+						{ elapsedMs: 222, jestOutput: successJest({ numPassedTests: 2 }) },
+						{ elapsedMs: 333, jestOutput: successJest({ numPassedTests: 3 }) },
+					]),
+				);
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const { results } = await backend.runTests(
+				jobsOptions([
+					job("alpha", { testNamePattern: "alpha-pattern" }),
+					job("beta", { testNamePattern: "beta-pattern" }),
+					job("gamma", { testNamePattern: "gamma-pattern" }),
+				]),
+			);
+
+			expect(stub.executeCalls).toHaveLength(1);
+
+			const { script } = stub.executeCalls[0]!;
+			const patterns = [...script.matchAll(/"testNamePattern":"([^"]+)"/g)].map(
+				(match) => match[1],
+			);
+
+			expect(patterns).toStrictEqual(["alpha-pattern", "beta-pattern", "gamma-pattern"]);
+			expect(results.map((entry) => entry.displayName)).toStrictEqual([
+				"alpha",
+				"beta",
+				"gamma",
+			]);
+			expect(results.map((entry) => entry.elapsedMs)).toStrictEqual([111, 222, 333]);
+		});
+
+		it("should preserve snapshotFormat per job inside the bundled configs array", async () => {
+			expect.assertions(2);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				return scriptResult(
+					envelope([{ jestOutput: successJest() }, { jestOutput: successJest() }]),
+				);
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			await backend.runTests(
+				jobsOptions([
+					job("alpha", {
+						snapshotFormat: { escapeString: true, printBasicPrototype: false },
+					}),
+					job("beta", {
+						snapshotFormat: { escapeString: false, printBasicPrototype: true },
+					}),
+				]),
+			);
+
+			const { script } = stub.executeCalls[0]!;
+
+			expect(script).toContain('"escapeString":true');
+			expect(script).toContain('"escapeString":false');
+		});
+
+		it("should treat --parallel 1 identically to the default path", async () => {
+			expect.assertions(2);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				return scriptResult(
+					envelope([
+						{ jestOutput: successJest() },
+						{ jestOutput: successJest() },
+						{ jestOutput: successJest() },
+					]),
+				);
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const { results } = await backend.runTests(
+				jobsOptions([job("alpha"), job("beta"), job("gamma")], 1),
+			);
+
+			expect(stub.executeCalls).toHaveLength(1);
+			expect(results).toHaveLength(3);
+		});
+
+		it("should populate timing.executionMs on the BackendResult", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => scriptResult(envelope([{ jestOutput: successJest() }])));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const { timing } = await backend.runTests(jobsOptions([job("alpha")]));
+
+			expect(timing.executionMs).toBeGreaterThanOrEqual(0);
+		});
+
+		it("should fan --parallel 3 out to three executeScript calls, one bucket each", async () => {
+			expect.assertions(3);
+
+			let bucketIndex = 0;
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				const index = bucketIndex;
+				bucketIndex += 1;
+				return scriptResult(
+					envelope([
+						{
+							elapsedMs: index * 10,
+							jestOutput: successJest({ numPassedTests: index + 1 }),
+						},
+					]),
+				);
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const { results } = await backend.runTests(
+				jobsOptions([job("alpha"), job("beta"), job("gamma")], 3),
+			);
+
+			expect(stub.executeCalls).toHaveLength(3);
+			expect(results).toHaveLength(3);
+			expect(results.map((entry) => entry.displayName)).toStrictEqual([
+				"alpha",
+				"beta",
+				"gamma",
+			]);
+		});
+
+		it("should round-robin 10 jobs into buckets of 4/3/3 and flatten in input order", async () => {
+			expect.assertions(5);
+
+			const bucketPatterns: Array<Array<string>> = [];
+			const stub = createRunnerStub();
+			stub.setExecute((options) => {
+				const patterns = [...options.script.matchAll(/"testNamePattern":"([^"]+)"/g)].map(
+					(match) => match[1]!,
+				);
+				bucketPatterns.push(patterns);
+				const index = bucketPatterns.length - 1;
+				return scriptResult(
+					envelope(
+						patterns.map((_, position) => {
+							return {
+								jestOutput: successJest({ numPassedTests: index * 10 + position }),
+							};
+						}),
+					),
+				);
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const jobs = Array.from({ length: 10 }, (_, index) => {
+				return job(`p${index.toString()}`, {
+					testNamePattern: `pattern-${index.toString()}`,
+				});
+			});
+
+			const { results } = await backend.runTests(jobsOptions(jobs, 3));
+
+			expect(stub.executeCalls).toHaveLength(3);
+			expect(bucketPatterns[0]).toStrictEqual([
+				"pattern-0",
+				"pattern-3",
+				"pattern-6",
+				"pattern-9",
+			]);
+			expect(bucketPatterns[1]).toStrictEqual(["pattern-1", "pattern-4", "pattern-7"]);
+			expect(bucketPatterns[2]).toStrictEqual(["pattern-2", "pattern-5", "pattern-8"]);
+			expect(results.map((entry) => entry.displayName)).toStrictEqual([
+				"p0",
+				"p1",
+				"p2",
+				"p3",
+				"p4",
+				"p5",
+				"p6",
+				"p7",
+				"p8",
+				"p9",
+			]);
+		});
+
+		it("should resolve --parallel auto to min(jobs.length, 3)", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute((options) => {
+				const count = [...options.script.matchAll(/"testNamePattern":"([^"]+)"/g)].length;
+				return scriptResult(
+					envelope(Array.from({ length: count }, () => ({ jestOutput: successJest() }))),
+				);
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const jobs = Array.from({ length: 5 }, (_, index) => {
+				return job(`p${index.toString()}`, { testNamePattern: `auto-${index.toString()}` });
+			});
+
+			await backend.runTests(jobsOptions(jobs, "auto"));
+
+			expect(stub.executeCalls).toHaveLength(3);
+		});
+
+		it("should cap --parallel auto at jobs.length when jobs are fewer than the auto ceiling", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => scriptResult(envelope([{ jestOutput: successJest() }])));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			await backend.runTests(jobsOptions([job("alpha"), job("beta")], "auto"));
+
+			expect(stub.executeCalls).toHaveLength(2);
+		});
+
+		it("should cap --parallel n at jobs.length when n exceeds the job count", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => scriptResult(envelope([{ jestOutput: successJest() }])));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			await backend.runTests(jobsOptions([job("alpha"), job("beta")], 10));
+
+			expect(stub.executeCalls).toHaveLength(2);
+		});
+
+		it("should throw when the bucket envelope length does not match the job count", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				return scriptResult(
+					envelope([{ jestOutput: successJest() }, { jestOutput: successJest() }]),
+				);
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+
+			await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrow(
+				/Open Cloud backend returned 2 entries but bucket had 1 jobs/,
+			);
+		});
+
+		it("should reject the whole call when any parallel bucket fails first", async () => {
+			expect.assertions(1);
+
+			let bucketIndex = 0;
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				const index = bucketIndex;
+				bucketIndex += 1;
+				if (index === 2) {
+					throw new Error("bucket two blew up");
+				}
+
+				return scriptResult(envelope([{ jestOutput: successJest() }]));
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+
+			await expect(
+				backend.runTests(jobsOptions([job("alpha"), job("beta"), job("gamma")], 3)),
+			).rejects.toThrowWithMessage(Error, "bucket two blew up");
+		});
+
+		it("should send scriptOverride when set instead of generating from inputs", async () => {
+			expect.assertions(2);
+
+			const customScript = "-- custom materializer script\nreturn nil";
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				return scriptResult(envelope([{ jestOutput: successJest(), pkg: "@halcyon/foo" }]));
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			await backend.runTests({ jobs: [job("alpha")], scriptOverride: customScript });
+
+			expect(stub.executeCalls[0]!.script).toBe(customScript);
+			expect(stub.executeCalls[0]!.script).not.toContain("Jest.runCLI");
+		});
+	});
+
+	describe("envelope parsing", () => {
+		it("should pass through per-entry gameOutput from the envelope", async () => {
+			expect.assertions(1);
+
+			const entryGameOutput = JSON.stringify([
+				{ message: "alpha log", messageType: 0, timestamp: 1 },
+			]);
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				return scriptResult(
+					envelope([{ gameOutput: entryGameOutput, jestOutput: successJest() }]),
+				);
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const { results } = await backend.runTests(jobsOptions([job("alpha")]));
+
+			expect(results[0]!.gameOutput).toBe(entryGameOutput);
+		});
+
+		it("should fall back to the outer results[1] gameOutput when the entry omits one", async () => {
+			expect.assertions(1);
+
+			const fallback = JSON.stringify([
+				{ message: "fallback", messageType: 0, timestamp: 0 },
+			]);
+			const stub = createRunnerStub();
+			stub.setExecute(() =>
+				scriptResult(envelope([{ jestOutput: successJest() }]), fallback),
+			);
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const { results } = await backend.runTests(jobsOptions([job("alpha")]));
+
+			expect(results[0]!.gameOutput).toBe(fallback);
+		});
+
+		it("should convert _setup seconds into setupMs on the parsed result", async () => {
+			expect.assertions(1);
+
+			const jestOutput = JSON.stringify({
+				_setup: 0.321,
+				success: true,
+				value: {
+					numFailedTests: 0,
+					numPassedTests: 1,
+					numPendingTests: 0,
+					numTotalTests: 1,
+					startTime: 0,
+					success: true,
+					testResults: [],
+				},
+			});
+			const stub = createRunnerStub();
+			stub.setExecute(() => scriptResult(envelope([{ jestOutput }])));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const { results } = await backend.runTests(jobsOptions([job("alpha")]));
+
+			expect(results[0]!.setupMs).toBe(321);
+		});
+
+		it("should return undefined setupMs when _setup is absent", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => scriptResult(envelope([{ jestOutput: successJest() }])));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const { results } = await backend.runTests(jobsOptions([job("alpha")]));
+
+			expect(results[0]!.setupMs).toBeUndefined();
+		});
+
+		it("should throw when executeScript returns no outputs", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => ({ durationMs: 0, outputs: [] }));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+
+			await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrow(
+				/No test results in output/,
+			);
+		});
+
+		it("should attach fallback gameOutput to LuauScriptError from parseJestOutput", async () => {
+			expect.assertions(2);
+
+			const luauError = JSON.stringify({ err: "Luau script error", success: false });
+			const gameOutputData = JSON.stringify([
+				{ message: "error context", messageType: 0, timestamp: 1 },
+			]);
+			const stub = createRunnerStub();
+			stub.setExecute(() => scriptResult(luauError, gameOutputData));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const error = await backend
+				.runTests(jobsOptions([job("alpha")]))
+				.catch((err: unknown) => err);
+
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error & { gameOutput?: string }).gameOutput).toBe(gameOutputData);
+		});
+
+		it("should attach entry gameOutput to LuauScriptError for ExecutionError payloads", async () => {
+			expect.assertions(3);
+
+			const executionErrorPayload = JSON.stringify({
+				success: true,
+				value: {
+					error: "Requested module experienced an error while loading",
+					kind: "ExecutionError",
+					parent: { error: "DataController failed loading", kind: "ExecutionError" },
+				},
+			});
+			const entryGameOutput = "[ERROR] DataController failed loading";
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				return scriptResult(
+					envelope([{ gameOutput: entryGameOutput, jestOutput: executionErrorPayload }]),
+				);
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const error = await backend
+				.runTests(jobsOptions([job("alpha")]))
+				.catch((err: unknown) => err);
+
+			expect(error).toBeInstanceOf(LuauScriptError);
+			expect((error as LuauScriptError).message).toContain("Jest execution failed:");
+			expect((error as LuauScriptError).gameOutput).toBe(entryGameOutput);
+		});
+
+		it("should rethrow non-LuauScriptError exceptions from parseJestOutput", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => scriptResult(envelope([{ jestOutput: "{bad json" }])));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+
+			await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrow(
+				/No valid Jest result JSON found/,
+			);
+		});
+
+		it("should accept envelope entries with pkg field", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				return scriptResult(envelope([{ jestOutput: successJest(), pkg: "@halcyon/foo" }]));
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const { results } = await backend.runTests(jobsOptions([job("alpha")]));
+
+			expect(results[0]?.result.success).toBeTrue();
+		});
+
+		it("should map a multi-package envelope to per-package results in input order", async () => {
+			expect.assertions(4);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				return scriptResult(
+					envelope([
+						{ jestOutput: successJest(), pkg: "@halcyon/foo" },
+						{
+							jestOutput: successJest({ numFailedTests: 1, success: false }),
+							pkg: "@halcyon/bar",
+						},
+						{ jestOutput: successJest(), pkg: "@halcyon/baz" },
+					]),
+				);
+			});
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const { results } = await backend.runTests(
+				jobsOptions([job("@halcyon/foo"), job("@halcyon/bar"), job("@halcyon/baz")]),
+			);
+
+			expect(results.map((entry) => entry.displayName)).toStrictEqual([
+				"@halcyon/foo",
+				"@halcyon/bar",
+				"@halcyon/baz",
+			]);
+			expect(results[0]?.result.success).toBeTrue();
+			expect(results[1]?.result.success).toBeFalse();
+			expect(results[2]?.result.success).toBeTrue();
+		});
+	});
+
+	describe("upload integration", () => {
+		it("should call runner.uploadPlace exactly once regardless of bucket count", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => scriptResult(envelope([{ jestOutput: successJest() }])));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			await backend.runTests(
+				jobsOptions([job("alpha"), job("beta"), job("gamma"), job("delta")], 4),
+			);
+
+			expect(stub.uploadCalls).toHaveLength(1);
+		});
+
+		it("should propagate upload errors from the runner", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub({
+				uploadError: new Error("Failed to upload place: 401"),
+			});
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+
+			await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrow(
+				/Failed to upload place/,
+			);
+		});
+
+		it("should reflect runner uploadCached=true on the backend timing", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub({
+				uploadResult: { cached: true, uploadMs: 0, versionNumber: 0 },
+			});
+			stub.setExecute(() => scriptResult(envelope([{ jestOutput: successJest() }])));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const { timing } = await backend.runTests(jobsOptions([job("alpha", { cache: true })]));
+
+			expect(timing.uploadCached).toBeTrue();
+		});
+
+		it("should reflect runner uploadCached=false on the backend timing", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => scriptResult(envelope([{ jestOutput: successJest() }])));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			const { timing } = await backend.runTests(jobsOptions([job("alpha")]));
+
+			expect(timing.uploadCached).toBeFalse();
+		});
+
+		it("should forward the job's cache flag to runner.uploadPlace", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => scriptResult(envelope([{ jestOutput: successJest() }])));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+			await backend.runTests(jobsOptions([job("alpha", { cache: true })]));
+
+			expect(stub.uploadCalls[0]?.cache).toBeTrue();
+		});
+	});
+
+	describe("work-stealing", () => {
 		it("should fire N tasks all carrying the same scriptOverride and upload once", async () => {
 			expect.assertions(3);
 
 			const stealingScript = "-- work-stealing materializer\nreturn nil";
-			const capturedScripts: Array<string> = [];
 			const taskPkgs = [
 				["alpha", "delta"],
 				["beta", "epsilon"],
 				["gamma", "zeta"],
 			] as const;
-			const http = createDispatchMock({
-				onCreateTask: (body) => {
-					capturedScripts.push((body as { script: string }).script);
-					const taskIndex = capturedScripts.length - 1;
-					const handledPkgs = taskPkgs[taskIndex] ?? [];
-					return {
-						complete: completeResponse(envelope(handledPkgs.map(packageEntry))),
-						taskPath: `task-stealing-${taskIndex.toString()}`,
-					};
-				},
+			let taskIndex = 0;
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				const handledPkgs = taskPkgs[taskIndex] ?? [];
+				taskIndex += 1;
+				return scriptResult(envelope(handledPkgs.map(packageEntry)));
 			});
 
-			const backend = new OpenCloudBackend(credentials, {
-				http,
-				readFile: () => buffer.Buffer.from("mock"),
-				sleep: noSleep,
-			});
-
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
 			await backend.runTests({
 				jobs: [
 					job("alpha"),
@@ -1462,54 +751,43 @@ describe(OpenCloudBackend, () => {
 				workStealing: true,
 			});
 
-			expect(http.createCallCount).toBe(3);
-			expect(capturedScripts).toStrictEqual([stealingScript, stealingScript, stealingScript]);
-			expect(http.calls.filter((call) => call.url.includes("/versions"))).toHaveLength(1);
+			expect(stub.executeCalls).toHaveLength(3);
+			expect(stub.executeCalls.map((call) => call.script)).toStrictEqual([
+				stealingScript,
+				stealingScript,
+				stealingScript,
+			]);
+			expect(stub.uploadCalls).toHaveLength(1);
 		});
 
 		it("should drop duplicate-pkg entries from fault-recovery and keep the first occurrence", async () => {
 			expect.assertions(3);
 
-			let createdCount = 0;
-			const http = createDispatchMock({
-				onCreateTask: () => {
-					const taskIndex = createdCount;
-					createdCount++;
-					// Both tasks return entry for "alpha" — task 0 succeeded,
-					// task 1 re-ran it after invisibility timeout. First one
-					// wins.
-					const entries =
-						taskIndex === 0
-							? [
-									{
-										jestOutput: successJest({ numPassedTests: 7 }),
-										pkg: "alpha",
-									},
-									{ jestOutput: successJest({ numPassedTests: 3 }), pkg: "beta" },
-								]
-							: [
-									{
-										jestOutput: successJest({
-											numFailedTests: 1,
-											numPassedTests: 0,
-											success: false,
-										}),
-										pkg: "alpha",
-									},
-								];
-					return {
-						complete: completeResponse(envelope(entries)),
-						taskPath: `task-recover-${taskIndex.toString()}`,
-					};
-				},
+			let taskIndex = 0;
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				const index = taskIndex;
+				taskIndex += 1;
+				const entries =
+					index === 0
+						? [
+								{ jestOutput: successJest({ numPassedTests: 7 }), pkg: "alpha" },
+								{ jestOutput: successJest({ numPassedTests: 3 }), pkg: "beta" },
+							]
+						: [
+								{
+									jestOutput: successJest({
+										numFailedTests: 1,
+										numPassedTests: 0,
+										success: false,
+									}),
+									pkg: "alpha",
+								},
+							];
+				return scriptResult(envelope(entries));
 			});
 
-			const backend = new OpenCloudBackend(credentials, {
-				http,
-				readFile: () => buffer.Buffer.from("mock"),
-				sleep: noSleep,
-			});
-
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
 			const { results } = await backend.runTests({
 				jobs: [job("alpha"), job("beta")],
 				parallel: 2,
@@ -1518,8 +796,6 @@ describe(OpenCloudBackend, () => {
 			});
 
 			expect(results.map((entry) => entry.displayName)).toStrictEqual(["alpha", "beta"]);
-			// First occurrence (task 0) wins — that's the success case with 7
-			// passing.
 			expect(results[0]?.result.success).toBeTrue();
 			expect(results[0]?.result.numPassedTests).toBe(7);
 		});
@@ -1527,22 +803,12 @@ describe(OpenCloudBackend, () => {
 		it("should error when a job has no matching entry in any envelope", async () => {
 			expect.assertions(1);
 
-			const http = createDispatchMock({
-				onCreateTask: () => {
-					return {
-						complete: completeResponse(
-							envelope([{ jestOutput: successJest(), pkg: "alpha" }]),
-						),
-						taskPath: "task-missing",
-					};
-				},
-			});
+			const stub = createRunnerStub();
+			stub.setExecute(() =>
+				scriptResult(envelope([{ jestOutput: successJest(), pkg: "alpha" }])),
+			);
 
-			const backend = new OpenCloudBackend(credentials, {
-				http,
-				readFile: () => buffer.Buffer.from("mock"),
-				sleep: noSleep,
-			});
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
 
 			await expect(
 				backend.runTests({
@@ -1554,32 +820,22 @@ describe(OpenCloudBackend, () => {
 			).rejects.toThrow(/no entries for 1 package\(s\): beta/);
 		});
 
-		it("should aggregate entries from all task envelopes and map them to jobs in input order", async () => {
+		it("should aggregate entries from all task envelopes in input order", async () => {
 			expect.assertions(2);
 
 			const taskPkgs = [
 				["alpha", "gamma"],
 				["beta", "delta"],
 			];
-			let createdCount = 0;
-			const http = createDispatchMock({
-				onCreateTask: () => {
-					const taskIndex = createdCount;
-					createdCount++;
-					const pkgs = taskPkgs[taskIndex] ?? [];
-					return {
-						complete: completeResponse(envelope(pkgs.map(packageEntry))),
-						taskPath: `task-agg-${taskIndex.toString()}`,
-					};
-				},
+			let taskIndex = 0;
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				const pkgs = taskPkgs[taskIndex] ?? [];
+				taskIndex += 1;
+				return scriptResult(envelope(pkgs.map(packageEntry)));
 			});
 
-			const backend = new OpenCloudBackend(credentials, {
-				http,
-				readFile: () => buffer.Buffer.from("mock"),
-				sleep: noSleep,
-			});
-
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
 			const { results } = await backend.runTests({
 				jobs: [job("alpha"), job("beta"), job("gamma"), job("delta")],
 				parallel: 2,
@@ -1596,29 +852,20 @@ describe(OpenCloudBackend, () => {
 			expect(results.every((entry) => entry.result.success)).toBeTrue();
 		});
 
-		it("should silently skip envelope entries that have no pkg field", async () => {
+		it("should silently skip envelope entries with no pkg field", async () => {
 			expect.assertions(2);
 
-			const http = createDispatchMock({
-				onCreateTask: () => {
-					return {
-						complete: completeResponse(
-							envelope([
-								{ jestOutput: successJest() },
-								{ jestOutput: successJest({ numPassedTests: 4 }), pkg: "alpha" },
-							]),
-						),
-						taskPath: "task-skip-no-pkg",
-					};
-				},
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				return scriptResult(
+					envelope([
+						{ jestOutput: successJest() },
+						{ jestOutput: successJest({ numPassedTests: 4 }), pkg: "alpha" },
+					]),
+				);
 			});
 
-			const backend = new OpenCloudBackend(credentials, {
-				http,
-				readFile: () => buffer.Buffer.from("mock"),
-				sleep: noSleep,
-			});
-
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
 			const { results } = await backend.runTests({
 				jobs: [job("alpha")],
 				parallel: 1,
@@ -1633,34 +880,25 @@ describe(OpenCloudBackend, () => {
 		it("should match entries to jobs by pkg::project so multi-project packages don't collide", async () => {
 			expect.assertions(3);
 
-			const http = createDispatchMock({
-				onCreateTask: () => {
-					return {
-						complete: completeResponse(
-							envelope([
-								{
-									jestOutput: successJest({ numPassedTests: 5 }),
-									pkg: "@halcyon/foo",
-									project: "client",
-								},
-								{
-									jestOutput: successJest({ numPassedTests: 9 }),
-									pkg: "@halcyon/foo",
-									project: "server",
-								},
-							]),
-						),
-						taskPath: "task-multi-project",
-					};
-				},
+			const stub = createRunnerStub();
+			stub.setExecute(() => {
+				return scriptResult(
+					envelope([
+						{
+							jestOutput: successJest({ numPassedTests: 5 }),
+							pkg: "@halcyon/foo",
+							project: "client",
+						},
+						{
+							jestOutput: successJest({ numPassedTests: 9 }),
+							pkg: "@halcyon/foo",
+							project: "server",
+						},
+					]),
+				);
 			});
 
-			const backend = new OpenCloudBackend(credentials, {
-				http,
-				readFile: () => buffer.Buffer.from("mock"),
-				sleep: noSleep,
-			});
-
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
 			const { results } = await backend.runTests({
 				jobs: [job("client", {}, "@halcyon/foo"), job("server", {}, "@halcyon/foo")],
 				parallel: 2,
@@ -1672,24 +910,43 @@ describe(OpenCloudBackend, () => {
 			expect(results[0]?.result.numPassedTests).toBe(5);
 			expect(results[1]?.result.numPassedTests).toBe(9);
 		});
+
+		it("should throw when work-stealing executeScript returns no outputs", async () => {
+			expect.assertions(1);
+
+			const stub = createRunnerStub();
+			stub.setExecute(() => ({ durationMs: 0, outputs: [] }));
+
+			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
+
+			await expect(
+				backend.runTests({
+					jobs: [job("alpha")],
+					parallel: 1,
+					scriptOverride: "stealing-script",
+					workStealing: true,
+				}),
+			).rejects.toThrow(/No test results in output/);
+		});
 	});
 });
 
 describe(createOpenCloudBackend, () => {
 	it("should construct an OpenCloudBackend from given credentials", () => {
-		expect.assertions(2);
+		expect.assertions(1);
 
-		const backend = createOpenCloudBackend({
-			apiKey: "key",
-			placeId: "456",
-			universeId: "123",
-		});
+		const backend = createOpenCloudBackend(credentials);
 
 		expect(backend).toBeInstanceOf(OpenCloudBackend);
-		expect(Reflect.get(backend, "credentials")).toStrictEqual({
-			apiKey: "key",
-			placeId: "456",
-			universeId: "123",
-		});
+	});
+
+	it("should honor JEST_ROBLOX_OPEN_CLOUD_BASE_URL env override for the default runner", () => {
+		expect.assertions(1);
+
+		vi.stubEnv("JEST_ROBLOX_OPEN_CLOUD_BASE_URL", "http://127.0.0.1:4010/custom/");
+
+		const backend = new OpenCloudBackend(credentials);
+
+		expect(backend).toBeInstanceOf(OpenCloudBackend);
 	});
 });

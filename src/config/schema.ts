@@ -410,10 +410,6 @@ export const configSchema: Type<Config> = type({
 	"universeId?": "string",
 }).as<Config>();
 
-export type GlobalTestConfigInput = Except<GlobalTestConfig, MergeableTestKey> & {
-	[K in MergeableTestKey]?: Mergeable<NonNullable<GlobalTestConfig[K]>>;
-};
-
 export interface ConfigInput extends Except<Config, "formatters" | "luauRoots" | "test"> {
 	formatters?: Mergeable<Array<FormatterEntry>>;
 	luauRoots?: Mergeable<Array<string>>;
@@ -434,6 +430,10 @@ type MergeableTestKey =
 	| "snapshotSerializers"
 	| "testMatch"
 	| "testPathIgnorePatterns";
+
+type GlobalTestConfigInput = Except<GlobalTestConfig, MergeableTestKey> & {
+	[K in MergeableTestKey]?: Mergeable<NonNullable<GlobalTestConfig[K]>>;
+};
 
 type RootCliKey = Exclude<keyof Config, "test">;
 

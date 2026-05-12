@@ -2,12 +2,11 @@ import process from "node:process";
 
 import packageJson from "../../package.json" with { type: "json" };
 import type { Backend } from "../backends/interface.ts";
-import { createOpenCloudBackend } from "../backends/open-cloud.ts";
+import { createOpenCloudBackend, resolveOpenCloudBaseUrl } from "../backends/open-cloud.ts";
 import type { MappedCoverageResult } from "../coverage/mapper.ts";
 import { mergeRawCoverage } from "../coverage/merge-raw-coverage.ts";
 import type { RawCoverageData } from "../coverage/types.ts";
 import { aggregateWorkspaceCoverage } from "../coverage/workspace-aggregate.ts";
-import { MemoryStoreQueueClient } from "../memory-store/queue-client.ts";
 import { runWorkspace, type WorkspaceProjectResult } from "../workspace-runner.ts";
 import { discoverWorkspaceRoot } from "../workspace/discovery.ts";
 import type { PackageInfo } from "../workspace/package-resolver.ts";
@@ -62,14 +61,16 @@ export async function runWorkspaceMode(options: RunOptions): Promise<WorkspaceRu
 	}
 
 	let backend: Backend;
-	let queueClient: MemoryStoreQueueClient;
+	let workStealingCredentials: { apiKey: string; baseUrl?: string; universeId: string };
 	try {
 		const credentials = buildWorkspaceCredentials(cli, config);
 		backend = createOpenCloudBackend(credentials);
-		queueClient = new MemoryStoreQueueClient({
+		const baseUrl = resolveOpenCloudBaseUrl();
+		workStealingCredentials = {
 			apiKey: credentials.apiKey,
+			...(baseUrl !== undefined ? { baseUrl } : {}),
 			universeId: credentials.universeId,
-		});
+		};
 	} catch (err) {
 		return {
 			...EMPTY_RESULT,
@@ -86,10 +87,10 @@ export async function runWorkspaceMode(options: RunOptions): Promise<WorkspaceRu
 			config,
 			// eslint-disable-next-line ts/no-non-null-assertion -- guaranteed when no error/noAffected
 			packageInfos: resolved.packageInfos!,
-			queueClient,
 			version: VERSION,
 			// eslint-disable-next-line ts/no-non-null-assertion -- guaranteed when no error/noAffected
 			workspaceRoot: resolved.workspaceRoot!,
+			workStealingCredentials,
 		});
 	} finally {
 		await backend.close?.();

@@ -68,10 +68,10 @@ export interface BackendResult {
 	timing: BackendTiming;
 }
 
-export type BackendKind = "open-cloud" | "studio";
-
 export interface Backend {
 	close?(): Promise<void> | void;
 	readonly kind: BackendKind;
 	runTests(options: BackendOptions): Promise<BackendResult>;
 }
+
+type BackendKind = "open-cloud" | "studio";

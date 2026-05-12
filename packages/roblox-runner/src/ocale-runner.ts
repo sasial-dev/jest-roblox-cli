@@ -1,4 +1,9 @@
-import { type } from "arktype";
+import type { HttpClient, SleepFunc } from "@bedrock-rbx/ocale";
+import { PollTimeoutError } from "@bedrock-rbx/ocale";
+import { LuauExecutionClient } from "@bedrock-rbx/ocale/luau-execution";
+import type { PublishParameters } from "@bedrock-rbx/ocale/places";
+import { PlacesClient } from "@bedrock-rbx/ocale/places";
+
 import type buffer from "node:buffer";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -12,8 +17,6 @@ import {
 	writeCache,
 } from "./cache.ts";
 import { hashBuffer } from "./hash.ts";
-import { createFetchClient } from "./http-client.ts";
-import type { HttpClient } from "./http-client.ts";
 import type {
 	ExecuteScriptOptions,
 	RemoteRunner,
@@ -23,63 +26,77 @@ import type {
 	UploadPlaceResult,
 } from "./types.ts";
 
-const OPEN_CLOUD_BASE_URL = "https://apis.roblox.com";
-const RATE_LIMIT_DEFAULT_WAIT_MS = 5000;
-const MAX_RATE_LIMIT_RETRIES = 5;
-const DEFAULT_POLL_INTERVAL_MS = 2000;
+const MAX_TASK_TIMEOUT_SECONDS = 300;
 
 export interface OcaleRunnerOptions {
-	http?: HttpClient;
+	baseUrl?: string;
+	httpClient?: HttpClient;
 	readFile?: (filePath: string) => buffer.Buffer;
-	sleep?: (ms: number) => Promise<void>;
+	sleep?: SleepFunc;
 }
-
-const taskResponse = type({ path: "string" });
-
-const taskStatusResponse = type({
-	"error?": { "message?": "string" },
-	"output?": { "results?": "string[]" },
-	"state": "'CANCELLED' | 'COMPLETE' | 'FAILED' | 'PROCESSING'",
-});
 
 export class OcaleRunner implements RemoteRunner {
 	private readonly credentials: RunnerCredentials;
-	private readonly http: HttpClient;
+	private readonly luau: LuauExecutionClient;
+	private readonly places: PlacesClient;
 	private readonly readFileFn: (filePath: string) => buffer.Buffer;
-	private readonly sleepFn: (ms: number) => Promise<void>;
 
 	constructor(credentials: RunnerCredentials, options?: OcaleRunnerOptions) {
 		this.credentials = credentials;
-		this.http =
-			options?.http ??
-			createFetchClient({
-				"x-api-key": credentials.apiKey,
-			});
+		const clientOptions = {
+			apiKey: credentials.apiKey,
+			...(options?.baseUrl !== undefined ? { baseUrl: options.baseUrl } : {}),
+			...(options?.httpClient !== undefined ? { httpClient: options.httpClient } : {}),
+			...(options?.sleep !== undefined ? { sleep: options.sleep } : {}),
+		};
+		this.luau = new LuauExecutionClient(clientOptions);
+		this.places = new PlacesClient(clientOptions);
 		this.readFileFn = options?.readFile ?? ((filePath) => fs.readFileSync(filePath));
-		this.sleepFn =
-			options?.sleep ??
-			(async (ms) => {
-				return new Promise((resolve) => {
-					setTimeout(resolve, ms);
-				});
-			});
 	}
 
 	public async executeScript(options: ExecuteScriptOptions): Promise<ScriptResult> {
-		if (options.timeout <= 0) {
+		const { pollInterval, script, timeout } = options;
+		if (timeout <= 0) {
 			throw new Error("Timeout must be a positive number");
 		}
 
-		const pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL_MS;
 		const startTime = Date.now();
+		const timeoutSeconds = Math.min(Math.floor(timeout / 1000), MAX_TASK_TIMEOUT_SECONDS);
 
-		const taskPath = await this.createExecutionTask(options.script, options.timeout);
-		const outputs = await this.pollForCompletion(taskPath, options.timeout, pollInterval);
+		const result = await this.luau.tasks.runUntilDone(
+			{
+				placeId: this.credentials.placeId,
+				script,
+				timeoutSeconds,
+				universeId: this.credentials.universeId,
+			},
+			{
+				timeoutMs: timeout,
+				...(pollInterval !== undefined ? { pollDelay: () => pollInterval } : {}),
+			},
+		);
 
-		return {
-			durationMs: Date.now() - startTime,
-			outputs,
-		};
+		if (!result.success) {
+			if (result.err instanceof PollTimeoutError) {
+				throw new Error("Execution timed out");
+			}
+
+			throw new Error(result.err.message);
+		}
+
+		const task = result.data;
+		if (task.state === "COMPLETE") {
+			return {
+				durationMs: Date.now() - startTime,
+				outputs: task.output.results.map(coerceOutputToString),
+			};
+		}
+
+		if (task.state === "FAILED") {
+			throw new Error(task.error.message);
+		}
+
+		throw new Error("Execution was cancelled");
 	}
 
 	public async uploadPlace(options: UploadPlaceOptions): Promise<UploadPlaceResult> {
@@ -103,123 +120,45 @@ export class OcaleRunner implements RemoteRunner {
 			};
 		}
 
-		const versionNumber = await this.uploadPlaceData(placeData);
+		const parameters: PublishParameters = {
+			body: toArrayBufferView(placeData),
+			format: deriveFormat(placeFilePath),
+			placeId: this.credentials.placeId,
+			universeId: this.credentials.universeId,
+		};
+		const result = await this.places.save(parameters);
+		if (!result.success) {
+			throw new Error(`Failed to upload place: ${result.err.message}`);
+		}
+
 		markUploaded(cache, cacheKey, fileHash);
 		writeCache(cacheFilePath, cache);
 
 		return {
 			cached: false,
 			uploadMs: Date.now() - uploadStart,
-			versionNumber,
+			versionNumber: result.data.versionNumber,
 		};
-	}
-
-	private async createExecutionTask(script: string, timeoutMs: number): Promise<string> {
-		const url = `${OPEN_CLOUD_BASE_URL}/cloud/v2/universes/${this.credentials.universeId}/places/${this.credentials.placeId}/luau-execution-session-tasks`;
-
-		// OCALE API caps task timeout at 300s
-		const taskTimeoutSeconds = Math.min(Math.floor(timeoutMs / 1000), 300);
-
-		const response = await this.http.request("POST", url, {
-			body: {
-				script,
-				timeout: `${taskTimeoutSeconds}s`,
-			},
-		});
-
-		if (!response.ok) {
-			throw new Error(`Failed to create execution task: ${response.status}`);
-		}
-
-		const body = taskResponse.assert(response.body);
-		return body.path;
-	}
-
-	private async pollForCompletion(
-		taskPath: string,
-		timeoutMs: number,
-		pollIntervalMs: number,
-	): Promise<Array<string>> {
-		const url = `${OPEN_CLOUD_BASE_URL}/cloud/v2/${taskPath}`;
-		const startTime = Date.now();
-		let rateLimitRetries = 0;
-
-		while (Date.now() - startTime < timeoutMs) {
-			const response = await this.http.request("GET", url);
-
-			if (response.status === 429) {
-				rateLimitRetries++;
-				if (rateLimitRetries > MAX_RATE_LIMIT_RETRIES) {
-					throw new Error("Rate limited by Open Cloud API after multiple retries");
-				}
-
-				const retryAfter = parseRetryAfter(response.headers);
-				await this.sleepFn(retryAfter);
-				continue;
-			}
-
-			if (!response.ok) {
-				throw new Error(`Failed to poll task: ${response.status}`);
-			}
-
-			const body = taskStatusResponse.assert(response.body);
-
-			switch (body.state) {
-				case "COMPLETE": {
-					return body.output?.results ?? [];
-				}
-				case "FAILED": {
-					throw new Error(body.error?.message ?? "Execution failed");
-				}
-				case "CANCELLED": {
-					throw new Error("Execution was cancelled");
-				}
-				case "PROCESSING": {
-					await this.sleepFn(pollIntervalMs);
-					break;
-				}
-			}
-		}
-
-		throw new Error("Execution timed out");
-	}
-
-	private async uploadPlaceData(placeData: buffer.Buffer): Promise<number> {
-		const url = `${OPEN_CLOUD_BASE_URL}/universes/v1/${this.credentials.universeId}/places/${this.credentials.placeId}/versions?versionType=Saved`;
-
-		const response = await this.http.request("POST", url, {
-			body: placeData,
-			headers: {
-				"Content-Type": "application/octet-stream",
-			},
-		});
-
-		if (!response.ok) {
-			throw new Error(`Failed to upload place: ${response.status}`);
-		}
-
-		const { body } = response;
-		if (typeof body === "object" && body !== null && "versionNumber" in body) {
-			const version = Number((body as { versionNumber: unknown }).versionNumber);
-			if (!Number.isNaN(version)) {
-				return version;
-			}
-		}
-
-		throw new Error("Upload succeeded but response is missing versionNumber");
 	}
 }
 
-function parseRetryAfter(headers?: Record<string, string | undefined>): number {
-	const value = headers?.["retry-after"];
-	if (value === undefined) {
-		return RATE_LIMIT_DEFAULT_WAIT_MS;
+function coerceOutputToString(value: unknown): string {
+	if (typeof value === "string") {
+		return value;
 	}
 
-	const seconds = Number(value);
-	if (Number.isNaN(seconds) || seconds <= 0) {
-		return RATE_LIMIT_DEFAULT_WAIT_MS;
-	}
+	// Bedrock's wire-parsed output.results is JSONValue (no undefined, function,
+	// or symbol entries), so JSON.stringify always returns a string here. The
+	// outer `String()` satisfies the union return type without adding a branch.
+	return String(JSON.stringify(value));
+}
 
-	return seconds * 1000;
+function toArrayBufferView(data: buffer.Buffer): Uint8Array<ArrayBuffer> {
+	const view = new Uint8Array(data.byteLength);
+	view.set(data);
+	return view;
+}
+
+function deriveFormat(filePath: string): "rbxl" | "rbxlx" {
+	return path.extname(filePath).toLowerCase() === ".rbxlx" ? "rbxlx" : "rbxl";
 }

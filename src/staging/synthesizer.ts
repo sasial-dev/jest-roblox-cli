@@ -12,13 +12,6 @@ export interface StubMount {
 	dataModelPath: string;
 }
 
-export interface CoverageRoot {
-	/** Path relative to `packageDirectory` that points at the original luau root. */
-	luauRoot: string;
-	/** Absolute path to the instrumented shadow directory for the same root. */
-	shadowDir: string;
-}
-
 export interface PackageDescriptor {
 	name: string;
 	/**
@@ -31,6 +24,13 @@ export interface PackageDescriptor {
 	packageDirectory: string;
 	rojoProjectPath: string;
 	stubMounts?: Array<StubMount>;
+}
+
+interface CoverageRoot {
+	/** Path relative to `packageDirectory` that points at the original luau root. */
+	luauRoot: string;
+	/** Absolute path to the instrumented shadow directory for the same root. */
+	shadowDir: string;
 }
 
 interface SynthesizeInput {

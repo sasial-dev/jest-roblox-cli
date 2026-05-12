@@ -9,8 +9,6 @@ export {
 export { resolveCredentials } from "./credentials.ts";
 export type { ResolveCredentialsInput } from "./credentials.ts";
 export { hashBuffer } from "./hash.ts";
-export { createFetchClient } from "./http-client.ts";
-export type { HttpClient, HttpResponse, RequestOptions } from "./http-client.ts";
 export { OcaleRunner } from "./ocale-runner.ts";
 export type { OcaleRunnerOptions } from "./ocale-runner.ts";
 export { StudioRunner } from "./studio-runner.ts";
@@ -23,3 +21,5 @@ export type {
 	UploadPlaceOptions,
 	UploadPlaceResult,
 } from "./types.ts";
+export type { ClaimedBatch, WorkQueueOptions } from "./work-queue.ts";
+export { WorkQueue } from "./work-queue.ts";

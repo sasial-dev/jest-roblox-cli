@@ -70,6 +70,7 @@ export default defineConfig([
 		deps: {
 			alwaysBundle: ["@isentinel/luau-ast"],
 			neverBundle: [
+				"@bedrock-rbx/ocale",
 				"arktype",
 				"istanbul-lib-coverage",
 				"istanbul-lib-report",

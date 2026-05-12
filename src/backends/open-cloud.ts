@@ -1,18 +1,7 @@
-import {
-	createFetchClient,
-	getCacheDirectory,
-	getCacheKey,
-	hashBuffer,
-	isUploaded,
-	markUploaded,
-	readCache,
-	writeCache,
-} from "@isentinel/roblox-runner";
-import type { HttpClient } from "@isentinel/roblox-runner";
+import { OcaleRunner } from "@isentinel/roblox-runner";
+import type { RemoteRunner, RunnerCredentials } from "@isentinel/roblox-runner";
 
 import { type } from "arktype";
-import type buffer from "node:buffer";
-import * as fs from "node:fs";
 import * as path from "node:path";
 import process from "node:process";
 
@@ -28,32 +17,19 @@ import type {
 } from "./interface.ts";
 
 const PARALLEL_AUTO_CAP = 3;
+const BASE_URL_ENV = "JEST_ROBLOX_OPEN_CLOUD_BASE_URL";
 
-const DEFAULT_OPEN_CLOUD_BASE_URL = "https://apis.roblox.com";
-const RATE_LIMIT_DEFAULT_WAIT_MS = 5000;
-const MAX_RATE_LIMIT_RETRIES = 5;
-
-export interface OpenCloudCredentials {
-	apiKey: string;
-	placeId: string;
-	universeId: string;
-}
+export type OpenCloudCredentials = RunnerCredentials;
 
 export interface OpenCloudOptions {
-	http?: HttpClient;
-	readFile?: FileReader;
-	sleep?: (ms: number) => Promise<void>;
+	/**
+	 * Inject a pre-built {@link RemoteRunner}. When provided, the
+	 * `credentials` argument to {@link OpenCloudBackend} is ignored —
+	 * the injected runner already owns its own credentials. Intended
+	 * primarily as a test seam.
+	 */
+	runner?: RemoteRunner;
 }
-
-type FileReader = (path: string) => buffer.Buffer;
-
-const taskResponse = type({ path: "string" });
-
-const taskStatusResponse = type({
-	"error?": { "message?": "string" },
-	"output?": { "results?": "string[]" },
-	"state": "'CANCELLED' | 'COMPLETE' | 'FAILED' | 'PROCESSING'",
-});
 
 const entrySchema = type({
 	"elapsedMs?": "number",
@@ -71,30 +47,12 @@ interface JobBucket {
 }
 
 export class OpenCloudBackend implements Backend {
-	private readonly baseUrl: string;
-	private readonly credentials: OpenCloudCredentials;
-	private readonly http: HttpClient;
-	private readonly readFile: FileReader;
-	private readonly sleepFn: (ms: number) => Promise<void>;
+	private readonly runner: RemoteRunner;
 
 	public readonly kind = "open-cloud" as const;
 
 	constructor(credentials: OpenCloudCredentials, options?: OpenCloudOptions) {
-		this.baseUrl = resolveOpenCloudBaseUrl();
-		this.credentials = credentials;
-		this.http =
-			options?.http ??
-			createFetchClient({
-				"x-api-key": credentials.apiKey,
-			});
-		this.readFile = options?.readFile ?? ((filePath) => fs.readFileSync(filePath));
-		this.sleepFn =
-			options?.sleep ??
-			(async (ms) => {
-				return new Promise((resolve) => {
-					setTimeout(resolve, ms);
-				});
-			});
+		this.runner = options?.runner ?? new OcaleRunner(credentials, resolveRunnerOptions());
 	}
 
 	public async runTests(options: BackendOptions): Promise<BackendResult> {
@@ -113,28 +71,11 @@ export class OpenCloudBackend implements Backend {
 		// eslint-disable-next-line ts/no-non-null-assertion -- length checked above
 		const primary = jobs[0]!;
 		const placeFilePath = path.resolve(primary.config.rootDir, primary.config.placeFile);
-		const cacheDirectory = getCacheDirectory();
-		const cacheFilePath = path.join(cacheDirectory, "upload-cache.json");
 
-		// Place upload happens once per runTests call regardless of how many
-		// sessions we fire. Hoisted above the bucket dispatch so --parallel does
-		// not upload N times.
-		const uploadStart = Date.now();
-		const placeData = this.readFile(placeFilePath);
-		const fileHash = hashBuffer(placeData);
-		const cacheKey = getCacheKey(this.credentials.universeId, this.credentials.placeId);
-
-		const cache = readCache(cacheFilePath);
-		const uploadCached = await this.uploadOrReuseCached({
-			cache,
-			cacheEnabled: primary.config.cache,
-			cacheFilePath,
-			cacheKey,
-			fileHash,
-			placeData,
+		const upload = await this.runner.uploadPlace({
+			cache: primary.config.cache,
+			placeFilePath,
 		});
-
-		const uploadMs = Date.now() - uploadStart;
 
 		const executionStart = Date.now();
 		const flattened =
@@ -146,91 +87,8 @@ export class OpenCloudBackend implements Backend {
 
 		return {
 			results: flattened,
-			timing: { executionMs, uploadCached, uploadMs },
+			timing: { executionMs, uploadCached: upload.cached, uploadMs: upload.uploadMs },
 		};
-	}
-
-	private async createExecutionTask(
-		inputs: Array<JestArgvInput>,
-		timeoutMs: number,
-		scriptOverride?: string,
-	): Promise<string> {
-		const url = `${this.baseUrl}/cloud/v2/universes/${this.credentials.universeId}/places/${this.credentials.placeId}/luau-execution-session-tasks`;
-
-		const script = scriptOverride ?? generateTestScript(inputs);
-
-		const response = await this.http.request("POST", url, {
-			body: {
-				script,
-				timeout: `${Math.floor(timeoutMs / 1000)}s`,
-			},
-		});
-
-		if (!response.ok) {
-			throw new Error(`Failed to create execution task: ${response.status}`);
-		}
-
-		const body = taskResponse.assert(response.body);
-		return body.path;
-	}
-
-	private async pollForCompletion(
-		taskPath: string,
-		timeoutMs: number,
-		pollIntervalMs: number,
-	): Promise<{ gameOutput?: string; jestOutput: string }> {
-		const url = `${this.baseUrl}/cloud/v2/${taskPath}`;
-		const startTime = Date.now();
-		let rateLimitRetries = 0;
-
-		while (Date.now() - startTime < timeoutMs) {
-			const response = await this.http.request("GET", url);
-
-			if (response.status === 429) {
-				rateLimitRetries++;
-				if (rateLimitRetries > MAX_RATE_LIMIT_RETRIES) {
-					throw new Error("Rate limited by Open Cloud API after multiple retries");
-				}
-
-				const retryAfter = parseRetryAfter(response.headers);
-				await this.sleepFn(retryAfter);
-				continue;
-			}
-
-			if (!response.ok) {
-				throw new Error(`Failed to poll task: ${response.status}`);
-			}
-
-			const body = taskStatusResponse.assert(response.body);
-
-			switch (body.state) {
-				case "COMPLETE": {
-					const value = body.output?.results?.[0];
-					if (value === undefined) {
-						throw new Error(
-							`No test results in output. Got: ${JSON.stringify(body.output)}`,
-						);
-					}
-
-					return {
-						gameOutput: body.output?.results?.[1],
-						jestOutput: value,
-					};
-				}
-				case "FAILED": {
-					throw new Error(body.error?.message ?? "Execution failed");
-				}
-				case "CANCELLED": {
-					throw new Error("Execution was cancelled");
-				}
-				case "PROCESSING": {
-					await this.sleepFn(pollIntervalMs);
-					break;
-				}
-			}
-		}
-
-		throw new Error("Execution timed out");
 	}
 
 	private async runBucket(
@@ -245,17 +103,21 @@ export class OpenCloudBackend implements Backend {
 			return { config: job.config, testFiles: job.testFiles };
 		});
 
-		const taskPath = await this.createExecutionTask(
-			inputs,
-			primary.config.timeout,
-			scriptOverride,
-		);
-		const { gameOutput, jestOutput } = await this.pollForCompletion(
-			taskPath,
-			primary.config.timeout,
-			primary.config.pollInterval,
-		);
+		const script = scriptOverride ?? generateTestScript(inputs);
+		const scriptResult = await this.runner.executeScript({
+			pollInterval: primary.config.pollInterval,
+			script,
+			timeout: primary.config.timeout,
+		});
 
+		const jestOutput = scriptResult.outputs[0];
+		if (jestOutput === undefined) {
+			throw new Error(
+				`No test results in output. Got: ${JSON.stringify(scriptResult.outputs)}`,
+			);
+		}
+
+		const fallbackGameOutput = scriptResult.outputs[1];
 		const entries = parseEnvelope(jestOutput);
 		if (entries.length !== jobs.length) {
 			throw new Error(
@@ -267,7 +129,7 @@ export class OpenCloudBackend implements Backend {
 			// Length match has been asserted above, so the index is always in
 			// range.
 			// eslint-disable-next-line ts/no-non-null-assertion -- length asserted above
-			return buildProjectResult(entry, jobs[index]!, gameOutput);
+			return buildProjectResult(entry, jobs[index]!, fallbackGameOutput);
 		});
 
 		return { indices, results };
@@ -301,13 +163,18 @@ export class OpenCloudBackend implements Backend {
 		script: string,
 		primaryConfig: ResolvedConfig,
 	): Promise<{ entries: Array<typeof entrySchema.infer>; gameOutput: string | undefined }> {
-		const taskPath = await this.createExecutionTask([], primaryConfig.timeout, script);
-		const { gameOutput, jestOutput } = await this.pollForCompletion(
-			taskPath,
-			primaryConfig.timeout,
-			primaryConfig.pollInterval,
-		);
-		return { entries: parseEnvelope(jestOutput), gameOutput };
+		const result = await this.runner.executeScript({
+			pollInterval: primaryConfig.pollInterval,
+			script,
+			timeout: primaryConfig.timeout,
+		});
+
+		const jestOutput = result.outputs[0];
+		if (jestOutput === undefined) {
+			throw new Error(`No test results in output. Got: ${JSON.stringify(result.outputs)}`);
+		}
+
+		return { entries: parseEnvelope(jestOutput), gameOutput: result.outputs[1] };
 	}
 
 	private async runWorkStealing(
@@ -364,60 +231,24 @@ export class OpenCloudBackend implements Backend {
 
 		return results;
 	}
+}
 
-	private async uploadOrReuseCached({
-		cache,
-		cacheEnabled,
-		cacheFilePath,
-		cacheKey,
-		fileHash,
-		placeData,
-	}: {
-		cache: ReturnType<typeof readCache>;
-		cacheEnabled: boolean;
-		cacheFilePath: string;
-		cacheKey: string;
-		fileHash: string;
-		placeData: buffer.Buffer;
-	}): Promise<boolean> {
-		if (cacheEnabled && isUploaded(cache, cacheKey, fileHash)) {
-			return true;
-		}
-
-		await this.uploadPlaceData(placeData);
-		markUploaded(cache, cacheKey, fileHash);
-		writeCache(cacheFilePath, cache);
-
-		return false;
+export function resolveOpenCloudBaseUrl(): string | undefined {
+	const override = process.env[BASE_URL_ENV]?.trim();
+	if (override === undefined || override === "") {
+		return undefined;
 	}
 
-	private async uploadPlaceData(placeData: buffer.Buffer): Promise<void> {
-		const url = `${this.baseUrl}/universes/v1/${this.credentials.universeId}/places/${this.credentials.placeId}/versions?versionType=Saved`;
-
-		const response = await this.http.request("POST", url, {
-			body: placeData,
-			headers: {
-				"Content-Type": "application/octet-stream",
-			},
-		});
-
-		if (!response.ok) {
-			throw new Error(`Failed to upload place: ${response.status}`);
-		}
-	}
+	return override.replace(/\/+$/, "");
 }
 
 export function createOpenCloudBackend(credentials: OpenCloudCredentials): OpenCloudBackend {
 	return new OpenCloudBackend(credentials);
 }
 
-function resolveOpenCloudBaseUrl(): string {
-	const override = process.env["JEST_ROBLOX_OPEN_CLOUD_BASE_URL"];
-	if (override === undefined || override.trim() === "") {
-		return DEFAULT_OPEN_CLOUD_BASE_URL;
-	}
-
-	return override.replace(/\/+$/, "");
+function resolveRunnerOptions(): { baseUrl?: string } {
+	const baseUrl = resolveOpenCloudBaseUrl();
+	return baseUrl === undefined ? {} : { baseUrl };
 }
 
 function resolveBucketCount(parallel: BackendOptions["parallel"], jobCount: number): number {
@@ -507,18 +338,4 @@ function buildProjectResult(
 			parsed.setupSeconds !== undefined ? Math.round(parsed.setupSeconds * 1000) : undefined,
 		snapshotWrites: parsed.snapshotWrites,
 	};
-}
-
-function parseRetryAfter(headers?: Record<string, string | undefined>): number {
-	const value = headers?.["retry-after"];
-	if (value === undefined) {
-		return RATE_LIMIT_DEFAULT_WAIT_MS;
-	}
-
-	const seconds = Number(value);
-	if (Number.isNaN(seconds) || seconds <= 0) {
-		return RATE_LIMIT_DEFAULT_WAIT_MS;
-	}
-
-	return seconds * 1000;
 }

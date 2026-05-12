@@ -5,7 +5,7 @@ import process from "node:process";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Backend, BackendOptions, BackendResult } from "../backends/interface.ts";
-import { createOpenCloudBackend } from "../backends/open-cloud.ts";
+import { createOpenCloudBackend, resolveOpenCloudBaseUrl } from "../backends/open-cloud.ts";
 import type { CliOptions, ResolvedConfig } from "../config/schema.ts";
 import { DEFAULT_CONFIG } from "../config/schema.ts";
 import type { ExecuteResult } from "../executor.ts";
@@ -22,9 +22,6 @@ vi.mock(import("../workspace/package-resolver.ts"));
 vi.mock(import("../workspace/affected.ts"));
 vi.mock(import("../backends/open-cloud.ts"));
 vi.mock(import("../coverage/workspace-aggregate.ts"));
-vi.mock(import("../memory-store/queue-client.ts"), () => {
-	return fromAny({ MemoryStoreQueueClient: vi.fn<() => unknown>() });
-});
 vi.mock(import("@isentinel/roblox-runner"), async (importOriginal) => {
 	const actual = await importOriginal();
 	return {
@@ -177,6 +174,23 @@ describe(runWorkspaceMode, () => {
 			expect(
 				vi.mocked(runWorkspace).mock.calls[0]?.[0].packageInfos.map((info) => info.name),
 			).toStrictEqual(["@halcyon/foo", "@halcyon/bar"]);
+		});
+
+		it("should forward the resolved base URL onto workStealingCredentials", async () => {
+			expect.assertions(1);
+
+			setupHappyPath();
+			vi.mocked(resolveOpenCloudBaseUrl).mockReturnValue("http://127.0.0.1:4010");
+			vi.mocked(runWorkspace).mockResolvedValue([]);
+
+			await runWorkspaceMode({
+				cli: makeCli({ packages: "@halcyon/foo", workspace: true }),
+				config: makeConfig(),
+			});
+
+			expect(
+				vi.mocked(runWorkspace).mock.calls[0]?.[0].workStealingCredentials?.baseUrl,
+			).toBe("http://127.0.0.1:4010");
 		});
 
 		it("should collapse displayName when project name matches package name", async () => {
