@@ -3,7 +3,7 @@
 	"tree": {
 		"$path": "src",
 		"shared": {
-			"$path": "out/shared"
+			"$path": "../luau"
 		}
 	}
 }
