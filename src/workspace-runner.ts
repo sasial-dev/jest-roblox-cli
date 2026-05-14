@@ -5,12 +5,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import process from "node:process";
 
-import type {
-	Backend,
-	BackendTiming,
-	ProjectBackendResult,
-	StreamingHooks,
-} from "./backends/interface.ts";
+import type { Backend, StreamingHooks } from "./backends/interface.ts";
 import { loadConfig } from "./config/loader.ts";
 import { mergeCliWithConfig } from "./config/merge.ts";
 import type { ResolvedProjectConfig } from "./config/projects.ts";
@@ -28,12 +23,7 @@ import {
 	prepareWorkspaceCoverage,
 	type WorkspacePackageCoverage,
 } from "./coverage/workspace-prepare.ts";
-import {
-	buildProjectJob,
-	executeBackend,
-	type ExecuteResult,
-	processProjectResult,
-} from "./executor.ts";
+import { type ExecuteResult, runProjects, type RunProjectsOptions } from "./executor.ts";
 import { StreamingResultClient } from "./memory-store/sorted-map-client.ts";
 import { prepareWorkStealingQueue } from "./memory-store/work-stealing.ts";
 import {
@@ -118,12 +108,10 @@ interface PendingEntry {
 	testFiles: Array<string>;
 }
 
-interface MapResultsOptions {
-	backendTiming: BackendTiming;
-	coverageByPackage: Map<string, WorkspacePackageCoverage>;
-	startTime: number;
-	version: string;
-}
+type WorkspaceDispatchSpec = Pick<
+	RunProjectsOptions,
+	"parallel" | "scriptOverride" | "streaming" | "workStealing"
+>;
 
 export async function runWorkspace(
 	options: RunWorkspaceOptions,
@@ -203,16 +191,6 @@ export async function runWorkspace(
 	fs.writeFileSync(synthProjectPath, projectJson);
 	buildWithRojo(synthProjectPath, synthRbxlPath);
 
-	const jobs = pending.map((entry) => {
-		return buildProjectJob({
-			config: { ...entry.projectConfig, placeFile: synthRbxlPath },
-			displayColor: entry.project.displayColor,
-			displayName: entry.project.displayName,
-			pkg: entry.pkg,
-			testFiles: entry.testFiles,
-		});
-	});
-
 	const inputs: Array<MaterializerInput> = pending.map((entry) => {
 		return {
 			config: { ...entry.projectConfig, placeFile: synthRbxlPath },
@@ -223,23 +201,33 @@ export async function runWorkspace(
 	});
 
 	const { onStreamingResult, workStealingCredentials } = options;
-	const { results, timing: backendTiming } = await dispatchWorkspace({
-		backend,
+	const dispatchSpec = await prepareWorkspaceDispatch({
 		cli,
 		inputs,
-		jobs,
 		...(onStreamingResult !== undefined ? { onStreamingResult } : {}),
 		workStealingCredentials,
 	});
 
-	writePerPackageOutputFiles(workspaceRoot, pending, results);
-
-	return mapBackendResults(results, pending, {
-		backendTiming,
-		coverageByPackage,
+	const { results } = await runProjects({
+		backend,
+		deferFormatting: true,
+		projects: pending.map((entry) => {
+			return {
+				config: { ...entry.projectConfig, placeFile: synthRbxlPath },
+				displayColor: entry.project.displayColor,
+				displayName: entry.project.displayName,
+				pkg: entry.pkg,
+				testFiles: entry.testFiles,
+			};
+		}),
 		startTime,
 		version,
+		...dispatchSpec,
 	});
+
+	writePerPackageOutputFiles(workspaceRoot, pending, results);
+
+	return attachCoverageManifests(results, pending, coverageByPackage);
 }
 
 function buildCoverageMap(
@@ -287,20 +275,14 @@ function buildStreaming(input: {
 	};
 }
 
-async function dispatchWorkspace(input: {
-	backend: Backend;
+async function prepareWorkspaceDispatch(input: {
 	cli: CliOptions;
 	generateUuid?: () => string;
 	inputs: Array<MaterializerInput>;
-	jobs: Array<ReturnType<typeof buildProjectJob>>;
 	onStreamingResult?: StreamingAggregatorOnEntry;
 	workStealingCredentials: undefined | { apiKey: string; baseUrl?: string; universeId: string };
-}): Promise<{
-	results: Array<ProjectBackendResult>;
-	timing: BackendTiming;
-}> {
-	const { backend, cli, generateUuid, inputs, jobs, onStreamingResult, workStealingCredentials } =
-		input;
+}): Promise<WorkspaceDispatchSpec> {
+	const { cli, generateUuid, inputs, onStreamingResult, workStealingCredentials } = input;
 
 	const parallel = typeof cli.parallel === "number" ? cli.parallel : undefined;
 	const useWorkStealing =
@@ -340,17 +322,15 @@ async function dispatchWorkspace(input: {
 			streaming !== undefined ? { streaming: { sortedMapId: streaming.sortedMapId } } : {},
 		);
 
-		return backend.runTests({
-			jobs,
+		return {
 			parallel,
 			scriptOverride: script,
 			...(streaming !== undefined ? { streaming: streaming.hooks } : {}),
 			workStealing: true,
-		});
+		};
 	}
 
-	const script = generateMaterializerScript(inputs);
-	return executeBackend(backend, jobs, undefined, script);
+	return { scriptOverride: generateMaterializerScript(inputs) };
 }
 
 async function loadPackages(input: {
@@ -583,26 +563,20 @@ function collectPendingEntries(contexts: Array<PackageContext>): Array<PendingEn
 	return pending;
 }
 
-function mapBackendResults(
-	results: Array<ProjectBackendResult>,
+function attachCoverageManifests(
+	results: Array<ExecuteResult>,
 	pending: Array<PendingEntry>,
-	options: MapResultsOptions,
+	coverageByPackage: Map<string, WorkspacePackageCoverage>,
 ): Array<WorkspaceProjectResult> {
-	return results.map((entry, index) => {
-		// eslint-disable-next-line ts/no-non-null-assertion -- length matches pending
+	return results.map((result, index) => {
+		// eslint-disable-next-line ts/no-non-null-assertion -- runProjects preserves order
 		const pendingEntry = pending[index]!;
-		const coverage = options.coverageByPackage.get(pendingEntry.pkg);
+		const coverage = coverageByPackage.get(pendingEntry.pkg);
 		return {
 			coverageManifest: coverage?.manifest,
 			displayName: pendingEntry.project.displayName,
 			pkg: pendingEntry.pkg,
-			result: processProjectResult(entry, {
-				backendTiming: options.backendTiming,
-				config: pendingEntry.projectConfig,
-				deferFormatting: true,
-				startTime: options.startTime,
-				version: options.version,
-			}),
+			result,
 		};
 	});
 }
@@ -617,13 +591,13 @@ function sanitizePathSegment(segment: string): string {
 function writePerPackageOutputFiles(
 	workspaceRoot: string,
 	pending: Array<PendingEntry>,
-	results: Array<ProjectBackendResult>,
+	results: Array<ExecuteResult>,
 ): void {
 	const directory = path.join(workspaceRoot, PER_PACKAGE_OUTPUT_DIRECTORY);
 	fs.mkdirSync(directory, { recursive: true });
 
 	for (const [index, result] of results.entries()) {
-		// eslint-disable-next-line ts/no-non-null-assertion -- backend keeps results aligned to pending.
+		// eslint-disable-next-line ts/no-non-null-assertion -- runProjects preserves order
 		const entry = pending[index]!;
 		const filename = `${sanitizePathSegment(entry.pkg)}--${sanitizePathSegment(
 			entry.project.displayName,

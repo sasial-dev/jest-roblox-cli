@@ -27,8 +27,14 @@ export {
 	ROOT_CLI_KEYS,
 	SHARED_TEST_KEYS,
 } from "./config/schema.ts";
-export { execute, formatExecuteOutput } from "./executor.ts";
-export type { ExecuteOptions, ExecuteResult, FormatOutputOptions } from "./executor.ts";
+export { formatExecuteOutput, runProjects } from "./executor.ts";
+export type {
+	ExecuteResult,
+	FormatOutputOptions,
+	ProjectInput,
+	RunProjectsOptions,
+	RunProjectsResult,
+} from "./executor.ts";
 
 export { formatResult, formatTestSummary, formatFailure } from "./formatters/formatter.ts";
 export { formatAnnotations, formatJobSummary } from "./formatters/github-actions.ts";

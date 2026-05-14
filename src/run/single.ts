@@ -5,7 +5,7 @@ import { resolveBackend } from "../backends/auto.ts";
 import { narrowConfigByFiles } from "../config/narrow-by-files.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import { prepareCoverage } from "../coverage/prepare.ts";
-import { execute, type ExecuteResult } from "../executor.ts";
+import { type ExecuteResult, runProjects } from "../executor.ts";
 import { hasFormatter, usesAgentFormatter } from "../formatters/utils.ts";
 import { runTypecheck } from "../typecheck/runner.ts";
 import { classifyTestFiles, discoverTestFiles, resolveSetupFilePaths } from "./discovery.ts";
@@ -87,13 +87,15 @@ async function executeRuntimeTests(
 	const backend = await resolveBackend(options.cli, config);
 
 	try {
-		return await execute({
+		const { results } = await runProjects({
 			backend,
-			config,
 			deferFormatting: true,
-			testFiles,
+			projects: [{ config, testFiles }],
+			startTime: Date.now(),
 			version: VERSION,
 		});
+		// eslint-disable-next-line ts/no-non-null-assertion -- length-1 invariant
+		return results[0]!;
 	} finally {
 		await backend.close?.();
 	}

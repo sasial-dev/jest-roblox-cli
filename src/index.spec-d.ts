@@ -5,13 +5,15 @@ import type {
 	CliOptions,
 	Config,
 	ConfigInput,
-	ExecuteOptions,
 	ExecuteResult,
 	GameOutputEntry,
 	JestArgv,
 	JestResult,
 	OpenCloudBackend,
+	ProjectInput,
 	ResolvedConfig,
+	RunProjectsOptions,
+	RunProjectsResult,
 	StudioBackend,
 	TestCaseResult,
 	TestDefinition,
@@ -26,7 +28,6 @@ import {
 	createStudioBackend,
 	DEFAULT_CONFIG,
 	defineConfig,
-	execute,
 	extractJsonFromOutput,
 	formatGameOutputNotice,
 	formatJson,
@@ -37,6 +38,7 @@ import {
 	parseGameOutput,
 	parseJestOutput,
 	resolveConfig,
+	runProjects,
 	runTypecheck,
 	writeGameOutput,
 	writeJsonFile,
@@ -107,10 +109,27 @@ describe("loadConfig", () => {
 	});
 });
 
-describe("execute", () => {
-	it("should accept ExecuteOptions and return Promise<ExecuteResult>", () => {
-		expectTypeOf(execute).parameter(0).toExtend<ExecuteOptions>();
-		expectTypeOf(execute).returns.toEqualTypeOf<Promise<ExecuteResult>>();
+describe("runProjects", () => {
+	it("should accept RunProjectsOptions and return Promise<RunProjectsResult>", () => {
+		expectTypeOf(runProjects).parameter(0).toExtend<RunProjectsOptions>();
+		expectTypeOf(runProjects).returns.toEqualTypeOf<Promise<RunProjectsResult>>();
+	});
+});
+
+describe("ProjectInput", () => {
+	it("should require config and testFiles", () => {
+		expectTypeOf<ProjectInput>().toHaveProperty("config");
+		expectTypeOf<ProjectInput>().toHaveProperty("testFiles");
+	});
+
+	it("should expose optional displayColor, displayName, pkg", () => {
+		expectTypeOf<ProjectInput["displayColor"]>().toBeNullable();
+		expectTypeOf<ProjectInput["displayName"]>().toBeNullable();
+		expectTypeOf<ProjectInput["pkg"]>().toBeNullable();
+	});
+
+	it("should be the element type of RunProjectsOptions.projects", () => {
+		expectTypeOf<RunProjectsOptions["projects"]>().toEqualTypeOf<Array<ProjectInput>>();
 	});
 });
 

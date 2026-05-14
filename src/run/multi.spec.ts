@@ -4,7 +4,7 @@ import { vol } from "memfs";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { resolveBackend } from "../backends/auto.ts";
-import type { Backend, BackendResult, ProjectJob } from "../backends/interface.ts";
+import type { Backend } from "../backends/interface.ts";
 import { narrowConfigByFiles } from "../config/narrow-by-files.ts";
 import type { ResolvedProjectConfig } from "../config/projects.ts";
 import { resolveAllProjects } from "../config/projects.ts";
@@ -17,12 +17,7 @@ import {
 import { createSetupResolver } from "../config/setup-resolver.ts";
 import { generateProjectStubs, syncStubsToShadowDirectory } from "../config/stubs.ts";
 import { prepareCoverage } from "../coverage/prepare.ts";
-import {
-	buildProjectJob,
-	executeBackend,
-	type ExecuteResult,
-	processProjectResult,
-} from "../executor.ts";
+import { type ExecuteResult, runProjects } from "../executor.ts";
 import { runTypecheck } from "../typecheck/runner.ts";
 import type { JestResult } from "../types/jest-result.ts";
 import { buildWithRojo } from "../utils/rojo-builder.ts";
@@ -44,16 +39,14 @@ vi.mock(import("../coverage/prepare"));
 vi.mock(import("../typecheck/runner"));
 
 const mocks = {
-	buildProjectJob: vi.mocked(buildProjectJob),
 	buildWithRojo: vi.mocked(buildWithRojo),
 	createSetupResolver: vi.mocked(createSetupResolver),
-	executeBackend: vi.mocked(executeBackend),
 	generateProjectStubs: vi.mocked(generateProjectStubs),
 	narrowConfigByFiles: vi.mocked(narrowConfigByFiles),
 	prepareCoverage: vi.mocked(prepareCoverage),
-	processProjectResult: vi.mocked(processProjectResult),
 	resolveAllProjects: vi.mocked(resolveAllProjects),
 	resolveBackend: vi.mocked(resolveBackend),
+	runProjects: vi.mocked(runProjects),
 	runTypecheck: vi.mocked(runTypecheck),
 	syncStubsToShadowDirectory: vi.mocked(syncStubsToShadowDirectory),
 };
@@ -100,20 +93,6 @@ function makeExecuteResult(overrides: Partial<ExecuteResult> = {}): ExecuteResul
 			uploadMs: 50,
 		},
 		...overrides,
-	};
-}
-
-function makeBackendResult(jobs: Array<ProjectJob>): BackendResult {
-	return {
-		results: jobs.map((job) => {
-			return {
-				displayColor: job.displayColor,
-				displayName: job.displayName,
-				elapsedMs: 50,
-				result: makeJestResult(),
-			};
-		}),
-		timing: { executionMs: 100, uploadCached: false, uploadMs: 50 },
 	};
 }
 
@@ -171,17 +150,11 @@ function setupDefaults(configOverrides: Partial<ResolvedConfig> = {}) {
 	mocks.createSetupResolver.mockReturnValue((input) => input);
 	mocks.generateProjectStubs.mockReturnValue(undefined);
 	mocks.resolveBackend.mockResolvedValue(makeBackend("studio"));
-	mocks.buildProjectJob.mockImplementation((parameters) => {
+	mocks.runProjects.mockImplementation(async (input) => {
 		return {
-			config: parameters.config,
-			displayColor: parameters.displayColor,
-			displayName: parameters.displayName ?? "",
-			testFiles: parameters.testFiles,
+			backendTiming: { executionMs: 100, uploadCached: false, uploadMs: 50 },
+			results: input.projects.map(() => makeExecuteResult()),
 		};
-	});
-	mocks.executeBackend.mockImplementation(async (_backend, jobs) => makeBackendResult(jobs));
-	mocks.processProjectResult.mockImplementation((entry, options) => {
-		return makeExecuteResult({ result: entry.result, timing: options.backendTiming as never });
 	});
 	mocks.narrowConfigByFiles.mockImplementation((cfg) => cfg);
 	writeRojoProject();
@@ -449,7 +422,7 @@ describe(runMultiProject, () => {
 			rawProjects: [makeProjectEntry("client")],
 		});
 
-		expect(mocks.executeBackend).not.toHaveBeenCalled();
+		expect(mocks.runProjects).not.toHaveBeenCalled();
 		expect(result.typecheckResult).toBeDefined();
 	});
 
@@ -459,18 +432,21 @@ describe(runMultiProject, () => {
 		const { config } = setupDefaults();
 		seedProjectFiles();
 
-		mocks.processProjectResult.mockImplementation((entry, options) => {
-			const tag = entry.displayName;
-			return makeExecuteResult({
-				coverageData: { [`${tag}.luau`]: { s: { "0": 1 } } },
-				result: entry.result,
-				sourceMapper: {
-					mapFailureMessage: (message) => `[${tag}] ${message}`,
-					mapFailureWithLocations: (message) => ({ locations: [], message }),
-					resolveTestFilePath: () => {},
-				},
-				timing: options.backendTiming as never,
-			});
+		mocks.runProjects.mockImplementation(async (input) => {
+			return {
+				backendTiming: { executionMs: 100, uploadCached: false, uploadMs: 50 },
+				results: input.projects.map((project) => {
+					const tag = project.displayName ?? "";
+					return makeExecuteResult({
+						coverageData: { [`${tag}.luau`]: { s: { "0": 1 } } },
+						sourceMapper: {
+							mapFailureMessage: (message) => `[${tag}] ${message}`,
+							mapFailureWithLocations: (message) => ({ locations: [], message }),
+							resolveTestFilePath: () => {},
+						},
+					});
+				}),
+			};
 		});
 
 		const result = await runMultiProject({
@@ -496,11 +472,11 @@ describe(runMultiProject, () => {
 			rawProjects: [makeProjectEntry("client")],
 		});
 
-		const openCloudCall = mocks.executeBackend.mock.calls[0];
+		const openCloudCall = mocks.runProjects.mock.calls[0];
 
-		expect(openCloudCall?.[2]).toBe(2);
+		expect(openCloudCall?.[0].parallel).toBe(2);
 
-		mocks.executeBackend.mockClear();
+		mocks.runProjects.mockClear();
 		mocks.resolveBackend.mockResolvedValueOnce(makeBackend("studio"));
 		await runMultiProject({
 			cli: makeCli(),
@@ -508,9 +484,9 @@ describe(runMultiProject, () => {
 			rawProjects: [makeProjectEntry("client")],
 		});
 
-		const studioCall = mocks.executeBackend.mock.calls[0];
+		const studioCall = mocks.runProjects.mock.calls[0];
 
-		expect(studioCall?.[2]).toBeUndefined();
+		expect(studioCall?.[0].parallel).toBeUndefined();
 	});
 
 	it("should derive coverage paths via collectCoverageFrom passthrough when computing merged data", async () => {
@@ -585,9 +561,9 @@ describe(runMultiProject, () => {
 			rawProjects: [makeProjectEntry("client")],
 		});
 
-		const job = mocks.executeBackend.mock.calls[0]?.[1][0];
+		const project = mocks.runProjects.mock.calls[0]?.[0].projects[0];
 
-		expect(job?.config.setupFiles).toStrictEqual(["resolved:./setup.ts"]);
+		expect(project?.config.setupFiles).toStrictEqual(["resolved:./setup.ts"]);
 	});
 
 	it("should preserve backend errors and still close the backend", async () => {
@@ -598,7 +574,7 @@ describe(runMultiProject, () => {
 		mocks.resolveBackend.mockResolvedValueOnce(backend);
 		seedProjectFiles();
 		const error = new Error("backend failed");
-		mocks.executeBackend.mockRejectedValueOnce(error);
+		mocks.runProjects.mockRejectedValueOnce(error);
 
 		await expect(
 			runMultiProject({

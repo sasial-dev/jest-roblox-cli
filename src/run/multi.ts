@@ -6,7 +6,7 @@ import * as path from "node:path";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { resolveBackend } from "../backends/auto.ts";
-import type { Backend, ProjectJob } from "../backends/interface.ts";
+import type { Backend } from "../backends/interface.ts";
 import { narrowConfigByFiles } from "../config/narrow-by-files.ts";
 import type { ResolvedProjectConfig } from "../config/projects.ts";
 import { resolveAllProjects } from "../config/projects.ts";
@@ -16,7 +16,7 @@ import { deriveCoverageFromIncludes } from "../coverage/derive-coverage-from.ts"
 import { mergeRawCoverage } from "../coverage/merge-raw-coverage.ts";
 import { prepareCoverage } from "../coverage/prepare.ts";
 import type { RawCoverageData } from "../coverage/types.ts";
-import { buildProjectJob, executeBackend, processProjectResult } from "../executor.ts";
+import { runProjects } from "../executor.ts";
 import { combineSourceMappers, type SourceMapper } from "../source-mapper/index.ts";
 import { runTypecheck } from "../typecheck/runner.ts";
 import { rojoProjectSchema } from "../types/rojo.ts";
@@ -89,16 +89,7 @@ export async function runMultiProject(options: MultiRunOptions): Promise<MultiRu
 		rootConfig,
 	});
 
-	const jobs = pendingJobs.map((pending) => {
-		return buildProjectJob({
-			config: pending.config,
-			displayColor: pending.displayColor,
-			displayName: pending.displayName,
-			testFiles: pending.runtimeFiles,
-		});
-	});
-
-	const projectResults = await runJobs(backend, jobs, pendingJobs, parallel);
+	const projectResults = await runJobs(backend, pendingJobs, parallel);
 
 	const uniqueTypeTestFiles = [...new Set(allTypeTestFiles)];
 	const typecheckResult =
@@ -187,46 +178,44 @@ function collectPendingJobs(arguments_: CollectPendingJobsArguments): {
 
 async function runJobs(
 	backend: Backend,
-	jobs: Array<ProjectJob>,
 	pendingJobs: Array<PendingJob>,
 	parallel: ParallelOption,
 ): Promise<Array<ProjectResult>> {
-	if (jobs.length === 0) {
+	if (pendingJobs.length === 0) {
 		await backend.close?.();
 		return [];
 	}
 
-	const startTime = Date.now();
-	let backendResult;
+	let runResult;
 	try {
-		backendResult = await executeBackend(backend, jobs, parallel);
+		runResult = await runProjects({
+			backend,
+			deferFormatting: true,
+			parallel,
+			projects: pendingJobs.map((pending) => {
+				return {
+					config: pending.config,
+					displayColor: pending.displayColor,
+					displayName: pending.displayName,
+					testFiles: pending.runtimeFiles,
+				};
+			}),
+			startTime: Date.now(),
+			version: VERSION,
+		});
 	} finally {
 		await backend.close?.();
 	}
 
-	const sharedTiming = backendResult.timing;
-	const projectResults: Array<ProjectResult> = [];
-	for (const [index, entry] of backendResult.results.entries()) {
-		// eslint-disable-next-line ts/no-non-null-assertion -- backend invariant: results.length === jobs.length
+	return runResult.results.map((executeResult, index) => {
+		// eslint-disable-next-line ts/no-non-null-assertion -- runProjects preserves order
 		const pending = pendingJobs[index]!;
-		// eslint-disable-next-line ts/no-non-null-assertion -- backend invariant: results.length === jobs.length
-		const jobConfig = jobs[index]!.config;
-
-		const executeResult = processProjectResult(entry, {
-			backendTiming: sharedTiming,
-			config: jobConfig,
-			deferFormatting: true,
-			startTime,
-			version: VERSION,
-		});
-		projectResults.push({
+		return {
 			displayColor: pending.displayColor,
 			displayName: pending.displayName,
 			result: executeResult,
-		});
-	}
-
-	return projectResults;
+		};
+	});
 }
 
 function loadRojoTree(config: ResolvedConfig): RojoTreeNode {

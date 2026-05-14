@@ -9,10 +9,10 @@ import color from "tinyrainbow";
 
 import type {
 	Backend,
-	BackendResult,
 	BackendTiming,
 	ProjectBackendResult,
 	ProjectJob,
+	StreamingHooks,
 } from "./backends/interface.ts";
 import { applySnapshotFormatDefaults } from "./config/loader.ts";
 import type { ResolvedConfig } from "./config/schema.ts";
@@ -35,14 +35,6 @@ import type { TsconfigMapping } from "./types/tsconfig.ts";
 import { formatBanner } from "./utils/banner.ts";
 import { normalizeWindowsPath } from "./utils/normalize-windows-path.ts";
 
-export interface ExecuteOptions {
-	backend: Backend;
-	config: ResolvedConfig;
-	deferFormatting?: boolean;
-	testFiles: Array<string>;
-	version: string;
-}
-
 export interface ExecuteResult {
 	coverageData?: RawCoverageData;
 	exitCode: number;
@@ -52,14 +44,6 @@ export interface ExecuteResult {
 	snapshotWriteFailures?: number;
 	sourceMapper?: SourceMapper;
 	timing: TimingResult;
-}
-
-export interface ProcessProjectOptions {
-	backendTiming: BackendTiming;
-	config: ResolvedConfig;
-	deferFormatting?: boolean;
-	startTime: number;
-	version: string;
 }
 
 export interface FormatOutputOptions {
@@ -80,6 +64,39 @@ export interface SnapshotWriteCounts {
 export interface TsconfigDirectories {
 	outDir: string | undefined;
 	rootDir: string | undefined;
+}
+
+export interface ProjectInput {
+	config: ResolvedConfig;
+	displayColor?: string;
+	displayName?: string;
+	pkg?: string;
+	testFiles: Array<string>;
+}
+
+export interface RunProjectsOptions {
+	backend: Backend;
+	deferFormatting?: boolean;
+	parallel?: "auto" | number;
+	projects: Array<ProjectInput>;
+	scriptOverride?: string;
+	startTime: number;
+	streaming?: StreamingHooks;
+	version: string;
+	workStealing?: boolean;
+}
+
+export interface RunProjectsResult {
+	backendTiming: BackendTiming;
+	results: Array<ExecuteResult>;
+}
+
+interface ProcessProjectOptions {
+	backendTiming: BackendTiming;
+	config: ResolvedConfig;
+	deferFormatting?: boolean;
+	startTime: number;
+	version: string;
 }
 
 interface TsconfigCompilerOptions {
@@ -230,134 +247,41 @@ export function formatExecuteOutput(options: FormatOutputOptions): string {
 }
 
 /**
- * Build a `ProjectJob` with `snapshotFormat` resolved per-project. Each job
- * carries its own config so the Luau runner never re-resolves or shares format
- * state across projects (fixes the spike's snapshot-diff regression — C1).
+ * Unified orchestration entry point: builds jobs for every input project,
+ * dispatches them through the backend in one call, then maps each backend
+ * result through per-project post-processing. Single-, multi-, and workspace-
+ * run callers all funnel through here so the build→execute→process sequence
+ * lives in exactly one place.
+ *
+ * Ordering contract: the returned `results` array is in the same order as
+ * `options.projects`. Backends MUST return `ProjectBackendResult[]` in the
+ * same order as the submitted `jobs` envelope — `runProjects` indexes into
+ * `jobs[i]` to recover each project's resolved config, so out-of-order
+ * results would post-process with the wrong config.
  */
-export function buildProjectJob(parameters: {
-	config: ResolvedConfig;
-	displayColor?: string;
-	displayName?: string;
-	pkg?: string;
-	testFiles: Array<string>;
-}): ProjectJob {
-	const tsconfigMappings = resolveAllTsconfigMappings(parameters.config.rootDir);
-	const luauProject = isLuauProject(parameters.testFiles, tsconfigMappings);
-	const config = applySnapshotFormatDefaults(parameters.config, luauProject);
-	return {
-		config,
-		displayColor: parameters.displayColor,
-		displayName: parameters.displayName ?? "",
-		pkg: parameters.pkg,
-		testFiles: parameters.testFiles,
-	};
-}
+export async function runProjects(options: RunProjectsOptions): Promise<RunProjectsResult> {
+	const jobs = options.projects.map((project) => buildProjectJob(project));
 
-/**
- * Thin wrapper over `backend.runTests`. Fires exactly once per CLI invocation
- * with a full `ProjectJob[]` envelope. Returns the raw `BackendResult`.
- */
-export async function executeBackend(
-	backend: Backend,
-	jobs: Array<ProjectJob>,
-	parallel?: "auto" | number,
-	scriptOverride?: string,
-): Promise<BackendResult> {
-	return backend.runTests({ jobs, parallel, scriptOverride });
-}
-
-/**
- * Process a single `ProjectBackendResult` into an `ExecuteResult`: writes
- * snapshots, builds the source mapper, resolves test-file paths, and renders
- * formatter output. Called once per job.
- */
-export function processProjectResult(
-	entry: ProjectBackendResult,
-	options: ProcessProjectOptions,
-): ExecuteResult {
-	const { backendTiming, config, deferFormatting, startTime, version } = options;
-	const { coverageData, gameOutput, luauTiming, result, setupMs, snapshotWrites } = entry;
-
-	const tsconfigMappings = resolveAllTsconfigMappings(config.rootDir);
-
-	const writeCounts: SnapshotWriteCounts =
-		snapshotWrites !== undefined
-			? writeSnapshots(snapshotWrites, config, tsconfigMappings)
-			: { attempted: 0, failed: 0, written: 0 };
-
-	const testsMs = calculateTestsMs(result.testResults);
-	const sourceMapper = config.sourceMap ? buildSourceMapper(config, tsconfigMappings) : undefined;
-
-	resolveTestFilePaths(result, sourceMapper);
-
-	const totalMs = Date.now() - startTime;
-
-	const timing = {
-		executionMs: backendTiming.executionMs,
-		setupMs,
-		startTime,
-		testsMs,
-		totalMs,
-		uploadCached: backendTiming.uploadCached,
-		uploadMs: backendTiming.uploadMs,
-	} satisfies TimingResult;
-
-	const output =
-		deferFormatting !== true
-			? formatExecuteOutput({
-					config,
-					result,
-					snapshotWriteFailures: writeCounts.failed,
-					sourceMapper,
-					timing,
-					version,
-				})
-			: "";
-
-	if (luauTiming !== undefined) {
-		printLuauTiming(luauTiming);
-	}
-
-	const exitCode = result.success && writeCounts.failed === 0 ? 0 : 1;
-
-	return {
-		coverageData,
-		exitCode,
-		gameOutput,
-		output,
-		result,
-		snapshotWriteFailures: writeCounts.failed > 0 ? writeCounts.failed : undefined,
-		sourceMapper,
-		timing,
-	};
-}
-
-/**
- * Single-project convenience wrapper: builds a length-1 jobs array, fires
- * `executeBackend` once, and maps the single entry through
- * `processProjectResult`. Multi-project callers drive `executeBackend` +
- * `processProjectResult` directly from `cli.ts`.
- */
-export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
-	const startTime = Date.now();
-
-	const job = buildProjectJob({
-		config: options.config,
-		testFiles: options.testFiles,
+	const { results: backendResults, timing: backendTiming } = await options.backend.runTests({
+		jobs,
+		parallel: options.parallel,
+		scriptOverride: options.scriptOverride,
+		streaming: options.streaming,
+		workStealing: options.workStealing,
 	});
 
-	const { results, timing: backendTiming } = await executeBackend(options.backend, [job]);
-	// Length-1 envelope: single-project path always gets exactly one result.
-	// eslint-disable-next-line ts/no-non-null-assertion -- length-1 invariant
-	const first = results[0]!;
-
-	return processProjectResult(first, {
-		backendTiming,
-		config: job.config,
-		deferFormatting: options.deferFormatting,
-		startTime,
-		version: options.version,
+	const results = backendResults.map((entry, index) => {
+		return processProjectResult(entry, {
+			backendTiming,
+			// eslint-disable-next-line ts/no-non-null-assertion -- backend invariant: results are parallel to jobs (same length, same order)
+			config: jobs[index]!.config,
+			deferFormatting: options.deferFormatting,
+			startTime: options.startTime,
+			version: options.version,
+		});
 	});
+
+	return { backendTiming, results };
 }
 
 function normalizeDirectoryPath(directory: string): string {
@@ -467,6 +391,90 @@ function printLuauTiming(timing: Record<string, number>): void {
 	}
 
 	process.stderr.write(`[TIMING] total: ${String(total)}ms\n`);
+}
+
+/**
+ * Process a single `ProjectBackendResult` into an `ExecuteResult`: writes
+ * snapshots, builds the source mapper, resolves test-file paths, and renders
+ * formatter output. Called once per job.
+ */
+function processProjectResult(
+	entry: ProjectBackendResult,
+	options: ProcessProjectOptions,
+): ExecuteResult {
+	const { backendTiming, config, deferFormatting, startTime, version } = options;
+	const { coverageData, gameOutput, luauTiming, result, setupMs, snapshotWrites } = entry;
+
+	const tsconfigMappings = resolveAllTsconfigMappings(config.rootDir);
+
+	const writeCounts: SnapshotWriteCounts =
+		snapshotWrites !== undefined
+			? writeSnapshots(snapshotWrites, config, tsconfigMappings)
+			: { attempted: 0, failed: 0, written: 0 };
+
+	const testsMs = calculateTestsMs(result.testResults);
+	const sourceMapper = config.sourceMap ? buildSourceMapper(config, tsconfigMappings) : undefined;
+
+	resolveTestFilePaths(result, sourceMapper);
+
+	const totalMs = Date.now() - startTime;
+
+	const timing = {
+		executionMs: backendTiming.executionMs,
+		setupMs,
+		startTime,
+		testsMs,
+		totalMs,
+		uploadCached: backendTiming.uploadCached,
+		uploadMs: backendTiming.uploadMs,
+	} satisfies TimingResult;
+
+	const output =
+		deferFormatting !== true
+			? formatExecuteOutput({
+					config,
+					result,
+					snapshotWriteFailures: writeCounts.failed,
+					sourceMapper,
+					timing,
+					version,
+				})
+			: "";
+
+	if (luauTiming !== undefined) {
+		printLuauTiming(luauTiming);
+	}
+
+	const exitCode = result.success && writeCounts.failed === 0 ? 0 : 1;
+
+	return {
+		coverageData,
+		exitCode,
+		gameOutput,
+		output,
+		result,
+		snapshotWriteFailures: writeCounts.failed > 0 ? writeCounts.failed : undefined,
+		sourceMapper,
+		timing,
+	};
+}
+
+/**
+ * Build a `ProjectJob` with `snapshotFormat` resolved per-project. Each job
+ * carries its own config so the Luau runner never re-resolves or shares format
+ * state across projects (fixes the spike's snapshot-diff regression — C1).
+ */
+function buildProjectJob(parameters: ProjectInput): ProjectJob {
+	const tsconfigMappings = resolveAllTsconfigMappings(parameters.config.rootDir);
+	const luauProject = isLuauProject(parameters.testFiles, tsconfigMappings);
+	const config = applySnapshotFormatDefaults(parameters.config, luauProject);
+	return {
+		config,
+		displayColor: parameters.displayColor,
+		displayName: parameters.displayName ?? "",
+		pkg: parameters.pkg,
+		testFiles: parameters.testFiles,
+	};
 }
 
 const instrumentedFileRecordSchema = type({

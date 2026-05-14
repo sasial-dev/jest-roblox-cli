@@ -17,16 +17,13 @@ import type { ResolvedConfig } from "./config/schema.ts";
 import { DEFAULT_CONFIG } from "./config/schema.ts";
 import type { RawCoverageData } from "./coverage/types.ts";
 import {
-	buildProjectJob,
-	execute,
-	executeBackend,
-	type ExecuteOptions,
+	type ExecuteResult,
 	isLuauProject,
 	loadCoverageManifest,
-	processProjectResult,
 	readTsconfigMapping,
 	resolveAllTsconfigMappings,
 	resolveTsconfigDirectories,
+	runProjects,
 } from "./executor.ts";
 import { parseJestOutput } from "./reporter/parser.ts";
 import type { JestResult } from "./types/jest-result.ts";
@@ -61,6 +58,26 @@ function seedCwd(): void {
 }
 
 seedCwd();
+
+interface ExecuteOptions {
+	backend: Backend;
+	config: ResolvedConfig;
+	deferFormatting?: boolean;
+	testFiles: Array<string>;
+	version: string;
+}
+
+async function executeSingle(options: ExecuteOptions): Promise<ExecuteResult> {
+	const { results } = await runProjects({
+		backend: options.backend,
+		deferFormatting: options.deferFormatting,
+		projects: [{ config: options.config, testFiles: options.testFiles }],
+		startTime: Date.now(),
+		version: options.version,
+	});
+
+	return results[0]!;
+}
 
 function createFailingResult(): JestResult {
 	return {
@@ -240,7 +257,7 @@ function createTemporaryDirectory(prefix: string): string {
 	return directory;
 }
 
-describe(execute, () => {
+describe("execute single-project helper", () => {
 	it("should return exit code 0 when all tests pass", async () => {
 		expect.assertions(2);
 
@@ -252,7 +269,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.exitCode).toBe(0);
 		expect(result.result.success).toBeTrue();
@@ -295,7 +312,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.exitCode).toBe(0);
 	});
@@ -311,7 +328,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.exitCode).toBe(1);
 		expect(result.result.success).toBeFalse();
@@ -337,7 +354,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		await execute(options);
+		await executeSingle(options);
 
 		expect(capturedOptions?.jobs[0]?.config.testNamePattern).toBe("should pass");
 	});
@@ -353,7 +370,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.output).toContain("✓");
 		expect(result.output).toContain("2 passed");
@@ -371,7 +388,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		const parsed = parseJestOutput(result.output);
 
@@ -391,7 +408,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.gameOutput).toBe(rawGameOutput);
 	});
@@ -412,7 +429,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		// verbose cancels agent — uses default formatter which includes RUN
 		// header
@@ -436,7 +453,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.exitCode).toBe(0);
 		expect(result.output).not.toBeEmpty();
@@ -454,7 +471,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.output).toBe("");
 	});
@@ -470,7 +487,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.timing.executionMs).toBe(100);
 		expect(result.timing.uploadMs).toBe(50);
@@ -490,7 +507,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.output).toBe("");
 		expect(result.timing.totalMs).toBeGreaterThanOrEqual(0);
@@ -515,7 +532,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.coverageData).toBe(coverageData);
 	});
@@ -536,7 +553,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		// coverageData is still returned (backend always provides it), but
 		// coverage processing is now handled by cli.ts
@@ -563,7 +580,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		// exit code is based only on test success, not coverage thresholds
 		expect(result.exitCode).toBe(0);
@@ -581,7 +598,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.exitCode).toBe(0);
 	});
@@ -598,7 +615,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		// Agent format uses PASS/FAIL prefix per file, no verbose headers
 		expect(result.output).toContain("FAIL");
@@ -620,7 +637,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.output).toContain("FAIL");
 	});
@@ -649,7 +666,7 @@ describe(execute, () => {
 		};
 
 		// Should not throw when luauTiming is present
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.exitCode).toBe(0);
 	});
@@ -708,7 +725,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const executeResult = await execute(options);
+		const executeResult = await executeSingle(options);
 
 		expect(executeResult.output).not.toContain(dataModelPath);
 		expect(executeResult.result.testResults[0]!.testFilePath).toContain(
@@ -742,7 +759,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.exitCode).toBe(1);
 		expect(result.snapshotWriteFailures).toBe(1);
@@ -786,7 +803,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.exitCode).toBe(0);
 
@@ -829,7 +846,7 @@ describe(execute, () => {
 		};
 
 		const config: ResolvedConfig = { ...DEFAULT_CONFIG, rootDir: temporaryDirectory };
-		await execute({
+		await executeSingle({
 			backend,
 			config,
 			testFiles: ["src/test.spec.ts"],
@@ -877,7 +894,7 @@ describe(execute, () => {
 			rootDir: temporaryDirectory,
 			silent: true,
 		};
-		await execute({
+		await executeSingle({
 			backend,
 			config,
 			testFiles: ["src/test.spec.ts"],
@@ -927,7 +944,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.exitCode).toBe(0);
 	});
@@ -971,7 +988,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		await execute(options);
+		await executeSingle(options);
 
 		expect(stderrSpy).toHaveBeenCalledWith(
 			expect.stringContaining("Cannot resolve snapshot path"),
@@ -1015,7 +1032,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		await execute(options);
+		await executeSingle(options);
 
 		expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("invalid rojo project"));
 
@@ -1050,7 +1067,7 @@ describe(execute, () => {
 		};
 
 		const config: ResolvedConfig = { ...DEFAULT_CONFIG, rootDir: temporaryDirectory };
-		await execute({
+		await executeSingle({
 			backend,
 			config,
 			testFiles: ["src/test.spec.ts"],
@@ -1099,7 +1116,7 @@ describe(execute, () => {
 		};
 
 		const config: ResolvedConfig = { ...DEFAULT_CONFIG, rootDir: temporaryDirectory };
-		const result = await execute({
+		const result = await executeSingle({
 			backend,
 			config,
 			testFiles: ["src/test.spec.ts"],
@@ -1149,7 +1166,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		await execute(options);
+		await executeSingle(options);
 
 		const output = stderrSpy.mock.calls.map(([message]) => String(message)).join("");
 
@@ -1205,7 +1222,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		await execute(options);
+		await executeSingle(options);
 
 		const output = stderrSpy.mock.calls.map(([message]) => String(message)).join("");
 		stderrSpy.mockRestore();
@@ -1241,7 +1258,7 @@ describe(execute, () => {
 		};
 
 		const config: ResolvedConfig = { ...DEFAULT_CONFIG, rootDir: temporaryDirectory };
-		const result = await execute({
+		const result = await executeSingle({
 			backend,
 			config,
 			testFiles: ["src/test.spec.ts"],
@@ -1291,7 +1308,7 @@ describe(execute, () => {
 			silent: true,
 		};
 
-		await execute({ backend, config, testFiles: [], version: "0.0.0-test" });
+		await executeSingle({ backend, config, testFiles: [], version: "0.0.0-test" });
 
 		const sourceSnapshot = path.join(
 			temporaryDirectory,
@@ -1341,7 +1358,7 @@ describe(execute, () => {
 			silent: true,
 		};
 
-		await execute({ backend, config, testFiles: [], version: "0.0.0-test" });
+		await executeSingle({ backend, config, testFiles: [], version: "0.0.0-test" });
 
 		const sourceSnapshot = path.join(
 			temporaryDirectory,
@@ -1390,7 +1407,7 @@ describe(execute, () => {
 			silent: true,
 		};
 
-		await execute({ backend, config, testFiles: [], version: "0.0.0-test" });
+		await executeSingle({ backend, config, testFiles: [], version: "0.0.0-test" });
 
 		// No tsconfig → no outDir/rootDir rewriting → lands at rojo-resolved path
 		const outSnapshot = path.join(
@@ -1433,7 +1450,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		// Source mapper was built (failure messages won't contain rojo paths
 		// though)
@@ -1490,7 +1507,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const executeResult = await execute(options);
+		const executeResult = await executeSingle(options);
 
 		expect(executeResult.result.testResults[0]!.testFilePath).toBe(
 			"packages/uuid-generator/src/init.spec.luau",
@@ -1545,7 +1562,7 @@ describe(execute, () => {
 		};
 
 		const config: ResolvedConfig = { ...DEFAULT_CONFIG, rootDir: temporaryDirectory };
-		await execute({ backend, config, testFiles: [], version: "0.0.0-test" });
+		await executeSingle({ backend, config, testFiles: [], version: "0.0.0-test" });
 
 		const snapshotPath = path.join(
 			temporaryDirectory,
@@ -1578,7 +1595,7 @@ describe(execute, () => {
 			version: "0.0.0-test",
 		};
 
-		const result = await execute(options);
+		const result = await executeSingle(options);
 
 		expect(result.exitCode).toBe(0);
 	});
@@ -1846,168 +1863,6 @@ describe(isLuauProject, () => {
 	});
 });
 
-describe(buildProjectJob, () => {
-	it("should resolve printBasicPrototype=true for Luau project", () => {
-		expect.assertions(2);
-
-		const job = buildProjectJob({
-			config: DEFAULT_CONFIG,
-			displayName: "luau-project",
-			testFiles: ["src/a.spec.luau"],
-		});
-
-		expect(job.displayName).toBe("luau-project");
-		expect(job.config.snapshotFormat?.printBasicPrototype).toBeTrue();
-	});
-
-	it("should resolve printBasicPrototype=false for TS project", () => {
-		expect.assertions(1);
-
-		const job = buildProjectJob({
-			config: DEFAULT_CONFIG,
-			testFiles: ["src/a.spec.ts"],
-		});
-
-		expect(job.config.snapshotFormat?.printBasicPrototype).toBeFalse();
-	});
-
-	it("should default displayName to empty string", () => {
-		expect.assertions(1);
-
-		const job = buildProjectJob({ config: DEFAULT_CONFIG, testFiles: [] });
-
-		expect(job.displayName).toBe("");
-	});
-
-	it("should preserve displayColor", () => {
-		expect.assertions(1);
-
-		const job = buildProjectJob({
-			config: DEFAULT_CONFIG,
-			displayColor: "green",
-			testFiles: [],
-		});
-
-		expect(job.displayColor).toBe("green");
-	});
-
-	it("should preserve existing snapshotFormat.printBasicPrototype when set", () => {
-		expect.assertions(1);
-
-		const config: ResolvedConfig = {
-			...DEFAULT_CONFIG,
-			snapshotFormat: { printBasicPrototype: false },
-		};
-		const job = buildProjectJob({ config, testFiles: ["src/a.spec.luau"] });
-
-		expect(job.config.snapshotFormat?.printBasicPrototype).toBeFalse();
-	});
-});
-
-describe(executeBackend, () => {
-	it("should call backend.runTests with jobs array and return BackendResult", async () => {
-		expect.assertions(2);
-
-		let captured: BackendOptions | undefined;
-		const backend: Backend = {
-			kind: "studio",
-			runTests: async (options_) => {
-				captured = options_;
-				return {
-					results: [{ displayName: "", elapsedMs: 42, result: createPassingResult() }],
-					timing: { executionMs: 100, uploadCached: false, uploadMs: 0 },
-				};
-			},
-		};
-
-		const job = buildProjectJob({ config: DEFAULT_CONFIG, testFiles: [] });
-		const result = await executeBackend(backend, [job]);
-
-		expect(captured?.jobs).toHaveLength(1);
-		expect(result.results[0]?.elapsedMs).toBe(42);
-	});
-
-	it("should forward parallel option to backend.runTests", async () => {
-		expect.assertions(1);
-
-		let captured: BackendOptions | undefined;
-		const backend: Backend = {
-			kind: "open-cloud",
-			runTests: async (options_) => {
-				captured = options_;
-				return {
-					results: [{ displayName: "", elapsedMs: 0, result: createPassingResult() }],
-					timing: { executionMs: 0, uploadCached: false, uploadMs: 0 },
-				};
-			},
-		};
-
-		const job = buildProjectJob({ config: DEFAULT_CONFIG, testFiles: [] });
-		await executeBackend(backend, [job], 3);
-
-		expect(captured?.parallel).toBe(3);
-	});
-
-	it("should forward auto parallel value", async () => {
-		expect.assertions(1);
-
-		let captured: BackendOptions | undefined;
-		const backend: Backend = {
-			kind: "open-cloud",
-			runTests: async (options_) => {
-				captured = options_;
-				return {
-					results: [{ displayName: "", elapsedMs: 0, result: createPassingResult() }],
-					timing: { executionMs: 0, uploadCached: false, uploadMs: 0 },
-				};
-			},
-		};
-
-		const job = buildProjectJob({ config: DEFAULT_CONFIG, testFiles: [] });
-		await executeBackend(backend, [job], "auto");
-
-		expect(captured?.parallel).toBe("auto");
-	});
-});
-
-describe(processProjectResult, () => {
-	it("should return ExecuteResult with backend timing and success exit code", () => {
-		expect.assertions(3);
-
-		const result = processProjectResult(
-			{ displayName: "", elapsedMs: 0, result: createPassingResult() },
-			{
-				backendTiming: { executionMs: 200, uploadCached: true, uploadMs: 50 },
-				config: DEFAULT_CONFIG,
-				deferFormatting: true,
-				startTime: Date.now(),
-				version: "0.0.0-test",
-			},
-		);
-
-		expect(result.exitCode).toBe(0);
-		expect(result.timing.executionMs).toBe(200);
-		expect(result.timing.uploadCached).toBeTrue();
-	});
-
-	it("should return exit code 1 when result fails", () => {
-		expect.assertions(1);
-
-		const result = processProjectResult(
-			{ displayName: "", elapsedMs: 0, result: createFailingResult() },
-			{
-				backendTiming: { executionMs: 0 },
-				config: DEFAULT_CONFIG,
-				deferFormatting: true,
-				startTime: Date.now(),
-				version: "0.0.0-test",
-			},
-		);
-
-		expect(result.exitCode).toBe(1);
-	});
-});
-
 describe(loadCoverageManifest, () => {
 	it("should return undefined when manifest file does not exist", () => {
 		expect.assertions(1);
@@ -2112,5 +1967,279 @@ describe(loadCoverageManifest, () => {
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("shared/invalid.luau"));
 
 		spy.mockRestore();
+	});
+});
+
+describe(runProjects, () => {
+	it("should return one processed result for a single project", async () => {
+		expect.assertions(3);
+
+		const backend = createMockBackend(createPassingResult());
+
+		const { backendTiming, results } = await runProjects({
+			backend,
+			projects: [{ config: DEFAULT_CONFIG, testFiles: ["src/test.spec.ts"] }],
+			startTime: Date.now(),
+			version: "0.0.0-test",
+		});
+
+		expect(results).toHaveLength(1);
+		expect(results[0]?.exitCode).toBe(0);
+		expect(backendTiming.executionMs).toBe(100);
+	});
+
+	it("should return one ExecuteResult per project in input order", async () => {
+		expect.assertions(3);
+
+		const backend: Backend = {
+			kind: "studio",
+			runTests: async () => {
+				return {
+					results: [
+						{ displayName: "first", elapsedMs: 0, result: createPassingResult() },
+						{ displayName: "second", elapsedMs: 0, result: createFailingResult() },
+					],
+					timing: DEFAULT_TIMING,
+				};
+			},
+		};
+
+		const { results } = await runProjects({
+			backend,
+			projects: [
+				{
+					config: DEFAULT_CONFIG,
+					displayName: "first",
+					testFiles: ["src/a.spec.ts"],
+				},
+				{
+					config: DEFAULT_CONFIG,
+					displayName: "second",
+					testFiles: ["src/b.spec.ts"],
+				},
+			],
+			startTime: Date.now(),
+			version: "0.0.0-test",
+		});
+
+		expect(results).toHaveLength(2);
+		expect(results[0]?.exitCode).toBe(0);
+		expect(results[1]?.exitCode).toBe(1);
+	});
+
+	it("should forward parallel to backend.runTests", async () => {
+		expect.assertions(1);
+
+		let captured: BackendOptions | undefined;
+		const backend: Backend = {
+			kind: "open-cloud",
+			runTests: async (options_) => {
+				captured = options_;
+				return singleEntryResult({ result: createPassingResult() });
+			},
+		};
+
+		await runProjects({
+			backend,
+			parallel: 3,
+			projects: [{ config: DEFAULT_CONFIG, testFiles: ["src/test.spec.ts"] }],
+			startTime: Date.now(),
+			version: "0.0.0-test",
+		});
+
+		expect(captured?.parallel).toBe(3);
+	});
+
+	it("should forward scriptOverride, workStealing, and streaming hooks", async () => {
+		expect.assertions(3);
+
+		let captured: BackendOptions | undefined;
+		const backend: Backend = {
+			kind: "open-cloud",
+			runTests: async (options_) => {
+				captured = options_;
+				return singleEntryResult({ result: createPassingResult() });
+			},
+		};
+
+		const streaming: NonNullable<BackendOptions["streaming"]> = fromAny({
+			onPackageResult: () => {},
+			reader: { read: async () => [] },
+		});
+
+		await runProjects({
+			backend,
+			projects: [{ config: DEFAULT_CONFIG, testFiles: ["src/test.spec.ts"] }],
+			scriptOverride: "-- staged materializer",
+			startTime: Date.now(),
+			streaming,
+			version: "0.0.0-test",
+			workStealing: true,
+		});
+
+		expect(captured?.scriptOverride).toBe("-- staged materializer");
+		expect(captured?.workStealing).toBeTrue();
+		expect(captured?.streaming).toBe(streaming);
+	});
+
+	it("should post-process each result with its own project config", async () => {
+		expect.assertions(2);
+
+		const backend: Backend = {
+			kind: "studio",
+			runTests: async () => {
+				return {
+					results: [
+						{ displayName: "silent", elapsedMs: 0, result: createPassingResult() },
+						{ displayName: "loud", elapsedMs: 0, result: createPassingResult() },
+					],
+					timing: DEFAULT_TIMING,
+				};
+			},
+		};
+
+		const { results } = await runProjects({
+			backend,
+			projects: [
+				{
+					config: { ...DEFAULT_CONFIG, silent: true },
+					displayName: "silent",
+					testFiles: ["src/a.spec.ts"],
+				},
+				{
+					config: DEFAULT_CONFIG,
+					displayName: "loud",
+					testFiles: ["src/b.spec.ts"],
+				},
+			],
+			startTime: Date.now(),
+			version: "0.0.0-test",
+		});
+
+		expect(results[0]?.output).toBe("");
+		expect(results[1]?.output).not.toBe("");
+	});
+
+	it("should share backend timing across every project result", async () => {
+		expect.assertions(3);
+
+		const backend: Backend = {
+			kind: "open-cloud",
+			runTests: async () => {
+				return {
+					results: [
+						{ displayName: "first", elapsedMs: 0, result: createPassingResult() },
+						{ displayName: "second", elapsedMs: 0, result: createPassingResult() },
+					],
+					timing: { executionMs: 250, uploadCached: false, uploadMs: 75 },
+				};
+			},
+		};
+
+		const { backendTiming, results } = await runProjects({
+			backend,
+			projects: [
+				{ config: DEFAULT_CONFIG, displayName: "first", testFiles: ["src/a.spec.ts"] },
+				{ config: DEFAULT_CONFIG, displayName: "second", testFiles: ["src/b.spec.ts"] },
+			],
+			startTime: Date.now(),
+			version: "0.0.0-test",
+		});
+
+		expect(backendTiming.executionMs).toBe(250);
+		expect(results[0]?.timing.executionMs).toBe(250);
+		expect(results[1]?.timing.executionMs).toBe(250);
+	});
+
+	it("should surface backend errors", async () => {
+		expect.assertions(1);
+
+		const backend: Backend = {
+			kind: "open-cloud",
+			runTests: async () => {
+				throw new Error("backend exploded");
+			},
+		};
+
+		const promise = runProjects({
+			backend,
+			projects: [{ config: DEFAULT_CONFIG, testFiles: ["src/test.spec.ts"] }],
+			startTime: Date.now(),
+			version: "0.0.0-test",
+		});
+
+		await expect(promise).rejects.toThrow("backend exploded");
+	});
+
+	it("should preserve displayColor, displayName, and pkg on jobs sent to the backend", async () => {
+		expect.assertions(3);
+
+		let captured: BackendOptions | undefined;
+		const backend: Backend = {
+			kind: "studio",
+			runTests: async (options_) => {
+				captured = options_;
+				return singleEntryResult({ result: createPassingResult() });
+			},
+		};
+
+		await runProjects({
+			backend,
+			projects: [
+				{
+					config: DEFAULT_CONFIG,
+					displayColor: "green",
+					displayName: "client",
+					pkg: "@halcyon/client",
+					testFiles: ["src/a.spec.ts"],
+				},
+			],
+			startTime: Date.now(),
+			version: "0.0.0-test",
+		});
+
+		expect(captured?.jobs[0]?.displayColor).toBe("green");
+		expect(captured?.jobs[0]?.displayName).toBe("client");
+		expect(captured?.jobs[0]?.pkg).toBe("@halcyon/client");
+	});
+
+	it("should apply per-project snapshotFormat defaults before backend dispatch", async () => {
+		expect.assertions(2);
+
+		let captured: BackendOptions | undefined;
+		const backend: Backend = {
+			kind: "studio",
+			runTests: async (options_) => {
+				captured = options_;
+				return {
+					results: [
+						{ displayName: "luau", elapsedMs: 0, result: createPassingResult() },
+						{ displayName: "ts", elapsedMs: 0, result: createPassingResult() },
+					],
+					timing: DEFAULT_TIMING,
+				};
+			},
+		};
+
+		await runProjects({
+			backend,
+			projects: [
+				{
+					config: DEFAULT_CONFIG,
+					displayName: "luau",
+					testFiles: ["src/a.spec.luau"],
+				},
+				{
+					config: DEFAULT_CONFIG,
+					displayName: "ts",
+					testFiles: ["src/b.spec.ts"],
+				},
+			],
+			startTime: Date.now(),
+			version: "0.0.0-test",
+		});
+
+		expect(captured?.jobs[0]?.config.snapshotFormat?.printBasicPrototype).toBeTrue();
+		expect(captured?.jobs[1]?.config.snapshotFormat?.printBasicPrototype).toBeFalse();
 	});
 });

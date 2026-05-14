@@ -9,7 +9,7 @@ import type {
 } from "../../../src/backends/interface.ts";
 import { loadConfig } from "../../../src/config/loader.ts";
 import { resolveAllProjects } from "../../../src/config/projects.ts";
-import { buildProjectJob, executeBackend, processProjectResult } from "../../../src/executor.ts";
+import { runProjects } from "../../../src/executor.ts";
 import { generateTestScript } from "../../../src/test-script.ts";
 import type { JestResult } from "../../../src/types/jest-result.ts";
 import { rojoProjectSchema } from "../../../src/types/rojo.ts";
@@ -91,17 +91,13 @@ describe("executor multi-root pipeline", () => {
 
 		const project = await resolveSingleMultiRootProject();
 
-		const job = buildProjectJob({
-			config: {
-				...project.config,
-				placeFile: project.config.placeFile,
-				projects: project.projects,
-				testMatch: project.testMatch,
-			},
-			displayColor: project.displayColor,
-			displayName: project.displayName,
-			testFiles: [`${SHARED_MOUNT}/shared.spec`, `${SERVER_MOUNT}/server.spec`],
-		});
+		const projectConfig = {
+			...project.config,
+			placeFile: project.config.placeFile,
+			projects: project.projects,
+			testMatch: project.testMatch,
+		};
+		const testFiles = [`${SHARED_MOUNT}/shared.spec`, `${SERVER_MOUNT}/server.spec`];
 
 		let captured: BackendOptions | undefined;
 		const fakeBackend: Backend = {
@@ -109,8 +105,8 @@ describe("executor multi-root pipeline", () => {
 			runTests: async (options): Promise<BackendResult> => {
 				captured = options;
 				const entry: ProjectBackendResult = {
-					displayColor: job.displayColor,
-					displayName: job.displayName,
+					displayColor: project.displayColor,
+					displayName: project.displayName,
 					elapsedMs: 50,
 					result: buildMergedJestResult(),
 					setupMs: 50,
@@ -122,8 +118,19 @@ describe("executor multi-root pipeline", () => {
 			},
 		};
 
-		const startTime = Date.now();
-		const backendResult = await executeBackend(fakeBackend, [job]);
+		const { results } = await runProjects({
+			backend: fakeBackend,
+			projects: [
+				{
+					config: projectConfig,
+					displayColor: project.displayColor,
+					displayName: project.displayName,
+					testFiles,
+				},
+			],
+			startTime: Date.now(),
+			version: "0.0.0-test",
+		});
 
 		// Backend received exactly one job whose config carries both rojo mount
 		// dataModel paths. The Open Cloud backend feeds this config straight into
@@ -139,15 +146,6 @@ describe("executor multi-root pipeline", () => {
 		);
 
 		expect(script).toMatch(new RegExp(`${SHARED_MOUNT}[\\s\\S]*${SERVER_MOUNT}`));
-
-		const first = backendResult.results[0]!;
-		const processed = processProjectResult(first, {
-			backendTiming: backendResult.timing,
-			config: job.config,
-			startTime,
-			version: "0.0.0-test",
-		});
-
-		expect(processed.output).toContain("2 passed");
+		expect(results[0]?.output).toContain("2 passed");
 	});
 });
