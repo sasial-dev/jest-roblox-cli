@@ -13,19 +13,7 @@ interface PnpmWorkspace {
 	packages?: Array<string>;
 }
 
-export function resolvePackage(workspaceRoot: string, name: string): PackageInfo {
-	const candidates = listPackages(workspaceRoot);
-	for (const candidate of candidates) {
-		if (candidate.name === name) {
-			return candidate;
-		}
-	}
-
-	const names = candidates.map((candidate) => candidate.name).join(", ");
-	throw new Error(`Package "${name}" not found in workspace. Available: ${names}`);
-}
-
-function listPackages(workspaceRoot: string): Array<PackageInfo> {
+export function listPackages(workspaceRoot: string): Array<PackageInfo> {
 	const yamlPath = path.join(workspaceRoot, "pnpm-workspace.yaml");
 	if (!fs.existsSync(yamlPath)) {
 		throw new Error(
@@ -57,4 +45,16 @@ function listPackages(workspaceRoot: string): Array<PackageInfo> {
 	}
 
 	return packages;
+}
+
+export function resolvePackage(workspaceRoot: string, name: string): PackageInfo {
+	const candidates = listPackages(workspaceRoot);
+	for (const candidate of candidates) {
+		if (candidate.name === name) {
+			return candidate;
+		}
+	}
+
+	const names = candidates.map((candidate) => candidate.name).join(", ");
+	throw new Error(`Package "${name}" not found in workspace. Available: ${names}`);
 }

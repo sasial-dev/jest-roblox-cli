@@ -5,6 +5,9 @@ import * as path from "node:path";
 import process from "node:process";
 
 import { NX_MARKER, TURBO_MARKER } from "./discovery.ts";
+import { listPackages } from "./package-resolver.ts";
+
+const JEST_CONFIG_MARKER = /^jest\.config\.[^.]+$/;
 
 function resolvePosixShim(binDirectory: string, command: string): string {
 	const candidate = path.join(binDirectory, command);
@@ -45,7 +48,7 @@ export function getAffectedPackages(workspaceRoot: string, ref: string): Array<s
 			["ls", "--affected", `--filter=...[${ref}]`, "--output=json"],
 			workspaceRoot,
 		);
-		return parseTurboOutput(stdout);
+		return filterJestRobloxPackages(workspaceRoot, parseTurboOutput(stdout));
 	}
 
 	if (fs.existsSync(path.join(workspaceRoot, NX_MARKER))) {
@@ -54,13 +57,49 @@ export function getAffectedPackages(workspaceRoot: string, ref: string): Array<s
 			["show", "projects", "--affected", `--base=${ref}`, "--json"],
 			workspaceRoot,
 		);
-		return parseNxOutput(stdout);
+		return filterJestRobloxPackages(workspaceRoot, parseNxOutput(stdout));
 	}
 
 	throw new Error(
 		"--affected-since requires turbo or nx at the workspace root. " +
 			"Use --packages to specify packages explicitly.",
 	);
+}
+
+function hasJestConfig(packageDirectory: string): boolean {
+	return fs.readdirSync(packageDirectory).some((entry) => JEST_CONFIG_MARKER.test(entry));
+}
+
+// turbo/nx return every affected package in the workspace, including ones
+// with no jest-roblox config (e.g. plain Node libs, scripts). Preflight would
+// reject those for missing `rojoProject`, so we drop them up front. Explicit
+// `--packages` skips this filter — a named package missing config is a user
+// error and should still surface.
+//
+// Unknown affected names (turbo/nx → name that pnpm-workspace.yaml does not
+// know about) are NOT silently dropped: that masks resolver drift, like an
+// nx project name not matching `package.json.name` — the run would report
+// success while skipping real affected work. Throw loudly instead so the
+// mismatch is visible.
+function filterJestRobloxPackages(workspaceRoot: string, names: Array<string>): Array<string> {
+	if (names.length === 0) {
+		return names;
+	}
+
+	const packages = listPackages(workspaceRoot);
+	const directoryByName = new Map(packages.map((info) => [info.name, info.packageDirectory]));
+
+	return names.filter((name) => {
+		const directory = directoryByName.get(name);
+		if (directory === undefined) {
+			const available = packages.map((info) => info.name).join(", ");
+			throw new Error(
+				`Affected package ${JSON.stringify(name)} not found in workspace. Available: ${available}`,
+			);
+		}
+
+		return hasJestConfig(directory);
+	});
 }
 
 function hasStringField<K extends string>(value: unknown, key: K): value is Record<K, string> {

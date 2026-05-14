@@ -25,12 +25,28 @@ vi.mock(import("node:child_process"));
 
 const ROOT = path.resolve("/repo");
 
+function seedRobloxWorkspace(names: Array<string>): Record<string, string> {
+	const entries: Record<string, string> = {
+		[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+	};
+	for (const name of names) {
+		const directory = `packages/${name.replace(/^@[^/]+\//, "")}`;
+		entries[path.join(ROOT, directory, "package.json")] = `{"name":${JSON.stringify(name)}}`;
+		entries[path.join(ROOT, directory, "jest.config.ts")] = "export default {};";
+	}
+
+	return entries;
+}
+
 describe(getAffectedPackages, () => {
 	it("should shell out to turbo when turbo.json is present and parse the package list", () => {
 		expect.assertions(2);
 
 		vol.reset();
-		vol.fromJSON({ [path.join(ROOT, "turbo.json")]: "{}" });
+		vol.fromJSON({
+			[path.join(ROOT, "turbo.json")]: "{}",
+			...seedRobloxWorkspace(["@org/foo", "@org/bar"]),
+		});
 
 		vi.mocked(cp.execFileSync).mockReturnValue(
 			JSON.stringify({
@@ -94,7 +110,10 @@ describe(getAffectedPackages, () => {
 		expect.assertions(1);
 
 		vol.reset();
-		vol.fromJSON({ [path.join(ROOT, "turbo.json")]: "{}" });
+		vol.fromJSON({
+			[path.join(ROOT, "turbo.json")]: "{}",
+			...seedRobloxWorkspace(["@org/foo"]),
+		});
 		vi.mocked(cp.execFileSync).mockReturnValue(
 			JSON.stringify({
 				packageManager: "pnpm@10.0.0",
@@ -234,7 +253,10 @@ describe(getAffectedPackages, () => {
 
 		stubPlatform("win32");
 		vol.reset();
-		vol.fromJSON({ [path.join(ROOT, "turbo.json")]: "{}" });
+		vol.fromJSON({
+			[path.join(ROOT, "turbo.json")]: "{}",
+			...seedRobloxWorkspace(["@org/foo"]),
+		});
 		vi.mocked(cp.execFileSync).mockReturnValue(
 			JSON.stringify({ packages: { items: [{ name: "@org/foo" }] } }),
 		);
@@ -260,6 +282,7 @@ describe(getAffectedPackages, () => {
 		vol.fromJSON({
 			[path.join(ROOT, "nx.json")]: "{}",
 			[shimPath]: "#!/usr/bin/env node\n",
+			...seedRobloxWorkspace(["proj-a"]),
 		});
 		vi.mocked(cp.execFileSync).mockReturnValue(JSON.stringify(["proj-a"]));
 
@@ -277,7 +300,10 @@ describe(getAffectedPackages, () => {
 
 		stubPlatform("linux");
 		vol.reset();
-		vol.fromJSON({ [path.join(ROOT, "nx.json")]: "{}" });
+		vol.fromJSON({
+			[path.join(ROOT, "nx.json")]: "{}",
+			...seedRobloxWorkspace(["proj-a"]),
+		});
 		vi.mocked(cp.execFileSync).mockReturnValue(JSON.stringify(["proj-a"]));
 
 		getAffectedPackages(ROOT, "develop");
@@ -293,7 +319,10 @@ describe(getAffectedPackages, () => {
 		expect.assertions(2);
 
 		vol.reset();
-		vol.fromJSON({ [path.join(ROOT, "nx.json")]: "{}" });
+		vol.fromJSON({
+			[path.join(ROOT, "nx.json")]: "{}",
+			...seedRobloxWorkspace(["proj-a", "proj-b"]),
+		});
 
 		vi.mocked(cp.execFileSync).mockReturnValue(JSON.stringify(["proj-a", "proj-b"]));
 
@@ -303,5 +332,80 @@ describe(getAffectedPackages, () => {
 			["show", "projects", "--affected", "--base=develop", "--json"],
 			expect.objectContaining({ cwd: ROOT }),
 		);
+	});
+
+	it("should return an empty list when every affected package lacks a jest.config.*", () => {
+		expect.assertions(1);
+
+		vol.reset();
+		vol.fromJSON({
+			[path.join(ROOT, "packages/bar/package.json")]: '{"name":"@org/bar"}',
+			[path.join(ROOT, "packages/foo/package.json")]: '{"name":"@org/foo"}',
+			[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			[path.join(ROOT, "turbo.json")]: "{}",
+		});
+		vi.mocked(cp.execFileSync).mockReturnValue(
+			JSON.stringify({
+				packages: { items: [{ name: "@org/foo" }, { name: "@org/bar" }] },
+			}),
+		);
+
+		expect(getAffectedPackages(ROOT, "main")).toStrictEqual([]);
+	});
+
+	it("should throw loudly when an affected name is not present in the pnpm workspace", () => {
+		expect.assertions(1);
+
+		vol.reset();
+		vol.fromJSON({
+			[path.join(ROOT, "turbo.json")]: "{}",
+			...seedRobloxWorkspace(["@org/foo"]),
+		});
+		vi.mocked(cp.execFileSync).mockReturnValue(
+			JSON.stringify({
+				packages: { items: [{ name: "@org/foo" }, { name: "@org/orphan" }] },
+			}),
+		);
+
+		expect(() => getAffectedPackages(ROOT, "main")).toThrow(
+			/Affected package "@org\/orphan" not found in workspace.*@org\/foo/s,
+		);
+	});
+
+	it("should accept any jest.config.<ext> as the marker", () => {
+		expect.assertions(1);
+
+		vol.reset();
+		vol.fromJSON({
+			[path.join(ROOT, "packages/foo/jest.config.luau")]: "return {}",
+			[path.join(ROOT, "packages/foo/package.json")]: '{"name":"@org/foo"}',
+			[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			[path.join(ROOT, "turbo.json")]: "{}",
+		});
+		vi.mocked(cp.execFileSync).mockReturnValue(
+			JSON.stringify({ packages: { items: [{ name: "@org/foo" }] } }),
+		);
+
+		expect(getAffectedPackages(ROOT, "main")).toStrictEqual(["@org/foo"]);
+	});
+
+	it("should drop affected packages that lack a jest.config.* marker", () => {
+		expect.assertions(1);
+
+		vol.reset();
+		vol.fromJSON({
+			[path.join(ROOT, "packages/bar/package.json")]: '{"name":"@org/bar"}',
+			[path.join(ROOT, "packages/foo/jest.config.ts")]: "export default {};",
+			[path.join(ROOT, "packages/foo/package.json")]: '{"name":"@org/foo"}',
+			[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			[path.join(ROOT, "turbo.json")]: "{}",
+		});
+		vi.mocked(cp.execFileSync).mockReturnValue(
+			JSON.stringify({
+				packages: { items: [{ name: "@org/foo" }, { name: "@org/bar" }] },
+			}),
+		);
+
+		expect(getAffectedPackages(ROOT, "main")).toStrictEqual(["@org/foo"]);
 	});
 });
