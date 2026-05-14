@@ -62,6 +62,7 @@ export function runCli(args: Array<string>, cwdOrOptions?: RunCliOptions | strin
 			encoding: "utf-8",
 			env: buildCliEnvironment(options.env),
 			timeout: options.timeoutMs ?? 30_000,
+			windowsHide: true,
 		});
 		return { exitCode: 0, stderr: "", stdout };
 	} catch (err: unknown) {
@@ -89,6 +90,7 @@ export async function runCliAsync(
 				env: buildCliEnvironment(options.env),
 				maxBuffer: 16 * 1024 * 1024,
 				timeout: options.timeoutMs ?? 30_000,
+				windowsHide: true,
 			},
 			(error, stdout, stderr) => {
 				if (error === null) {

@@ -5,6 +5,7 @@ export function buildWithRojo(projectPath: string, outputPath: string): void {
 	try {
 		cp.execFileSync("rojo", ["build", projectPath, "-o", outputPath], {
 			stdio: "pipe",
+			windowsHide: true,
 		});
 	} catch (err) {
 		if (err instanceof Error && "code" in err && err.code === "ENOENT") {

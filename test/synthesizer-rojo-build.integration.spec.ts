@@ -9,7 +9,7 @@ import { buildWithRojo } from "../src/utils/rojo-builder.ts";
 
 function rojoOnPath(): boolean {
 	try {
-		cp.execFileSync("rojo", ["--version"], { stdio: "pipe" });
+		cp.execFileSync("rojo", ["--version"], { stdio: "pipe", windowsHide: true });
 		return true;
 	} catch {
 		return false;

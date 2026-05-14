@@ -27,6 +27,7 @@ describe("parse-ast.luau lute integration", () => {
 
 		const json = execFileSync("lute", ["run", PARSE_AST_SCRIPT, "--", temporaryFile], {
 			encoding: "utf-8",
+			windowsHide: true,
 		});
 
 		const ast = JSON.parse(json) as { location: Record<string, unknown> };

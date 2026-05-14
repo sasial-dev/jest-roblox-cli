@@ -25,7 +25,7 @@ const isLive = process.env["JEST_ROBLOX_LIVE"] === "1";
 
 function rojoOnPath(): boolean {
 	try {
-		cp.execFileSync("rojo", ["--version"], { stdio: "pipe" });
+		cp.execFileSync("rojo", ["--version"], { stdio: "pipe", windowsHide: true });
 		return true;
 	} catch {
 		return false;

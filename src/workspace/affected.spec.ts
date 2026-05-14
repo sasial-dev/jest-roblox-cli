@@ -230,7 +230,7 @@ describe(getAffectedPackages, () => {
 	});
 
 	it("should run via cmd.exe with node_modules/.bin prepended to PATH on Windows", () => {
-		expect.assertions(4);
+		expect.assertions(5);
 
 		stubPlatform("win32");
 		vol.reset();
@@ -246,6 +246,7 @@ describe(getAffectedPackages, () => {
 
 		expect(file).toBe("turbo");
 		expect(options?.shell).toBeTrue();
+		expect(options?.windowsHide).toBeTrue();
 		expect(options?.cwd).toBe(ROOT);
 		expect(options?.env?.["PATH"]?.startsWith(`${binDirectory}${path.delimiter}`)).toBeTrue();
 	});

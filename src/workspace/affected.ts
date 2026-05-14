@@ -107,6 +107,7 @@ function runTool(command: string, args: Array<string>, cwd: string): string {
 			env: childEnvironment,
 			shell: isWindows,
 			stdio: "pipe",
+			windowsHide: true,
 		});
 	} catch (err) {
 		if (err instanceof Error && "code" in err && err.code === "ENOENT") {

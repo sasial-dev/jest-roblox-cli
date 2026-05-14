@@ -24,7 +24,7 @@ const FIXTURE = path.resolve(__dirname, "../fixtures/workspace");
 
 function rojoOnPath(): boolean {
 	try {
-		cp.execFileSync("rojo", ["--version"], { stdio: "pipe" });
+		cp.execFileSync("rojo", ["--version"], { stdio: "pipe", windowsHide: true });
 		return true;
 	} catch {
 		return false;

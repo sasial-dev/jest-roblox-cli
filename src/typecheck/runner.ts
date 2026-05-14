@@ -223,6 +223,7 @@ function spawnTsgo(options: TypecheckOptions): string {
 			cwd: options.rootDir,
 			encoding: "utf-8",
 			stdio: ["ignore", "pipe", "pipe"],
+			windowsHide: true,
 		});
 	} catch (err: unknown) {
 		if (!isExecSyncError(err)) {

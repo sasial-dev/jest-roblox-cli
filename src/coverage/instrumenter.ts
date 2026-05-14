@@ -78,6 +78,7 @@ export function instrumentRoot(
 			encoding: "utf-8",
 			// File list only (paths, not ASTs) — 1MB is plenty
 			maxBuffer: 1024 * 1024,
+			windowsHide: true,
 		});
 	} catch (err) {
 		if (err instanceof Error && "code" in err && err.code === "ENOENT") {

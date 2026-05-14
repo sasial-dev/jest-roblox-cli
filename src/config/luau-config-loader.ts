@@ -22,6 +22,7 @@ export function loadLuauConfig(filePath: string): Record<string, unknown> {
 		stdout = cp.execFileSync("lute", ["run", scriptPath, "--", path.resolve(filePath)], {
 			encoding: "utf-8",
 			maxBuffer: 1024 * 1024,
+			windowsHide: true,
 		});
 	} catch (err) {
 		if (err instanceof Error && "code" in err && err.code === "ENOENT") {
