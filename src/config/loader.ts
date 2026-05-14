@@ -81,8 +81,7 @@ async function seaImport(id: string): Promise<JSONValue> {
 		return JSON.parse(content);
 	}
 
-	// eslint-disable-next-line ts/no-unnecessary-type-assertion -- import(id) returns any
-	return import(id) as unknown as JSONValue;
+	return import(id) as Promise<JSONValue>;
 }
 
 // c12's merger signature and defuFn's generic signature are structurally

@@ -197,7 +197,7 @@ function createHttpClient(apiKey: string): HttpClient {
 
 			const response = await fetch(url, fetchOptions);
 			const contentType = response.headers.get("content-type") ?? "";
-			const body = contentType.includes("application/json")
+			const body: unknown = contentType.includes("application/json")
 				? await response.json()
 				: await response.text();
 
