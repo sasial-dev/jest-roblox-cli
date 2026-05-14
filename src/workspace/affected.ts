@@ -14,6 +14,16 @@ function resolvePosixShim(binDirectory: string, command: string): string {
 	return fs.existsSync(candidate) ? candidate : command;
 }
 
+// Build cmd.exe args for `cmd.exe /d /s /c "<command>"`. Each token is wrapped
+// in double quotes — cmd metacharacters (^, &, |, <, >) are literal inside
+// quotes, and `ref` is already restricted by validRefPattern so no `"` can
+// appear. The outer pair of quotes around the whole command is stripped by
+// /s, leaving cmd.exe to parse the inner `"tok" "tok" ...` normally.
+function buildCmdExeArgs(command: string, args: Array<string>): Array<string> {
+	const quoted = [command, ...args].map((argument) => `"${argument}"`).join(" ");
+	return ["/d", "/s", "/c", `"${quoted}"`];
+}
+
 // Validate only the fields we read — turbo adds top-level fields between
 // versions (e.g. `packageManager`), so we tolerate unknown keys here.
 const turboLsOutputSchema = type({
@@ -25,7 +35,7 @@ const turboLsOutputSchema = type({
 const nxShowProjectsOutputSchema = type("string[]");
 
 // cspell:words metacharacter
-// On Windows we route through cmd.exe via `shell: true`, so any shell
+// On Windows we invoke cmd.exe explicitly (see runTool), so any shell
 // metacharacter in `ref` becomes an injection vector when interpolated into
 // the turbo / nx command line. The allowed charset matches what
 // git-check-ref-format permits plus `~` and `^` for revision arithmetic
@@ -125,28 +135,31 @@ function readStream(err: unknown, key: "stderr" | "stdout"): string | undefined 
 // pnpm only prepends `node_modules/.bin` to PATH for `pnpm exec` / `pnpm run`,
 // so a direct `node bin/jest-roblox.js` invocation can't see local tools.
 // Resolution differs per platform:
-//   - Windows: prepend the local bin to PATH and let cmd.exe resolve the
-//     binary via PATHEXT (this is what `shell: true` opts into). We can't
-//     spawn the `.cmd` shim directly without a shell — Node's
-//     CVE-2024-27980 guard rejects it with EINVAL on Node 21+.
+//   - Windows: prepend the local bin to PATH and invoke cmd.exe with /d /s /c
+//     so it resolves the `.cmd` shim via PATHEXT. Args are pre-quoted and
+//     passed verbatim — `shell: true` with an args array trips Node 25's
+//     DEP0190, and spawning the `.cmd` shim directly trips Node's
+//     CVE-2024-27980 guard (EINVAL on Node 21+).
 //   - POSIX: pin the absolute path of the locally installed shim. Scripts
 //     in `.bin` are directly executable (`#!/usr/bin/env node`), so no
 //     shell is needed and the bare-PATH lookup isn't required.
 function runTool(command: string, args: Array<string>, cwd: string): string {
 	const binDirectory = path.join(cwd, "node_modules", ".bin");
 	const isWindows = process.platform === "win32";
-	const file = isWindows ? command : resolvePosixShim(binDirectory, command);
 	const childEnvironment = isWindows
 		? { ...process.env, PATH: `${binDirectory}${path.delimiter}${process.env["PATH"]}` }
 		: process.env;
+	const file = isWindows ? "cmd.exe" : resolvePosixShim(binDirectory, command);
+	const spawnArgs = isWindows ? buildCmdExeArgs(command, args) : args;
 	try {
-		return cp.execFileSync(file, args, {
+		return cp.execFileSync(file, spawnArgs, {
 			cwd,
 			encoding: "utf8",
 			env: childEnvironment,
-			shell: isWindows,
+			shell: false,
 			stdio: "pipe",
 			windowsHide: true,
+			...(isWindows ? { windowsVerbatimArguments: true } : {}),
 		});
 	} catch (err) {
 		if (err instanceof Error && "code" in err && err.code === "ENOENT") {

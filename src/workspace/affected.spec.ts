@@ -42,6 +42,7 @@ describe(getAffectedPackages, () => {
 	it("should shell out to turbo when turbo.json is present and parse the package list", () => {
 		expect.assertions(2);
 
+		stubPlatform("linux");
 		vol.reset();
 		vol.fromJSON({
 			[path.join(ROOT, "turbo.json")]: "{}",
@@ -248,8 +249,8 @@ describe(getAffectedPackages, () => {
 		);
 	});
 
-	it("should run via cmd.exe with node_modules/.bin prepended to PATH on Windows", () => {
-		expect.assertions(5);
+	it("should invoke cmd.exe directly with verbatim args on Windows (no shell:true to avoid DEP0190)", () => {
+		expect.assertions(4);
 
 		stubPlatform("win32");
 		vol.reset();
@@ -264,13 +265,37 @@ describe(getAffectedPackages, () => {
 		getAffectedPackages(ROOT, "main");
 
 		const binDirectory = path.join(ROOT, "node_modules", ".bin");
-		const [file, , options] = vi.mocked(cp.execFileSync).mock.calls[0]!;
+		const [file, args, options] = vi.mocked(cp.execFileSync).mock.calls[0]!;
 
-		expect(file).toBe("turbo");
-		expect(options?.shell).toBeTrue();
-		expect(options?.windowsHide).toBeTrue();
-		expect(options?.cwd).toBe(ROOT);
-		expect(options?.env?.["PATH"]?.startsWith(`${binDirectory}${path.delimiter}`)).toBeTrue();
+		expect(file).toBe("cmd.exe");
+		expect(args).toStrictEqual([
+			"/d",
+			"/s",
+			"/c",
+			'""turbo" "ls" "--affected" "--filter=...[main]" "--output=json""',
+		]);
+		expect(options).toMatchObject({
+			cwd: ROOT,
+			shell: false,
+			windowsHide: true,
+			windowsVerbatimArguments: true,
+		});
+		expect(options?.env?.["PATH"]).toStartWith(`${binDirectory}${path.delimiter}`);
+	});
+
+	it("should preserve cmd metacharacters like ^ inside double-quoted args on Windows", () => {
+		expect.assertions(1);
+
+		stubPlatform("win32");
+		vol.reset();
+		vol.fromJSON({ [path.join(ROOT, "turbo.json")]: "{}" });
+		vi.mocked(cp.execFileSync).mockReturnValue(JSON.stringify({ packages: { items: [] } }));
+
+		getAffectedPackages(ROOT, "HEAD^");
+
+		const [, args] = vi.mocked(cp.execFileSync).mock.calls[0]!;
+
+		expect(args?.[3]).toContain('"--filter=...[HEAD^]"');
 	});
 
 	it("should resolve nx from node_modules/.bin without a shell on POSIX", () => {
@@ -318,6 +343,7 @@ describe(getAffectedPackages, () => {
 	it("should shell out to nx when nx.json is present and parse the project list", () => {
 		expect.assertions(2);
 
+		stubPlatform("linux");
 		vol.reset();
 		vol.fromJSON({
 			[path.join(ROOT, "nx.json")]: "{}",
