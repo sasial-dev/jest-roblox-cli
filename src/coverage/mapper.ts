@@ -1,29 +1,14 @@
 import { originalPositionFor, TraceMap } from "@jridgewell/trace-mapping";
 
-import { type } from "arktype";
 import assert from "node:assert";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
-import type { CoverageManifest, RawCoverageData } from "./types.ts";
-
-const positionSchema = type({ column: "number", line: "number" });
-const spanSchema = type({ end: positionSchema, start: positionSchema });
-const functionEntrySchema = type({
-	name: "string",
-	location: type({ end: positionSchema, start: positionSchema }),
-});
-const branchEntrySchema = type({
-	locations: type("Record<string, unknown>[]"),
-	type: "string",
-});
-const NESTED_RECORD = "Record<string, Record<string, unknown>>" as const;
-const coverageMapSchema = type({
-	"branchMap?": NESTED_RECORD,
-	"functionMap?": NESTED_RECORD,
-	"statementMap": type(NESTED_RECORD),
-});
+import type { CoverageMap, SourceLocation } from "./coverage-map.ts";
+import { readCoverageMap } from "./coverage-map.ts";
+import type { CoverageManifest } from "./manifest.ts";
+import type { RawCoverageData } from "./types.ts";
 
 export interface MappedFileCoverage {
 	b: Record<string, Array<number>>;
@@ -93,7 +78,7 @@ interface MappedPosition {
 }
 
 interface FileResources {
-	coverageMap: typeof coverageMapSchema.infer;
+	coverageMap: CoverageMap;
 	sourceKey: string;
 	/** Directory containing the source map, used to resolve relative source paths. */
 	sourceMapDirectory: string;
@@ -112,6 +97,23 @@ interface SourceMapped {
 	coverageMap: FileResources["coverageMap"];
 	sourceMapDirectory: string;
 	traceMap: TraceMap;
+}
+
+/**
+ * Thrown when a coverage map sidecar is present on disk but cannot be parsed or
+ * validated. Silently skipping these files would let coverage thresholds pass
+ * on incomplete data — the exact silent-breakage failure mode HAL-172 was meant
+ * to eliminate.
+ */
+export class CoverageMapMalformedError extends Error {
+	public readonly coverageMapPath: string;
+
+	constructor(coverageMapPath: string) {
+		super(
+			`Coverage map at ${coverageMapPath} is malformed or invalid (re-run \`jest-roblox instrument\`)`,
+		);
+		this.coverageMapPath = coverageMapPath;
+	}
 }
 
 export function mapCoverageToTypeScript(
@@ -156,16 +158,16 @@ export function mapCoverageToTypeScript(
 // Luau columns are 1-based; Istanbul expects 0-based.
 
 function loadFileResources(record: CoverageManifest["files"][string]): FileResources | undefined {
-	let coverageMapRaw: string;
-	try {
-		coverageMapRaw = fs.readFileSync(record.coverageMapPath, "utf-8");
-	} catch {
+	const result = readCoverageMap(record.coverageMapPath);
+	// File missing → silent skip (stale cache, will be regenerated).
+	// File present-but-unreadable → throw, so callers don't compute reports
+	// or enforce thresholds on incomplete data.
+	if (result.kind === "missing") {
 		return undefined;
 	}
 
-	const parsed = coverageMapSchema(JSON.parse(coverageMapRaw));
-	if (parsed instanceof type.errors) {
-		return undefined;
+	if (result.kind === "invalid") {
+		throw new CoverageMapMalformedError(record.coverageMapPath);
 	}
 
 	let traceMap: TraceMap | undefined;
@@ -178,7 +180,12 @@ function loadFileResources(record: CoverageManifest["files"][string]): FileResou
 
 	const sourceMapDirectory = path.posix.dirname(record.sourceMapPath);
 
-	return { coverageMap: parsed, sourceKey: record.key, sourceMapDirectory, traceMap };
+	return {
+		coverageMap: result.map,
+		sourceKey: record.key,
+		sourceMapDirectory,
+		traceMap,
+	};
 }
 
 // --- Passthrough helpers for native Luau (no source map) ---
@@ -198,12 +205,7 @@ function passthroughFileStatements(
 		pending.set(resources.sourceKey, fileStatements);
 	}
 
-	for (const [statementId, rawSpan] of Object.entries(resources.coverageMap.statementMap)) {
-		const span = spanSchema(rawSpan);
-		if (span instanceof type.errors) {
-			continue;
-		}
-
+	for (const [statementId, span] of Object.entries(resources.coverageMap.statementMap)) {
 		const hitCount = fileCoverage.s[statementId] ?? 0;
 		fileStatements.set(statementId, {
 			end: { column: toIstanbulColumn(span.end.column), line: span.end.line },
@@ -228,12 +230,7 @@ function passthroughFileFunctions(
 		pendingFunctions.set(resources.sourceKey, fileFunctions);
 	}
 
-	for (const [functionId, rawEntry] of Object.entries(resources.coverageMap.functionMap)) {
-		const entry = functionEntrySchema(rawEntry);
-		if (entry instanceof type.errors) {
-			continue;
-		}
-
+	for (const [functionId, entry] of Object.entries(resources.coverageMap.functionMap)) {
 		fileFunctions.push({
 			name: entry.name,
 			hitCount: fileCoverage.f?.[functionId] ?? 0,
@@ -268,29 +265,17 @@ function passthroughFileBranches(
 		pendingBranches.set(resources.sourceKey, fileBranches);
 	}
 
-	for (const [branchId, rawEntry] of Object.entries(resources.coverageMap.branchMap)) {
-		const entry = branchEntrySchema(rawEntry);
-		if (entry instanceof type.errors) {
-			continue;
-		}
-
+	for (const [branchId, entry] of Object.entries(resources.coverageMap.branchMap)) {
 		const armHitCounts = fileCoverage.b?.[branchId] ?? [];
-		const locations: PendingBranch["locations"] = [];
-
-		for (const rawLocation of entry.locations) {
-			const location = spanSchema(rawLocation);
-			if (location instanceof type.errors) {
-				continue;
-			}
-
-			locations.push({
+		const locations: PendingBranch["locations"] = entry.locations.map((location) => {
+			return {
 				end: { column: toIstanbulColumn(location.end.column), line: location.end.line },
 				start: {
 					column: toIstanbulColumn(location.start.column),
 					line: location.start.line,
 				},
-			});
-		}
+			};
+		});
 
 		if (locations.length === 0) {
 			continue;
@@ -425,12 +410,7 @@ function mapFileStatements(
 ): Set<string> {
 	const resolvedTsPaths = new Set<string>();
 
-	for (const [statementId, rawSpan] of Object.entries(resources.coverageMap.statementMap)) {
-		const span = spanSchema(rawSpan);
-		if (span instanceof type.errors) {
-			continue;
-		}
-
+	for (const [statementId, span] of Object.entries(resources.coverageMap.statementMap)) {
 		const hitCount = fileCoverage.s[statementId] ?? 0;
 
 		const mapped = mapStatement(resources.traceMap, span, resources.sourceMapDirectory);
@@ -455,12 +435,7 @@ function mapFileFunctions(
 		return;
 	}
 
-	for (const [functionId, rawEntry] of Object.entries(resources.coverageMap.functionMap)) {
-		const entry = functionEntrySchema(rawEntry);
-		if (entry instanceof type.errors) {
-			continue;
-		}
-
+	for (const [functionId, entry] of Object.entries(resources.coverageMap.functionMap)) {
 		const hitCount = fileCoverage.f?.[functionId] ?? 0;
 
 		const mapped = mapStatement(
@@ -519,18 +494,13 @@ function mapFileFunctions(
 
 function mapBranchArmLocations(
 	traceMap: TraceMap,
-	rawLocations: Array<Record<string, unknown>>,
+	locations: ReadonlyArray<SourceLocation>,
 	sourceMapDirectory: string,
 ): MappedArmLocations | undefined {
 	const mappedLocations: MappedArmLocations["locations"] = [];
 	let tsPath: string | undefined;
 
-	for (const rawLocation of rawLocations) {
-		const location = spanSchema(rawLocation);
-		if (location instanceof type.errors) {
-			return undefined;
-		}
-
+	for (const location of locations) {
 		const mapped = mapStatement(traceMap, location, sourceMapDirectory);
 		if (mapped === undefined) {
 			return undefined;
@@ -564,12 +534,7 @@ function mapFileBranches(
 		return;
 	}
 
-	for (const [branchId, rawEntry] of Object.entries(resources.coverageMap.branchMap)) {
-		const entry = branchEntrySchema(rawEntry);
-		if (entry instanceof type.errors) {
-			continue;
-		}
-
+	for (const [branchId, entry] of Object.entries(resources.coverageMap.branchMap)) {
 		const armHitCounts = fileCoverage.b?.[branchId] ?? [];
 
 		const result = mapBranchArmLocations(

@@ -8,6 +8,11 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { ResolvedConfig } from "../config/schema.ts";
 import { DEFAULT_CONFIG } from "../config/schema.ts";
 import { INSTRUMENTER_VERSION } from "./instrumenter.ts";
+import type {
+	CoverageManifest,
+	InstrumentedFileRecord,
+	NonInstrumentedFileRecord,
+} from "./manifest.ts";
 import {
 	collectLuauRootsFromRojo,
 	discoverInstrumentableFiles,
@@ -15,11 +20,6 @@ import {
 	resolveLuauRoots,
 } from "./prepare.ts";
 import type { RojoProject } from "./rojo-rewriter.ts";
-import type {
-	CoverageManifest,
-	InstrumentedFileRecord,
-	NonInstrumentedFileRecord,
-} from "./types.ts";
 
 vi.mock(import("node:fs"), async () => {
 	const memfs = await vi.importActual<typeof import("memfs")>("memfs");

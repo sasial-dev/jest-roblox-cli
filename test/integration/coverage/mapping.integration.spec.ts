@@ -4,12 +4,9 @@ import path from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import { INSTRUMENTER_VERSION, instrumentRoot } from "../../../src/coverage/instrumenter.ts";
+import type { CoverageManifest, InstrumentedFileRecord } from "../../../src/coverage/manifest.ts";
 import { mapCoverageToTypeScript } from "../../../src/coverage/mapper.ts";
-import type {
-	CoverageManifest,
-	InstrumentedFileRecord,
-	RawCoverageData,
-} from "../../../src/coverage/types.ts";
+import type { RawCoverageData } from "../../../src/coverage/types.ts";
 import { normalizeWindowsPath } from "../../../src/utils/normalize-windows-path.ts";
 import { createRbxtsFixtureSandbox } from "../../e2e/cli/helpers.ts";
 

@@ -6,7 +6,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import type { ResolvedConfig } from "../config/schema.ts";
 import { DEFAULT_CONFIG } from "../config/schema.ts";
-import type { CoverageManifest, InstrumentedFileRecord } from "./types.ts";
+import type { CoverageManifest, InstrumentedFileRecord } from "./manifest.ts";
 import { prepareWorkspaceCoverage } from "./workspace-prepare.ts";
 
 vi.mock(import("node:fs"), async () => {

@@ -18,7 +18,7 @@ import type {
 } from "./config/schema.ts";
 import { createSetupResolver } from "./config/setup-resolver.ts";
 import { generateProjectStubs, STUB_FILENAME } from "./config/stubs.ts";
-import type { CoverageManifest } from "./coverage/types.ts";
+import type { CoverageManifest } from "./coverage/manifest.ts";
 import {
 	prepareWorkspaceCoverage,
 	type WorkspacePackageCoverage,

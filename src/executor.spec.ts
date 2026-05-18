@@ -2014,12 +2014,30 @@ describe(loadCoverageManifest, () => {
 		fs.mkdirSync(coverageDirectory, { recursive: true });
 		fs.writeFileSync(
 			path.join(coverageDirectory, "manifest.json"),
-			JSON.stringify({ wrong: "schema" }),
+			JSON.stringify({ version: 1, wrong: "schema" }),
 		);
 		const spy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
 
 		expect(loadCoverageManifest(temporaryDirectory)).toBeUndefined();
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("manifest is invalid"));
+
+		spy.mockRestore();
+	});
+
+	it("should warn and return undefined for version-mismatched manifest", () => {
+		expect.assertions(2);
+
+		const temporaryDirectory = createTemporaryDirectory("cov-test-");
+		const coverageDirectory = path.join(temporaryDirectory, ".jest-roblox/coverage");
+		fs.mkdirSync(coverageDirectory, { recursive: true });
+		fs.writeFileSync(
+			path.join(coverageDirectory, "manifest.json"),
+			JSON.stringify({ version: 99 }),
+		);
+		const spy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+		expect(loadCoverageManifest(temporaryDirectory)).toBeUndefined();
+		expect(spy).toHaveBeenCalledWith(expect.stringContaining("version 99"));
 
 		spy.mockRestore();
 	});
@@ -2037,12 +2055,15 @@ describe(loadCoverageManifest, () => {
 					coverageMapPath: "shared/player.cov-map.json",
 					instrumentedLuauPath: "shared/player.luau",
 					originalLuauPath: "out/shared/player.luau",
+					sourceHash: "abc123",
 					sourceMapPath: "out/shared/player.luau.map",
 					statementCount: 10,
 				},
 			},
 			generatedAt: "2026-01-01T00:00:00Z",
+			instrumenterVersion: 1,
 			luauRoots: ["out"],
+			nonInstrumentedFiles: {},
 			shadowDir: ".jest-roblox/coverage/out",
 			version: 1,
 		};
@@ -2053,8 +2074,8 @@ describe(loadCoverageManifest, () => {
 		expect(result!.files["shared/player.luau"]!.statementCount).toBe(10);
 	});
 
-	it("should skip invalid file records and warn to stderr", () => {
-		expect.assertions(3);
+	it("should reject the whole manifest when any file record fails validation", () => {
+		expect.assertions(2);
 
 		const temporaryDirectory = createTemporaryDirectory("cov-test-");
 		const coverageDirectory = path.join(temporaryDirectory, ".jest-roblox/coverage");
@@ -2067,23 +2088,23 @@ describe(loadCoverageManifest, () => {
 					coverageMapPath: "shared/valid.cov-map.json",
 					instrumentedLuauPath: "shared/valid.luau",
 					originalLuauPath: "out/shared/valid.luau",
+					sourceHash: "abc123",
 					sourceMapPath: "out/shared/valid.luau.map",
 					statementCount: 5,
 				},
 			},
 			generatedAt: "2026-01-01T00:00:00Z",
+			instrumenterVersion: 1,
 			luauRoots: ["out"],
+			nonInstrumentedFiles: {},
 			shadowDir: ".jest-roblox/coverage/out",
 			version: 1,
 		};
 		fs.writeFileSync(path.join(coverageDirectory, "manifest.json"), JSON.stringify(manifest));
 		const spy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
 
-		const result = loadCoverageManifest(temporaryDirectory);
-
-		expect(result).toBeDefined();
-		expect(result!.files["shared/invalid.luau"]).toBeUndefined();
-		expect(spy).toHaveBeenCalledWith(expect.stringContaining("shared/invalid.luau"));
+		expect(loadCoverageManifest(temporaryDirectory)).toBeUndefined();
+		expect(spy).toHaveBeenCalledWith(expect.stringContaining("manifest is invalid"));
 
 		spy.mockRestore();
 	});

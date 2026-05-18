@@ -1,5 +1,6 @@
+import type { CoverageManifest } from "./manifest.ts";
 import { mapCoverageToTypeScript, type MappedCoverageResult } from "./mapper.ts";
-import type { CoverageManifest, RawCoverageData } from "./types.ts";
+import type { RawCoverageData } from "./types.ts";
 
 export interface WorkspacePackageCoverageEntry {
 	coverageData: RawCoverageData | undefined;

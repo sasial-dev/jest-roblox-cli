@@ -7,7 +7,7 @@ import picomatch from "picomatch";
 import type { ResolvedConfig } from "../config/schema.ts";
 import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
 import { INSTRUMENTER_VERSION, instrumentRoot } from "./instrumenter.ts";
-import type { CoverageManifest, InstrumentedFileRecord } from "./types.ts";
+import type { CoverageManifest, InstrumentedFileRecord } from "./manifest.ts";
 
 const WORKSPACE_COVERAGE_DIR = ".jest-roblox/workspace";
 

@@ -17,7 +17,9 @@ import type {
 } from "./backends/interface.ts";
 import { applySnapshotFormatDefaults } from "./config/loader.ts";
 import type { ResolvedConfig } from "./config/schema.ts";
-import type { CoverageManifest, RawCoverageData } from "./coverage/types.ts";
+import type { CoverageManifest } from "./coverage/manifest.ts";
+import { readManifest } from "./coverage/manifest.ts";
+import type { RawCoverageData } from "./coverage/types.ts";
 import { formatAgent } from "./formatters/agent.ts";
 import { formatResult } from "./formatters/formatter.ts";
 import { formatJson } from "./formatters/json.ts";
@@ -295,6 +297,37 @@ export async function runProjects(options: RunProjectsOptions): Promise<RunProje
 	return { backendTiming, results };
 }
 
+export function loadCoverageManifest(rootDirectory: string): CoverageManifest | undefined {
+	const manifestPath = path.join(rootDirectory, ".jest-roblox", "coverage", "manifest.json");
+	const result = readManifest(manifestPath);
+	switch (result.kind) {
+		case "invalid": {
+			process.stderr.write(
+				`Warning: Coverage manifest is invalid (re-run \`jest-roblox instrument\`): ${result.summary}\n`,
+			);
+			return undefined;
+		}
+		case "malformed-json": {
+			process.stderr.write(
+				"Warning: Coverage manifest is malformed JSON (re-run `jest-roblox instrument`)\n",
+			);
+			return undefined;
+		}
+		case "missing": {
+			return undefined;
+		}
+		case "ok": {
+			return result.manifest;
+		}
+		case "version-mismatch": {
+			process.stderr.write(
+				`Warning: Coverage manifest version ${String(result.actual)} does not match expected ${result.expected} (re-run \`jest-roblox instrument\`)\n`,
+			);
+			return undefined;
+		}
+	}
+}
+
 function normalizeDirectoryPath(directory: string): string {
 	return normalizeWindowsPath(path.normalize(directory));
 }
@@ -402,151 +435,6 @@ function printLuauTiming(timing: Record<string, number>): void {
 	}
 
 	process.stderr.write(`[TIMING] total: ${String(total)}ms\n`);
-}
-
-/**
- * Process a single `ProjectBackendResult` into an `ExecuteResult`: writes
- * snapshots, builds the source mapper, resolves test-file paths, and renders
- * formatter output. Called once per job.
- */
-function processProjectResult(
-	entry: ProjectBackendResult,
-	options: ProcessProjectOptions,
-): ExecuteResult {
-	const { backendTiming, config, deferFormatting, startTime, version } = options;
-	const { coverageData, gameOutput, luauTiming, result, setupMs, snapshotWrites } = entry;
-
-	const tsconfigMappings = resolveAllTsconfigMappings(config.rootDir);
-
-	const writeCounts: SnapshotWriteCounts =
-		snapshotWrites !== undefined
-			? writeSnapshots(snapshotWrites, config, tsconfigMappings)
-			: { attempted: 0, failed: 0, written: 0 };
-
-	const testsMs = calculateTestsMs(result.testResults);
-	const sourceMapper = config.sourceMap ? buildSourceMapper(config, tsconfigMappings) : undefined;
-
-	resolveTestFilePaths(result, sourceMapper);
-
-	const totalMs = Date.now() - startTime;
-
-	const timing = {
-		executionMs: backendTiming.executionMs,
-		setupMs,
-		startTime,
-		testsMs,
-		totalMs,
-		uploadMs: backendTiming.uploadMs,
-	} satisfies TimingResult;
-
-	const output =
-		deferFormatting !== true
-			? formatExecuteOutput({
-					config,
-					result,
-					snapshotWriteFailures: writeCounts.failed,
-					sourceMapper,
-					timing,
-					version,
-				})
-			: "";
-
-	if (luauTiming !== undefined) {
-		printLuauTiming(luauTiming);
-	}
-
-	const exitCode = result.success && writeCounts.failed === 0 ? 0 : 1;
-
-	return {
-		coverageData,
-		exitCode,
-		gameOutput,
-		output,
-		result,
-		snapshotWriteFailures: writeCounts.failed > 0 ? writeCounts.failed : undefined,
-		sourceMapper,
-		timing,
-	};
-}
-
-/**
- * Build a `ProjectJob` with `snapshotFormat` resolved per-project. Each job
- * carries its own config so the Luau runner never re-resolves or shares format
- * state across projects (fixes the spike's snapshot-diff regression — C1).
- */
-function buildProjectJob(parameters: ProjectInput): ProjectJob {
-	const tsconfigMappings = resolveAllTsconfigMappings(parameters.config.rootDir);
-	const luauProject = isLuauProject(parameters.testFiles, tsconfigMappings);
-	const config = applySnapshotFormatDefaults(parameters.config, luauProject);
-	return {
-		config,
-		displayColor: parameters.displayColor,
-		displayName: parameters.displayName ?? "",
-		pkg: parameters.pkg,
-		testFiles: parameters.testFiles,
-	};
-}
-
-const instrumentedFileRecordSchema = type({
-	"key": "string",
-	"branchCount?": "number",
-	"coverageMapPath": "string",
-	"functionCount?": "number",
-	"instrumentedLuauPath": "string",
-	"originalLuauPath": "string",
-	"sourceMapPath": "string",
-	"statementCount": "number",
-});
-
-const coverageManifestSchema = type({
-	files: type("Record<string, unknown>").pipe((files) => {
-		const validated: Record<string, typeof instrumentedFileRecordSchema.infer> = {};
-		const skipped: Array<string> = [];
-		for (const [key, value] of Object.entries(files)) {
-			const parsed = instrumentedFileRecordSchema(value);
-			if (parsed instanceof type.errors) {
-				skipped.push(key);
-			} else {
-				validated[key] = parsed;
-			}
-		}
-
-		if (skipped.length > 0) {
-			process.stderr.write(
-				`Warning: ${skipped.length} file record(s) in coverage manifest failed validation and were skipped: ${skipped.join(", ")}\n`,
-			);
-		}
-
-		return validated;
-	}),
-	generatedAt: "string",
-	luauRoots: "string[]",
-	shadowDir: "string",
-	version: type.unit(1),
-});
-
-export function loadCoverageManifest(rootDirectory: string): CoverageManifest | undefined {
-	const manifestPath = path.join(rootDirectory, ".jest-roblox", "coverage", "manifest.json");
-	try {
-		const raw = fs.readFileSync(manifestPath, "utf-8");
-		const parsed = coverageManifestSchema(JSON.parse(raw));
-		if (parsed instanceof type.errors) {
-			process.stderr.write(
-				`Warning: Coverage manifest is invalid (re-run \`jest-roblox instrument\`): ${parsed.summary}\n`,
-			);
-			return undefined;
-		}
-
-		return parsed as CoverageManifest;
-	} catch (err) {
-		if (err instanceof SyntaxError) {
-			process.stderr.write(
-				"Warning: Coverage manifest is malformed JSON (re-run `jest-roblox instrument`)\n",
-			);
-		}
-
-		return undefined;
-	}
 }
 
 function logSnapshotWriteSummary(options: {
@@ -675,4 +563,87 @@ function writeSnapshots(
 	logSnapshotWriteSummary({ attempted, failed, silent: config.silent, written });
 
 	return { attempted, failed, written };
+}
+
+/**
+ * Process a single `ProjectBackendResult` into an `ExecuteResult`: writes
+ * snapshots, builds the source mapper, resolves test-file paths, and renders
+ * formatter output. Called once per job.
+ */
+function processProjectResult(
+	entry: ProjectBackendResult,
+	options: ProcessProjectOptions,
+): ExecuteResult {
+	const { backendTiming, config, deferFormatting, startTime, version } = options;
+	const { coverageData, gameOutput, luauTiming, result, setupMs, snapshotWrites } = entry;
+
+	const tsconfigMappings = resolveAllTsconfigMappings(config.rootDir);
+
+	const writeCounts: SnapshotWriteCounts =
+		snapshotWrites !== undefined
+			? writeSnapshots(snapshotWrites, config, tsconfigMappings)
+			: { attempted: 0, failed: 0, written: 0 };
+
+	const testsMs = calculateTestsMs(result.testResults);
+	const sourceMapper = config.sourceMap ? buildSourceMapper(config, tsconfigMappings) : undefined;
+
+	resolveTestFilePaths(result, sourceMapper);
+
+	const totalMs = Date.now() - startTime;
+
+	const timing = {
+		executionMs: backendTiming.executionMs,
+		setupMs,
+		startTime,
+		testsMs,
+		totalMs,
+		uploadMs: backendTiming.uploadMs,
+	} satisfies TimingResult;
+
+	const output =
+		deferFormatting !== true
+			? formatExecuteOutput({
+					config,
+					result,
+					snapshotWriteFailures: writeCounts.failed,
+					sourceMapper,
+					timing,
+					version,
+				})
+			: "";
+
+	if (luauTiming !== undefined) {
+		printLuauTiming(luauTiming);
+	}
+
+	const exitCode = result.success && writeCounts.failed === 0 ? 0 : 1;
+
+	return {
+		coverageData,
+		exitCode,
+		gameOutput,
+		output,
+		result,
+		snapshotWriteFailures: writeCounts.failed > 0 ? writeCounts.failed : undefined,
+		sourceMapper,
+		timing,
+	};
+}
+
+/**
+ * Build a `ProjectJob` with `snapshotFormat` resolved per-project. Each job
+ * carries its own config so the Luau runner never re-resolves or shares format
+ * state across projects (fixes the spike's snapshot-diff regression — C1).
+ */
+function buildProjectJob(parameters: ProjectInput): ProjectJob {
+	const tsconfigMappings = resolveAllTsconfigMappings(parameters.config.rootDir);
+	const luauProject = isLuauProject(parameters.testFiles, tsconfigMappings);
+	const config = applySnapshotFormatDefaults(parameters.config, luauProject);
+	return {
+		config,
+		displayColor: parameters.displayColor,
+		displayName: parameters.displayName ?? "",
+		pkg: parameters.pkg,
+		testFiles: parameters.testFiles,
+	};
 }

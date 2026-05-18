@@ -1,5 +1,5 @@
 import type { CollectorResult } from "./coverage-collector.ts";
-import type { CoverageMap, SourceLocation } from "./types.ts";
+import type { CoverageMap, SourceLocation } from "./coverage-map.ts";
 
 export function buildCoverageMap(result: CollectorResult): CoverageMap {
 	const statementMap: Record<string, SourceLocation> = {};

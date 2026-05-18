@@ -4,8 +4,8 @@ import { type } from "arktype";
 import { getTsconfig } from "get-tsconfig";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import process from "node:process";
 import picomatch from "picomatch";
-import type { Except } from "type-fest";
 
 import type { ResolvedConfig } from "../config/schema.ts";
 import { rojoProjectSchema } from "../types/rojo.ts";
@@ -13,13 +13,14 @@ import { hashBuffer } from "../utils/hash.ts";
 import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
 import { buildWithRojo } from "../utils/rojo-builder.ts";
 import { INSTRUMENTER_VERSION, instrumentRoot } from "./instrumenter.ts";
-import type { RojoProject, RootEntry } from "./rojo-rewriter.ts";
-import { rewriteRojoProject } from "./rojo-rewriter.ts";
 import type {
 	CoverageManifest,
 	InstrumentedFileRecord,
 	NonInstrumentedFileRecord,
-} from "./types.ts";
+} from "./manifest.ts";
+import { MANIFEST_VERSION, readManifest, writeManifest } from "./manifest.ts";
+import type { RojoProject, RootEntry } from "./rojo-rewriter.ts";
+import { rewriteRojoProject } from "./rojo-rewriter.ts";
 
 const COVERAGE_DIR = ".jest-roblox/coverage";
 
@@ -35,27 +36,6 @@ export const NON_INSTRUMENTED_SUFFIXES = [
 	".snap.luau",
 	".snap.lua",
 ] as const;
-
-/** Previous manifests may lack nonInstrumentedFiles (pre-fix). */
-type PreviousManifest = Except<CoverageManifest, "nonInstrumentedFiles"> & {
-	nonInstrumentedFiles?: CoverageManifest["nonInstrumentedFiles"];
-};
-
-export function isNonInstrumentedFile(filename: string): boolean {
-	return NON_INSTRUMENTED_SUFFIXES.some((suffix) => filename.endsWith(suffix));
-}
-
-const previousManifestSchema = type({
-	"files": type({ "[string]": { sourceHash: "string" } }),
-	"instrumenterVersion": "number",
-	"luauRoots": "string[]",
-	"nonInstrumentedFiles?": type({
-		"[string]": { shadowPath: "string", sourceHash: "string", sourcePath: "string" },
-	}),
-	"placeFilePath?": "string",
-	"shadowDir": "string",
-	"version": "number",
-}).as<PreviousManifest>();
 
 export interface PrepareCoverageResult {
 	manifest: CoverageManifest;
@@ -84,10 +64,14 @@ interface SyncResult {
 
 interface FullCacheOptions {
 	luauRoot: string;
-	previousManifest: PreviousManifest;
+	previousManifest: CoverageManifest;
 	rootEntry: RootEntry;
 	shadowDirectory: string;
 	skipFiles: Set<string>;
+}
+
+export function isNonInstrumentedFile(filename: string): boolean {
+	return NON_INSTRUMENTED_SUFFIXES.some((suffix) => filename.endsWith(suffix));
 }
 
 export function collectLuauRootsFromRojo(
@@ -145,7 +129,7 @@ export function prepareCoverage(
 	validateRelativeRoots(luauRoots);
 
 	const manifestPath = path.join(COVERAGE_DIR, "manifest.json");
-	const previousManifest = loadPreviousManifest(manifestPath);
+	const previousManifest = loadCoverageManifest(manifestPath);
 	const useIncremental = canUseIncremental(previousManifest, config);
 
 	if (!useIncremental && fs.existsSync(COVERAGE_DIR)) {
@@ -186,7 +170,7 @@ export function prepareCoverage(
 	}
 
 	const placeFile = path.join(COVERAGE_DIR, "game.rbxl");
-	const manifest = writeManifest({
+	const manifest = buildAndWriteManifest({
 		allFiles,
 		luauRoots,
 		manifestPath,
@@ -326,7 +310,7 @@ function validateRelativeRoots(luauRoots: Array<string>): void {
 
 function carryForwardRecords(
 	luauRoot: string,
-	previousManifest: PreviousManifest,
+	previousManifest: CoverageManifest,
 	allFiles: Record<string, InstrumentedFileRecord>,
 	skipFiles: Set<string>,
 ): void {
@@ -417,7 +401,7 @@ function syncNonInstrumentedFiles(
 	return { changed, files };
 }
 
-function computeSkipFiles(luauRoot: string, previousManifest: PreviousManifest): Set<string> {
+function computeSkipFiles(luauRoot: string, previousManifest: CoverageManifest): Set<string> {
 	const skipFiles = new Set<string>();
 	const posixRoot = normalizeWindowsPath(luauRoot);
 
@@ -442,7 +426,7 @@ function computeSkipFiles(luauRoot: string, previousManifest: PreviousManifest):
 	return skipFiles;
 }
 
-function countPreviousFilesForRoot(luauRoot: string, previousManifest: PreviousManifest): number {
+function countPreviousFilesForRoot(luauRoot: string, previousManifest: CoverageManifest): number {
 	const posixRoot = normalizeWindowsPath(luauRoot);
 	let count = 0;
 	for (const fileKey of Object.keys(previousManifest.files)) {
@@ -464,7 +448,7 @@ function countPreviousFilesForRoot(luauRoot: string, previousManifest: PreviousM
  */
 function computeIncrementalState(
 	luauRoot: string,
-	previousManifest: PreviousManifest,
+	previousManifest: CoverageManifest,
 ): { allCached: boolean; changed: boolean; skipFiles: Set<string> } {
 	const skipFiles = computeSkipFiles(luauRoot, previousManifest);
 	const previousCount = countPreviousFilesForRoot(luauRoot, previousManifest);
@@ -504,7 +488,7 @@ function buildFullCacheResult(options: FullCacheOptions): InstrumentRootResult {
 function instrumentRootWithCache(
 	luauRoot: string,
 	useIncremental: boolean,
-	previousManifest: PreviousManifest | undefined,
+	previousManifest: CoverageManifest | undefined,
 ): InstrumentRootResult {
 	const shadowDirectory = normalizeWindowsPath(path.join(COVERAGE_DIR, luauRoot));
 	let changed = false;
@@ -575,26 +559,6 @@ function instrumentRootWithCache(
 	};
 }
 
-function writeManifest(options: WriteManifestOptions): CoverageManifest {
-	const { allFiles, luauRoots, manifestPath, nonInstrumentedFiles, placeFile } = options;
-
-	const manifest = {
-		files: allFiles,
-		generatedAt: new Date().toISOString(),
-		instrumenterVersion: INSTRUMENTER_VERSION,
-		luauRoots,
-		nonInstrumentedFiles,
-		placeFilePath: placeFile,
-		shadowDir: COVERAGE_DIR,
-		version: 1,
-	} satisfies CoverageManifest;
-
-	fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
-	fs.writeFileSync(manifestPath, JSON.stringify(manifest, undefined, "\t"));
-
-	return manifest;
-}
-
 function buildRojoProject(
 	rojoProjectPath: string,
 	roots: Array<RootEntry>,
@@ -620,26 +584,33 @@ function buildRojoProject(
 	buildWithRojo(rewrittenProjectPath, placeFile);
 }
 
-function loadPreviousManifest(manifestPath: string): PreviousManifest | undefined {
-	if (!fs.existsSync(manifestPath)) {
-		return undefined;
-	}
-
-	try {
-		const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-		const result = previousManifestSchema(parsed);
-		if (result instanceof type.errors) {
+function loadCoverageManifest(manifestPath: string): CoverageManifest | undefined {
+	const result = readManifest(manifestPath);
+	switch (result.kind) {
+		case "invalid": {
+			process.stderr.write(
+				`Warning: Previous coverage manifest is invalid (cache discarded): ${result.summary}\n`,
+			);
 			return undefined;
 		}
-
-		return result;
-	} catch {
-		return undefined;
+		case "malformed-json": {
+			process.stderr.write(
+				"Warning: Previous coverage manifest is malformed JSON (cache discarded)\n",
+			);
+			return undefined;
+		}
+		case "missing":
+		case "version-mismatch": {
+			return undefined;
+		}
+		case "ok": {
+			return result.manifest;
+		}
 	}
 }
 
 function canUseIncremental(
-	previousManifest: PreviousManifest | undefined,
+	previousManifest: CoverageManifest | undefined,
 	config: ResolvedConfig,
 ): boolean {
 	if (!config.coverageCache) {
@@ -654,17 +625,11 @@ function canUseIncremental(
 		return false;
 	}
 
-	// Force cold rebuild when upgrading from a manifest that lacks
-	// nonInstrumentedFiles tracking — prevents orphaned stale test files.
-	if (previousManifest.nonInstrumentedFiles === undefined) {
-		return false;
-	}
-
 	return true;
 }
 
 function detectDeletedFiles(
-	previousManifest: PreviousManifest,
+	previousManifest: CoverageManifest,
 	currentFiles: Record<string, InstrumentedFileRecord>,
 ): Array<InstrumentedFileRecord> {
 	const deleted: Array<InstrumentedFileRecord> = [];
@@ -691,4 +656,23 @@ function cleanupDeletedFiles(records: Array<InstrumentedFileRecord>): void {
 			// Best-effort cleanup
 		}
 	}
+}
+
+function buildAndWriteManifest(options: WriteManifestOptions): CoverageManifest {
+	const { allFiles, luauRoots, manifestPath, nonInstrumentedFiles, placeFile } = options;
+
+	const manifest: CoverageManifest = {
+		files: allFiles,
+		generatedAt: new Date().toISOString(),
+		instrumenterVersion: INSTRUMENTER_VERSION,
+		luauRoots,
+		nonInstrumentedFiles,
+		placeFilePath: placeFile,
+		shadowDir: COVERAGE_DIR,
+		version: MANIFEST_VERSION,
+	};
+
+	writeManifest(manifestPath, manifest);
+
+	return manifest;
 }

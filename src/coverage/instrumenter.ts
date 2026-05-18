@@ -10,8 +10,10 @@ import { hashBuffer } from "../utils/hash.ts";
 import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
 import { collectCoverage } from "./coverage-collector.ts";
 import { buildCoverageMap } from "./coverage-map-builder.ts";
+import { writeCoverageMap } from "./coverage-map.ts";
+import type { CoverageManifest, InstrumentedFileRecord } from "./manifest.ts";
+import { MANIFEST_VERSION, writeManifest } from "./manifest.ts";
 import { insertProbes } from "./probe-inserter.ts";
-import type { CoverageManifest, InstrumentedFileRecord } from "./types.ts";
 
 export const INSTRUMENTER_VERSION = 2;
 
@@ -141,7 +143,7 @@ export function instrumentRoot(
 		const coverageMap = buildCoverageMap(collectorResult);
 
 		fs.writeFileSync(path.join(shadowDir, relativePath), instrumentedSource);
-		fs.writeFileSync(coverageMapOutputPath, JSON.stringify(coverageMap, undefined, "\t"));
+		writeCoverageMap(coverageMapOutputPath, coverageMap);
 
 		files[fileKey] = {
 			key: fileKey,
@@ -169,18 +171,17 @@ export function instrument(options: InstrumentOptions): CoverageManifest {
 	const files = instrumentRoot(options);
 	const posixLuauRoot = normalizeWindowsPath(luauRoot);
 
-	const manifest = {
+	const manifest: CoverageManifest = {
 		files,
 		generatedAt: new Date().toISOString(),
 		instrumenterVersion: INSTRUMENTER_VERSION,
 		luauRoots: [posixLuauRoot],
 		nonInstrumentedFiles: {},
 		shadowDir: normalizeWindowsPath(shadowDir),
-		version: 1,
-	} satisfies CoverageManifest;
+		version: MANIFEST_VERSION,
+	};
 
-	fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
-	fs.writeFileSync(manifestPath, JSON.stringify(manifest, undefined, "\t"));
+	writeManifest(manifestPath, manifest);
 
 	return manifest;
 }

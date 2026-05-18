@@ -3,7 +3,8 @@ import { fromAny } from "@total-typescript/shoehorn";
 import { vol } from "memfs";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
-import type { CoverageManifest, RawCoverageData } from "./types.ts";
+import type { CoverageManifest } from "./manifest.ts";
+import type { RawCoverageData } from "./types.ts";
 import { aggregateWorkspaceCoverage } from "./workspace-aggregate.ts";
 
 vi.mock(import("node:fs"), async () => {

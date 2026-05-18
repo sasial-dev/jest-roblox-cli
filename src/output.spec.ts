@@ -6,7 +6,7 @@ import type { MockInstance } from "vitest";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { DEFAULT_CONFIG, type ResolvedConfig } from "./config/schema.ts";
-import { mapCoverageToTypeScript } from "./coverage/mapper.ts";
+import { CoverageMapMalformedError, mapCoverageToTypeScript } from "./coverage/mapper.ts";
 import { checkThresholds, generateReports, printCoverageHeader } from "./coverage/reporter.ts";
 import { type ExecuteResult, formatExecuteOutput, loadCoverageManifest } from "./executor.ts";
 import { formatAgentMultiProject } from "./formatters/agent.ts";
@@ -731,6 +731,32 @@ describe("processCoverage via outputSingleResult", () => {
 		expect(spies.stderr).toHaveBeenCalledWith(
 			expect.stringContaining("Coverage threshold not met"),
 		);
+	});
+
+	it("should not generate reports or check thresholds when mapper throws on malformed coverage map", async () => {
+		expect.assertions(3);
+
+		setupDefaults();
+		mocks.loadCoverageManifest.mockReturnValue(fromAny({}));
+		mocks.mapCoverageToTypeScript.mockImplementation(() => {
+			throw new CoverageMapMalformedError("out/foo.luau.cov-map.json");
+		});
+		setupOutputSpies();
+
+		await expect(
+			outputSingleResult(
+				makeConfig({
+					collectCoverage: true,
+					coverageThreshold: { lines: 100 },
+				}),
+				makeSingleResult({
+					runtimeResult: makeExecuteResult({ coverageData: fromAny({ "x.luau": {} }) }),
+				}),
+			),
+		).rejects.toThrow(CoverageMapMalformedError);
+
+		expect(mocks.generateReports).not.toHaveBeenCalled();
+		expect(mocks.checkThresholds).not.toHaveBeenCalled();
 	});
 });
 
