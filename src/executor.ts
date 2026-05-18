@@ -436,7 +436,6 @@ function processProjectResult(
 		startTime,
 		testsMs,
 		totalMs,
-		uploadCached: backendTiming.uploadCached,
 		uploadMs: backendTiming.uploadMs,
 	} satisfies TimingResult;
 

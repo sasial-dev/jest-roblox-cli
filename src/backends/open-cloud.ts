@@ -62,17 +62,13 @@ export class OpenCloudBackend implements Backend {
 			throw new Error("OpenCloudBackend work-stealing mode requires scriptOverride");
 		}
 
-		// Cache/timeout/pollInterval are picked from the first job. All jobs in
-		// a single CLI invocation share the same place file, so these are
-		// per-run knobs rather than per-job.
+		// timeout/pollInterval are picked from the first job — they're per-run
+		// knobs.
 		// eslint-disable-next-line ts/no-non-null-assertion -- length checked above
 		const primary = jobs[0]!;
 		const placeFilePath = path.resolve(primary.config.rootDir, primary.config.placeFile);
 
-		const upload = await this.runner.uploadPlace({
-			cache: primary.config.cache,
-			placeFilePath,
-		});
+		const upload = await this.runner.uploadPlace({ placeFilePath });
 
 		const executionStart = Date.now();
 		const flattened =
@@ -90,7 +86,7 @@ export class OpenCloudBackend implements Backend {
 
 		return {
 			rawResults: flattened,
-			timing: { executionMs, uploadCached: upload.cached, uploadMs: upload.uploadMs },
+			timing: { executionMs, uploadMs: upload.uploadMs },
 		};
 	}
 

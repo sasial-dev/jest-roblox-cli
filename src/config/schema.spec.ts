@@ -199,7 +199,7 @@ describe(configSchema, () => {
 
 			const result = configSchema({
 				backend: "studio",
-				cache: false,
+				coverageCache: false,
 				port: 4000,
 				test: {
 					collectCoverage: true,
@@ -209,6 +209,12 @@ describe(configSchema, () => {
 			});
 
 			expect(result).not.toBeInstanceOf(type.errors);
+		});
+
+		it("should reject the removed `cache` field as unknown", () => {
+			expect.assertions(1);
+
+			expect(() => validateConfig({ cache: true })).toThrow(/Invalid config/);
 		});
 
 		it("should accept all valid backend values", () => {

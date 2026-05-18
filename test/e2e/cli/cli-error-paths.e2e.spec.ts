@@ -19,7 +19,7 @@ describe("cli error paths", () => {
 				},
 			]);
 
-			const result = await runCliAsync(["--no-cache"], {
+			const result = await runCliAsync([], {
 				cwd: sandbox,
 				env: createOpenCloudEnvironment(server.baseUrl),
 			});
@@ -35,7 +35,7 @@ describe("cli error paths", () => {
 
 			const sandbox = createFixtureSandbox(RBXTS_FIXTURE);
 
-			const result = await runCliAsync(["--backend", "open-cloud", "--no-cache"], {
+			const result = await runCliAsync(["--backend", "open-cloud"], {
 				cwd: sandbox,
 				env: {
 					// Strip every Open Cloud env var so the resolver has no
@@ -70,14 +70,11 @@ describe("cli error paths", () => {
 				},
 			]);
 
-			const result = await runCliAsync(
-				["--no-cache", "--timeout", "2000", "--pollInterval", "100"],
-				{
-					cwd: sandbox,
-					env: createOpenCloudEnvironment(server.baseUrl),
-					timeoutMs: 30_000,
-				},
-			);
+			const result = await runCliAsync(["--timeout", "2000", "--pollInterval", "100"], {
+				cwd: sandbox,
+				env: createOpenCloudEnvironment(server.baseUrl),
+				timeoutMs: 30_000,
+			});
 
 			expect(result.exitCode).toBeGreaterThan(0);
 			expect(result.stderr).toMatch(/timed out/i);
@@ -93,7 +90,7 @@ describe("cli error paths", () => {
 			// missing file surfaces as ENOENT naming the resolved path.
 			const sandbox = createFixtureSandbox(LUAU_FIXTURE);
 
-			const result = await runCliAsync(["--backend", "open-cloud", "--no-cache"], {
+			const result = await runCliAsync(["--backend", "open-cloud"], {
 				cwd: sandbox,
 				env: createOpenCloudEnvironment("http://127.0.0.1:1"),
 			});

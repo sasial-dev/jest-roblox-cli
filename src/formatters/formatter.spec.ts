@@ -53,7 +53,6 @@ function createTiming(totalMs: number): TimingResult {
 		startTime: Date.now(),
 		testsMs: 50,
 		totalMs,
-		uploadCached: false,
 		uploadMs: 50,
 	};
 }
@@ -2108,20 +2107,6 @@ describe("formatTestInGroup duration undefined", () => {
 		// The passed test line should end with the title, no "ms" suffix
 		expect(plain).toContain("✓ no-dur passes");
 		expect(plain).toContain("× no-dur fails");
-	});
-});
-
-describe("formatTestSummary upload cached", () => {
-	it("should show (cached) suffix when upload was cached", () => {
-		expect.assertions(1);
-
-		const summary = formatTestSummary(PASSING_RESULT, {
-			...TIMING,
-			uploadCached: true,
-		});
-		const plain = stripVTControlCharacters(summary);
-
-		expect(plain).toContain("upload 50ms (cached)");
 	});
 });
 

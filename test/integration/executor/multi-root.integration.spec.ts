@@ -105,7 +105,7 @@ describe("executor multi-root pipeline", () => {
 				});
 				return {
 					rawResults: [{ entry: { elapsedMs: 50, jestOutput } }],
-					timing: { executionMs: 100, uploadCached: false, uploadMs: 25 },
+					timing: { executionMs: 100, uploadMs: 25 },
 				};
 			},
 		};

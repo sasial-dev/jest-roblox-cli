@@ -114,7 +114,6 @@ function createFailingResult(): JestResult {
 
 const DEFAULT_TIMING: BackendResult["timing"] = {
 	executionMs: 100,
-	uploadCached: false,
 	uploadMs: 50,
 };
 
@@ -704,7 +703,7 @@ describe("execute single-project helper", () => {
 						luauTiming: { requireJest: 1.5 },
 						result: createPassingResult(),
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -798,7 +797,7 @@ describe("execute single-project helper", () => {
 								"snapshot content",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -841,7 +840,7 @@ describe("execute single-project helper", () => {
 							"ReplicatedStorage/__snapshots__/b.snap.luau": "snap b",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -891,7 +890,7 @@ describe("execute single-project helper", () => {
 							"UnknownService/__snapshots__/b.snap.luau": "snap b",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -935,7 +934,7 @@ describe("execute single-project helper", () => {
 							"ReplicatedStorage/__snapshots__/a.snap.luau": "snap a",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -982,7 +981,7 @@ describe("execute single-project helper", () => {
 							"ReplicatedStorage/__snapshots__/test.snap.luau": "snap",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -1006,7 +1005,7 @@ describe("execute single-project helper", () => {
 		// each package's `rootDir`, not where the CLI was invoked.
 		expect.assertions(2);
 
-		const temporaryDirectory = createTemporaryDirectory("exec-snap-rootdir-");
+		const temporaryDirectory = createTemporaryDirectory("exec-snap-root-dir-");
 
 		const rojoProject = {
 			name: "test",
@@ -1029,7 +1028,7 @@ describe("execute single-project helper", () => {
 							"ReplicatedStorage/__snapshots__/test.snap.luau": "snap content",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -1050,10 +1049,12 @@ describe("execute single-project helper", () => {
 		stderrSpy.mockRestore();
 
 		expect(output).not.toMatch(/Cannot write snapshots - no rojo project found/);
+
 		const snapshotPath = path.join(
 			temporaryDirectory,
 			"src/shared/__snapshots__/test.snap.luau",
 		);
+
 		expect(fs.existsSync(snapshotPath)).toBeTrue();
 	});
 
@@ -1083,7 +1084,7 @@ describe("execute single-project helper", () => {
 							"UnknownService/__snapshots__/test.snap.luau": "snap content",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -1127,7 +1128,7 @@ describe("execute single-project helper", () => {
 							"ReplicatedStorage/__snapshots__/test.snap.luau": "snap",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -1169,7 +1170,7 @@ describe("execute single-project helper", () => {
 							"ReplicatedStorage/__snapshots__/test.snap.luau": "snap",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -1218,7 +1219,7 @@ describe("execute single-project helper", () => {
 							"ReplicatedStorage/__snapshots__/test.snap.luau": "snap",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -1261,7 +1262,7 @@ describe("execute single-project helper", () => {
 							"ReplicatedStorage/__snapshots__/test.snap.luau": "snap",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -1317,7 +1318,7 @@ describe("execute single-project helper", () => {
 							"ReplicatedStorage/__snapshots__/test.snap.luau": "snap",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -1360,7 +1361,7 @@ describe("execute single-project helper", () => {
 							"UnknownService/__snapshots__/a.snap.luau": "snap a",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -1405,7 +1406,7 @@ describe("execute single-project helper", () => {
 							"ReplicatedStorage/__snapshots__/test.spec.snap.luau": "-- snapshot",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -1455,7 +1456,7 @@ describe("execute single-project helper", () => {
 							"ReplicatedStorage/__snapshots__/test.spec.snap.luau": "-- snapshot",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -1504,7 +1505,7 @@ describe("execute single-project helper", () => {
 							"ReplicatedStorage/__snapshots__/test.spec.snap.luau": "-- snapshot",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -1664,7 +1665,7 @@ describe("execute single-project helper", () => {
 								"-- snapshot",
 						},
 					},
-					{ executionMs: 100, uploadCached: false, uploadMs: 50 },
+					{ executionMs: 100, uploadMs: 50 },
 				);
 			},
 		};
@@ -2230,7 +2231,7 @@ describe(runProjects, () => {
 			runTests: async () => {
 				return multiEntryResult(
 					[{ result: createPassingResult() }, { result: createPassingResult() }],
-					{ executionMs: 250, uploadCached: false, uploadMs: 75 },
+					{ executionMs: 250, uploadMs: 75 },
 				);
 			},
 		};

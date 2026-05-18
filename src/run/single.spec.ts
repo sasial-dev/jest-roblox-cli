@@ -116,7 +116,7 @@ function createFakeBackend(
 
 			return {
 				rawResults: [{ entry: { jestOutput: JSON.stringify(result) } }],
-				timing: { executionMs: 1, uploadCached: false, uploadMs: 0 },
+				timing: { executionMs: 1, uploadMs: 0 },
 			};
 		},
 	};
@@ -269,7 +269,7 @@ describe(runSingleProject, () => {
 				runTests: async (): Promise<BackendResult> => {
 					return {
 						rawResults: [{ entry: { jestOutput: JSON.stringify(makeJestResult()) } }],
-						timing: { executionMs: 1, uploadCached: false, uploadMs: 0 },
+						timing: { executionMs: 1, uploadMs: 0 },
 					};
 				},
 			};

@@ -114,7 +114,6 @@ function makeExecuteResult(overrides: Partial<ExecuteResult> = {}): ExecuteResul
 			startTime: 1000,
 			testsMs: 50,
 			totalMs: 200,
-			uploadCached: false,
 			uploadMs: 50,
 		},
 		...overrides,
@@ -1073,7 +1072,6 @@ describe(mergeProjectResults, () => {
 				startTime: 1000,
 				testsMs: 50,
 				totalMs: 200,
-				uploadCached: false,
 				uploadMs: 50,
 			},
 		});
@@ -1083,7 +1081,6 @@ describe(mergeProjectResults, () => {
 				startTime: 2000,
 				testsMs: 75,
 				totalMs: 200,
-				uploadCached: false,
 				uploadMs: 50,
 			},
 		});
@@ -1101,7 +1098,6 @@ describe(mergeProjectResults, () => {
 				startTime: 1000,
 				testsMs: 50,
 				totalMs: 200,
-				uploadCached: false,
 				uploadMs: 50,
 			},
 		});
@@ -1112,7 +1108,6 @@ describe(mergeProjectResults, () => {
 				startTime: 1000,
 				testsMs: 50,
 				totalMs: 200,
-				uploadCached: false,
 				uploadMs: 50,
 			},
 		});

@@ -82,7 +82,6 @@ describe("workspace --parallel work-stealing", () => {
 					"--parallel=2",
 					"--backend",
 					"open-cloud",
-					"--no-cache",
 				],
 				{
 					cwd: sandbox,
@@ -140,7 +139,7 @@ describe("workspace synthesizer $path-mounted parent virtualization", () => {
 			]);
 
 			const result = await runCliAsync(
-				["--workspace", "--packages=@e2e/nested", "--backend", "open-cloud", "--no-cache"],
+				["--workspace", "--packages=@e2e/nested", "--backend", "open-cloud"],
 				{
 					cwd: sandbox,
 					env: {
@@ -185,13 +184,7 @@ describe("workspace synthesizer zero-test project tolerance", () => {
 			]);
 
 			const result = await runCliAsync(
-				[
-					"--workspace",
-					"--packages=@e2e/foo,@e2e/empty-tests",
-					"--backend",
-					"open-cloud",
-					"--no-cache",
-				],
+				["--workspace", "--packages=@e2e/foo,@e2e/empty-tests", "--backend", "open-cloud"],
 				{
 					cwd: sandbox,
 					env: {

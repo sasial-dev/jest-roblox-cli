@@ -230,12 +230,11 @@ describe(StudioRunner, () => {
 	});
 
 	it("should return no-op for uploadPlace", async () => {
-		expect.assertions(3);
+		expect.assertions(2);
 
 		const runner = new StudioRunner({ port: 0 });
 		const result = await runner.uploadPlace({ placeFilePath: "./test.rbxl" });
 
-		expect(result.cached).toBeFalse();
 		expect(result.uploadMs).toBe(0);
 		expect(result.versionNumber).toBe(0);
 	});

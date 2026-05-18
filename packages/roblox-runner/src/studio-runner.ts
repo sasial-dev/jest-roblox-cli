@@ -56,7 +56,7 @@ export class StudioRunner implements RemoteRunner {
 	}
 
 	public async uploadPlace(_options: UploadPlaceOptions): Promise<UploadPlaceResult> {
-		return { cached: false, uploadMs: 0, versionNumber: 0 };
+		return { uploadMs: 0, versionNumber: 0 };
 	}
 
 	private async waitForResult(wss: WebSocketServer, script: string): Promise<ResultMessage> {

@@ -25,7 +25,7 @@ describe("--formatters json stream isolation", () => {
 			},
 		]);
 
-		const result = await runCliAsync(["--no-cache", "--formatters", "json"], {
+		const result = await runCliAsync(["--formatters", "json"], {
 			cwd: sandbox,
 			env: createOpenCloudEnvironment(server.baseUrl),
 		});

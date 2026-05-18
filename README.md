@@ -136,7 +136,7 @@ Root fields control the CLI/runner. Jest passthrough fields live under `test:`.
 | `formatters` | Output formatters (`"default"`, `"agent"`, `"json"`, `"github-actions"`) | `["default"]` |
 | `gameOutput` | Path to write game print/warn/error output | — |
 | `showLuau` | Show Luau code snippets in failure output | `true` |
-| `cache` | Cache place file uploads by content hash | `true` |
+| `coverageCache` | Reuse incrementally-instrumented coverage shadow dir between runs | `true` |
 | `pollInterval` | How often to poll for results in ms (Open Cloud) | `500` |
 | `parallel` | Number of concurrent Open Cloud sessions, or `"auto"` (= `min(jobs, 3)`) | — |
 | `luauRoots` | Where Luau files live for coverage instrumentation | auto from tsconfig `outDir` |
@@ -295,7 +295,7 @@ and drop it into your Studio plugins folder.
 | `--verbose` | Show each test result |
 | `--silent` | Hide all output |
 | `--no-color` | Turn off colors |
-| `--no-cache` | Force a fresh place file upload |
+| `--no-coverage-cache` | Force a clean coverage re-instrumentation |
 | `--pollInterval <ms>` | How often to check for results (Open Cloud) |
 | `--parallel [n]` | Open Cloud concurrent sessions, or `auto` (= `min(jobs, 3)`) |
 | `--project <name...>` | Filter which named projects to run |

@@ -5,12 +5,10 @@ export interface RunnerCredentials {
 }
 
 export interface UploadPlaceOptions {
-	cache?: boolean;
 	placeFilePath: string;
 }
 
 export interface UploadPlaceResult {
-	cached: boolean;
 	uploadMs: number;
 	versionNumber: number;
 }

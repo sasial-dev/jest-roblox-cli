@@ -20,8 +20,10 @@ Requires three environment variables. The CLI uploads the place file to Roblox
 via the Open Cloud API, creates a Luau execution task, polls for completion, and
 parses the JSON result.
 
-Place files are cached by SHA256 hash — use `--no-cache` to force re-upload.
-Poll interval is configurable via `--pollInterval <ms>` (default: 500).
+Every invocation uploads the place file fresh — Open Cloud has no read endpoint
+to verify a previously-uploaded version is still current, so caching is unsafe
+when a place ID is shared across worktrees. Poll interval is configurable via
+`--pollInterval <ms>` (default: 500).
 
 ## Studio
 

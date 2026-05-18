@@ -43,7 +43,7 @@ Options:
   --workspace                       Run tests across all workspace packages
   --packages <names>                Comma-separated package names (workspace mode)
   --affected-since <ref>            Run only packages affected since git ref via turbo/nx
-  --no-cache                        Force re-upload place file (skip cache)
+  --no-coverage-cache               Force a clean coverage re-instrumentation (skip incremental cache)
   --pollInterval <ms>               Open Cloud poll interval in ms (default: 500)
   --parallel [n]                    Open-Cloud-only: number of concurrent sessions
                                     (or "auto" = min(jobs, 3); default: 1 session)
@@ -88,18 +88,18 @@ export function parseArgs(args: Array<string>): CliOptions {
 			"affected-since": { type: "string" },
 			"apiKey": { type: "string" },
 			"backend": { type: "string" },
-			"cache": { type: "boolean" },
 			"collectCoverageFrom": { multiple: true, type: "string" },
 			"color": { type: "boolean" },
 			"config": { type: "string" },
 			"coverage": { type: "boolean" },
+			"coverage-cache": { type: "boolean" },
 			"coverageDirectory": { type: "string" },
 			"coverageReporters": { multiple: true, type: "string" },
 			"formatters": { multiple: true, type: "string" },
 			"gameOutput": { type: "string" },
 			"help": { default: false, type: "boolean" },
-			"no-cache": { type: "boolean" },
 			"no-color": { type: "boolean" },
+			"no-coverage-cache": { type: "boolean" },
 			"no-show-luau": { type: "boolean" },
 			"outputFile": { type: "string" },
 			"packages": { type: "string" },
@@ -141,11 +141,11 @@ export function parseArgs(args: Array<string>): CliOptions {
 		affectedSince: values["affected-since"],
 		apiKey: values.apiKey,
 		backend: validateBackend(values.backend),
-		cache: values["no-cache"] === true ? false : values.cache,
 		collectCoverage: values.coverage,
 		collectCoverageFrom: values.collectCoverageFrom,
 		color: values["no-color"] === true ? false : values.color,
 		config: values.config,
+		coverageCache: values["no-coverage-cache"] === true ? false : values["coverage-cache"],
 		coverageDirectory: values.coverageDirectory,
 		coverageReporters: values.coverageReporters as Array<CoverageReporter> | undefined,
 		files: positionals.length > 0 ? positionals : undefined,

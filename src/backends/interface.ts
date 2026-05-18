@@ -85,7 +85,6 @@ export interface BackendOptions {
 
 export interface BackendTiming {
 	executionMs: number;
-	uploadCached?: boolean;
 	uploadMs?: number;
 }
 

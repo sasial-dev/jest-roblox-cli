@@ -642,7 +642,7 @@ function canUseIncremental(
 	previousManifest: PreviousManifest | undefined,
 	config: ResolvedConfig,
 ): boolean {
-	if (!config.cache) {
+	if (!config.coverageCache) {
 		return false;
 	}
 

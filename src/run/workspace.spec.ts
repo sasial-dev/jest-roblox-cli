@@ -65,7 +65,6 @@ function makeExecuteResult(overrides: Partial<ExecuteResult> = {}): ExecuteResul
 			startTime: 0,
 			testsMs: 0,
 			totalMs: 0,
-			uploadCached: false,
 			uploadMs: 0,
 		},
 		...overrides,

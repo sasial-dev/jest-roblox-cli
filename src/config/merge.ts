@@ -7,10 +7,10 @@ export function mergeCliWithConfig(cli: CliOptions, config: ResolvedConfig): Res
 	return {
 		...config,
 		backend: cli.backend ?? config.backend,
-		cache: cli.cache ?? config.cache,
 		collectCoverage: cli.collectCoverage ?? config.collectCoverage,
 		collectCoverageFrom: cli.collectCoverageFrom ?? config.collectCoverageFrom,
 		color: cli.color ?? config.color,
+		coverageCache: cli.coverageCache ?? config.coverageCache,
 		coverageDirectory: cli.coverageDirectory ?? config.coverageDirectory,
 		coverageReporters: cli.coverageReporters ?? config.coverageReporters,
 		formatters: resolveFormatters(cli, config),

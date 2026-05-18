@@ -18,7 +18,7 @@ Root fields control the CLI/runner. Jest passthrough fields live under `test:`.
 | `rojoProject` | Path to Rojo project file | auto-detected |
 | `formatters` | Output formatters (`"default"`, `"agent"`, `"json"`, `"github-actions"`) | `["default"]` |
 | `gameOutput` | Write game print/warn/error to file | — |
-| `cache` | Cache place files by SHA256 hash | `true` |
+| `coverageCache` | Reuse incrementally-instrumented coverage shadow dir between runs | `true` |
 | `luauRoots` | Compiled Luau directories to instrument | auto from tsconfig `outDir` |
 
 ## Test Fields

@@ -89,7 +89,6 @@ function makeExecuteResult(overrides: Partial<ExecuteResult> = {}): ExecuteResul
 			startTime: 1000,
 			testsMs: 50,
 			totalMs: 200,
-			uploadCached: false,
 			uploadMs: 50,
 		},
 		...overrides,
@@ -152,7 +151,7 @@ function setupDefaults(configOverrides: Partial<ResolvedConfig> = {}) {
 	mocks.resolveBackend.mockResolvedValue(makeBackend("studio"));
 	mocks.runProjects.mockImplementation(async (input) => {
 		return {
-			backendTiming: { executionMs: 100, uploadCached: false, uploadMs: 50 },
+			backendTiming: { executionMs: 100, uploadMs: 50 },
 			results: input.projects.map(() => makeExecuteResult()),
 		};
 	});
@@ -434,7 +433,7 @@ describe(runMultiProject, () => {
 
 		mocks.runProjects.mockImplementation(async (input) => {
 			return {
-				backendTiming: { executionMs: 100, uploadCached: false, uploadMs: 50 },
+				backendTiming: { executionMs: 100, uploadMs: 50 },
 				results: input.projects.map((project) => {
 					const tag = project.displayName ?? "";
 					return makeExecuteResult({

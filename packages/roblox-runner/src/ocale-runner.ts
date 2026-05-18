@@ -8,15 +8,6 @@ import type buffer from "node:buffer";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import {
-	getCacheDirectory,
-	getCacheKey,
-	isUploaded,
-	markUploaded,
-	readCache,
-	writeCache,
-} from "./cache.ts";
-import { hashBuffer } from "./hash.ts";
 import type {
 	ExecuteScriptOptions,
 	RemoteRunner,
@@ -101,24 +92,8 @@ export class OcaleRunner implements RemoteRunner {
 
 	public async uploadPlace(options: UploadPlaceOptions): Promise<UploadPlaceResult> {
 		const placeFilePath = path.resolve(options.placeFilePath);
-		const cacheDirectory = getCacheDirectory();
-		const cacheFilePath = path.join(cacheDirectory, "upload-cache.json");
-
 		const uploadStart = Date.now();
 		const placeData = this.readFileFn(placeFilePath);
-		const fileHash = hashBuffer(placeData);
-		const cacheKey = getCacheKey(this.credentials.universeId, this.credentials.placeId);
-
-		const cache = readCache(cacheFilePath);
-		const cacheEnabled = options.cache ?? false;
-
-		if (cacheEnabled && isUploaded(cache, cacheKey, fileHash)) {
-			return {
-				cached: true,
-				uploadMs: Date.now() - uploadStart,
-				versionNumber: 0,
-			};
-		}
 
 		const parameters: PublishParameters = {
 			body: toArrayBufferView(placeData),
@@ -131,11 +106,7 @@ export class OcaleRunner implements RemoteRunner {
 			throw new Error(`Failed to upload place: ${result.err.message}`);
 		}
 
-		markUploaded(cache, cacheKey, fileHash);
-		writeCache(cacheFilePath, cache);
-
 		return {
-			cached: false,
 			uploadMs: Date.now() - uploadStart,
 			versionNumber: result.data.versionNumber,
 		};

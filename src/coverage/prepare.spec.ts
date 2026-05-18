@@ -734,7 +734,7 @@ describe(prepareCoverage, () => {
 			seedIncrementalScenario();
 
 			const config = makeConfig({
-				cache: false,
+				coverageCache: false,
 				luauRoots: ["out-tsc/test"],
 			});
 
@@ -755,7 +755,7 @@ describe(prepareCoverage, () => {
 			vol.writeFileSync(".jest-roblox/coverage/stale.txt", "stale");
 
 			const config = makeConfig({
-				cache: false,
+				coverageCache: false,
 				luauRoots: ["out-tsc/test"],
 			});
 

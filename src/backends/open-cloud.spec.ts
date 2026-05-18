@@ -53,7 +53,7 @@ function createStreamReader(pages: Array<Array<StreamingResultRecord>>): StubStr
 	return reader;
 }
 
-const DEFAULT_UPLOAD: UploadPlaceResult = { cached: false, uploadMs: 12, versionNumber: 1 };
+const DEFAULT_UPLOAD: UploadPlaceResult = { uploadMs: 12, versionNumber: 1 };
 
 function createRunnerStub(options: RunnerStubOptions = {}): RunnerStub {
 	const executeCalls: Array<ExecuteScriptOptions> = [];
@@ -131,7 +131,6 @@ function job(
 	return {
 		config: {
 			...DEFAULT_CONFIG,
-			cache: false,
 			placeFile: "./test.rbxl",
 			...overrides,
 		},
@@ -550,44 +549,6 @@ describe(OpenCloudBackend, () => {
 			await expect(backend.runTests(jobsOptions([job("alpha")]))).rejects.toThrow(
 				/Failed to upload place/,
 			);
-		});
-
-		it("should reflect runner uploadCached=true on the backend timing", async () => {
-			expect.assertions(1);
-
-			const stub = createRunnerStub({
-				uploadResult: { cached: true, uploadMs: 0, versionNumber: 0 },
-			});
-			stub.setExecute(() => scriptResult(envelope([{ jestOutput: successJest() }])));
-
-			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
-			const { timing } = await backend.runTests(jobsOptions([job("alpha", { cache: true })]));
-
-			expect(timing.uploadCached).toBeTrue();
-		});
-
-		it("should reflect runner uploadCached=false on the backend timing", async () => {
-			expect.assertions(1);
-
-			const stub = createRunnerStub();
-			stub.setExecute(() => scriptResult(envelope([{ jestOutput: successJest() }])));
-
-			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
-			const { timing } = await backend.runTests(jobsOptions([job("alpha")]));
-
-			expect(timing.uploadCached).toBeFalse();
-		});
-
-		it("should forward the job's cache flag to runner.uploadPlace", async () => {
-			expect.assertions(1);
-
-			const stub = createRunnerStub();
-			stub.setExecute(() => scriptResult(envelope([{ jestOutput: successJest() }])));
-
-			const backend = new OpenCloudBackend(credentials, { runner: stub.runner });
-			await backend.runTests(jobsOptions([job("alpha", { cache: true })]));
-
-			expect(stub.uploadCalls[0]?.cache).toBeTrue();
 		});
 	});
 

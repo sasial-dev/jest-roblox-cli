@@ -139,7 +139,6 @@ export const TIMING: TimingResult = {
 	startTime: 1700000000000,
 	testsMs: 100,
 	totalMs: 250,
-	uploadCached: false,
 	uploadMs: 50,
 };
 
@@ -156,7 +155,6 @@ export const TIMING_COVERAGE: TimingResult = {
 	startTime: 1700000000000,
 	testsMs: 100,
 	totalMs: 3250,
-	uploadCached: false,
 	uploadMs: 50,
 };
 

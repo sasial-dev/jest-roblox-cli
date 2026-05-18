@@ -414,11 +414,7 @@ export function formatTestSummary(
 	const breakdownParts: Array<string> = [];
 
 	if (timing.uploadMs !== undefined) {
-		breakdownParts.push(
-			timing.uploadCached === true
-				? `upload ${timing.uploadMs}ms (cached)`
-				: `upload ${timing.uploadMs}ms`,
-		);
+		breakdownParts.push(`upload ${timing.uploadMs}ms`);
 	}
 
 	breakdownParts.push(`environment ${environmentMs}ms`);

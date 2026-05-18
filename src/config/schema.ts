@@ -115,8 +115,8 @@ export interface GlobalTestConfig extends SharedTestConfig {
  */
 export interface Config {
 	backend?: Backend;
-	cache?: boolean;
 	color?: boolean;
+	coverageCache?: boolean;
 	extends?: Array<string> | string;
 	formatters?: Array<FormatterEntry>;
 	gameOutput?: string;
@@ -149,9 +149,9 @@ export interface Config {
 export interface ResolvedConfig
 	extends Except<Config, "test">, Except<GlobalTestConfig, "projects"> {
 	backend: Backend;
-	cache: boolean;
 	collectCoverage: boolean;
 	color: boolean;
+	coverageCache: boolean;
 	coverageDirectory: string;
 	coveragePathIgnorePatterns: Array<string>;
 	coverageReporters: Array<CoverageReporter>;
@@ -189,9 +189,9 @@ export function isValidBackend(value: string): value is Backend {
 
 export const DEFAULT_CONFIG: ResolvedConfig = {
 	backend: "auto",
-	cache: true,
 	collectCoverage: false,
 	color: true,
+	coverageCache: true,
 	coverageDirectory: "coverage",
 	coveragePathIgnorePatterns: [
 		"**/*.spec.lua",
@@ -233,12 +233,12 @@ export interface CliOptions {
 	affectedSince?: string;
 	apiKey?: string;
 	backend?: Backend;
-	cache?: boolean;
 	collectCoverage?: boolean;
 	collectCoverageFrom?: Array<string>;
 	color?: boolean;
 
 	config?: string;
+	coverageCache?: boolean;
 	coverageDirectory?: string;
 	coverageReporters?: Array<CoverageReporter>;
 	files?: Array<string>;
@@ -384,9 +384,9 @@ const globalTestConfigSchema = type({
 export const configSchema: Type<Config> = type({
 	"+": "reject",
 	"backend?": type("'auto'|'open-cloud'|'studio'"),
-	"cache?": "boolean",
 	"color?": "boolean",
 	"config?": "string",
+	"coverageCache?": "boolean",
 	"extends?": type("string").or(type("string[]")),
 	"formatters?": formatterEntrySchema.array(),
 	"gameOutput?": "string",
@@ -443,8 +443,8 @@ type SharedKey = keyof SharedTestConfig;
 
 export const ROOT_CLI_KEYS_LIST: ReadonlyArray<RootCliKey> = [
 	"backend",
-	"cache",
 	"color",
+	"coverageCache",
 	"extends",
 	"formatters",
 	"gameOutput",

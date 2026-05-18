@@ -174,7 +174,6 @@ export function mergeProjectResults(results: Array<ExecuteResult>): ExecuteResul
 			startTime: mergedStartTime,
 			testsMs,
 			totalMs,
-			uploadCached: sharedTiming.timing.uploadCached,
 			uploadMs: sharedTiming.timing.uploadMs,
 		},
 	};

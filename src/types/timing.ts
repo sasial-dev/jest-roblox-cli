@@ -5,6 +5,5 @@ export interface TimingResult {
 	startTime: number;
 	testsMs: number;
 	totalMs: number;
-	uploadCached?: boolean;
 	uploadMs?: number;
 }

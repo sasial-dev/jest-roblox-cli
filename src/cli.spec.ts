@@ -84,7 +84,6 @@ function makeExecuteResult(overrides: Partial<ExecuteResult> = {}): ExecuteResul
 			startTime: Date.now(),
 			testsMs: 50,
 			totalMs: 200,
-			uploadCached: false,
 			uploadMs: 50,
 		},
 		...overrides,
@@ -222,9 +221,19 @@ describe(parseArgs, () => {
 		expect(parseArgs(["--formatters", "agent"]).formatters).toStrictEqual(["agent"]);
 	});
 
-	it("should parse --no-cache flag", () => {
+	it("should reject --no-cache as an unknown option", () => {
 		expect.assertions(1);
-		expect(parseArgs(["--no-cache"]).cache).toBeFalse();
+		expect(() => parseArgs(["--no-cache"])).toThrow(/Unknown option/);
+	});
+
+	it("should reject --cache as an unknown option", () => {
+		expect.assertions(1);
+		expect(() => parseArgs(["--cache"])).toThrow(/Unknown option/);
+	});
+
+	it("should parse --no-coverage-cache flag", () => {
+		expect.assertions(1);
+		expect(parseArgs(["--no-coverage-cache"]).coverageCache).toBeFalse();
 	});
 
 	it("should parse --no-color flag", () => {

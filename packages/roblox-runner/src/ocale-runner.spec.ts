@@ -52,7 +52,7 @@ function makeRunner(httpClient: FakeHttpClient, readData: buffer.Buffer = rbxlBu
 describe(OcaleRunner, () => {
 	describe("uploadPlace", () => {
 		it("should publish rbxl place and return versionNumber", async () => {
-			expect.assertions(3);
+			expect.assertions(2);
 
 			const http = createFakeHttpClient();
 			http.mockResponse({ body: { versionNumber: 7 }, status: 200 });
@@ -60,7 +60,6 @@ describe(OcaleRunner, () => {
 			const runner = makeRunner(http);
 			const result = await runner.uploadPlace({ placeFilePath: "/work/test.rbxl" });
 
-			expect(result.cached).toBeFalse();
 			expect(result.versionNumber).toBe(7);
 			expect(http.requests[0]!.request.url).toContain("/places/456/versions");
 		});
@@ -81,27 +80,7 @@ describe(OcaleRunner, () => {
 			expect(headers["Content-Type"] ?? headers["content-type"]).toMatch(/xml/i);
 		});
 
-		it("should reuse cached upload on second call with same file content", async () => {
-			expect.assertions(3);
-
-			const http = createFakeHttpClient();
-			http.mockResponse({ body: { versionNumber: 1 }, status: 200 });
-
-			const unique = buffer.Buffer.concat([
-				rbxlBuffer(),
-				buffer.Buffer.from(`cache-${Date.now()}-${Math.random()}`),
-			]);
-			const runner = makeRunner(http, unique);
-
-			const first = await runner.uploadPlace({ cache: true, placeFilePath: "/work/p.rbxl" });
-			const second = await runner.uploadPlace({ cache: true, placeFilePath: "/work/p.rbxl" });
-
-			expect(first.cached).toBeFalse();
-			expect(second.cached).toBeTrue();
-			expect(http.requests).toHaveLength(1);
-		});
-
-		it("should re-upload when cache option is false", async () => {
+		it("should always upload on repeat calls with identical bytes", async () => {
 			expect.assertions(1);
 
 			const http = createFakeHttpClient();
@@ -110,8 +89,8 @@ describe(OcaleRunner, () => {
 
 			const runner = makeRunner(http);
 
-			await runner.uploadPlace({ cache: false, placeFilePath: "/work/p.rbxl" });
-			await runner.uploadPlace({ cache: false, placeFilePath: "/work/p.rbxl" });
+			await runner.uploadPlace({ placeFilePath: "/work/p.rbxl" });
+			await runner.uploadPlace({ placeFilePath: "/work/p.rbxl" });
 
 			expect(http.requests).toHaveLength(2);
 		});
