@@ -22,6 +22,36 @@ local function fail(err: string)
 	}
 end
 
+-- Mirrors @rbxts-js/roblox-shared/src/normalizePromiseError.lua: when Jest's
+-- internal Promise chain rejects (e.g. process.exit fires via nodeUtils:25),
+-- the rejection value is a Promise.Error table whose `.error` field at every
+-- non-leaf level is `tostring(parent)` — the upstream Promise.Error __tostring
+-- blob. Walking to the deepest parent recovers the original cause string
+-- ("Exited with code: 1") instead of a multi-frame trace. Depth-capped to
+-- defend against future cycles (a Promise.Error pointing at itself would
+-- otherwise hang the test task until the infinite-yield watchdog fires).
+local MAX_PROMISE_ERROR_DEPTH = 64
+local function normalizePromiseError(err: any): string
+	if type(err) ~= "table" then
+		return tostring(err)
+	end
+
+	local current: any = err
+	for _ = 1, MAX_PROMISE_ERROR_DEPTH do
+		if type(current.parent) ~= "table" then
+			break
+		end
+
+		current = current.parent
+	end
+
+	if type(current.error) == "string" then
+		return current.error
+	end
+
+	return tostring(err)
+end
+
 type CapturedMessage = { message: string, messageType: number, timestamp: number }
 
 local function interceptWriteable(writeable: any, buffer: { CapturedMessage }, messageType: number)
@@ -158,7 +188,7 @@ function module.run(callingScript: LuaSourceContainer, config: Config): (string,
 		SetupTiming.unpatch(setupTimingState)
 
 		if not runCLIOk then
-			error(runCLIValue, 0)
+			error(normalizePromiseError(runCLIValue), 0)
 		end
 
 		local jestResult = runCLIValue

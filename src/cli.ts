@@ -254,6 +254,33 @@ function formatGameOutputLines(raw: string | undefined): string | undefined {
 	return entries.map((entry) => entry.message.replace(/^/gm, "  ")).join("\n");
 }
 
+const EXIT_CODE_MESSAGE = /^Exited with code: \d+$/;
+
+function formatLuauErrorBanner(err: LuauScriptError): string {
+	const gameLines = formatGameOutputLines(err.gameOutput);
+
+	// When the message is just "Exited with code: N", Jest's real error is in
+	// the captured stdout, not in the message itself — surface stdout as the
+	// primary content and demote the exit-code transport to a dim footer.
+	if (EXIT_CODE_MESSAGE.test(err.message) && gameLines !== undefined) {
+		const body = [gameLines, `\n  ${color.dim(err.message)}`];
+		return formatBanner({ body, level: "error", title: "Test Run Failed" });
+	}
+
+	const body = [color.red(err.message)];
+
+	const hint = getLuauErrorHint(err.message);
+	if (hint !== undefined) {
+		body.push(`\n  ${color.dim("Hint:")} ${hint}`);
+	}
+
+	if (gameLines !== undefined) {
+		body.push(`\n  ${color.dim("Game output:")}\n${gameLines}`);
+	}
+
+	return formatBanner({ body, level: "error", title: "Luau Error" });
+}
+
 function printError(err: unknown): void {
 	if (err instanceof ConfigError) {
 		const body = [color.red(err.message)];
@@ -263,19 +290,7 @@ function printError(err: unknown): void {
 
 		process.stderr.write(formatBanner({ body, level: "error", title: "Config Error" }));
 	} else if (err instanceof LuauScriptError) {
-		const body = [color.red(err.message)];
-
-		const hint = getLuauErrorHint(err.message);
-		if (hint !== undefined) {
-			body.push(`\n  ${color.dim("Hint:")} ${hint}`);
-		}
-
-		const gameLines = formatGameOutputLines(err.gameOutput);
-		if (gameLines !== undefined) {
-			body.push(`\n  ${color.dim("Game output:")}\n${gameLines}`);
-		}
-
-		process.stderr.write(formatBanner({ body, level: "error", title: "Luau Error" }));
+		process.stderr.write(formatLuauErrorBanner(err));
 	} else if (err instanceof Error) {
 		console.error(`Error: ${err.message}`);
 	} else {

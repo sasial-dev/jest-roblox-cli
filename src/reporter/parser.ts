@@ -112,14 +112,57 @@ function isValidJson(text: string): boolean {
 	}
 }
 
-function extractExecutionError(object: Record<string, unknown>): string {
-	// Traverse nested parent chain to find root error
-	let current = object;
-	while (current["parent"] !== undefined && typeof current["parent"] === "object") {
-		current = current["parent"] as Record<string, unknown>;
+const PROMISE_TRACE_HEADER = /^-- Promise\.Error\(/;
+// Accept zero-or-more spaces after the second colon so we also catch
+// `path:N:msg` from Luau `error(msg, 0)` calls that don't add a space.
+const PROMISE_TRACE_CAUSE_LINE = /:\d+:\s*(.+)$/;
+
+function looksLikePromiseTrace(text: string): boolean {
+	return PROMISE_TRACE_HEADER.test(text);
+}
+
+function extractCauseFromPromiseTrace(trace: string): string | undefined {
+	for (const rawLine of trace.split("\n").reverse()) {
+		const line = rawLine.trim();
+		if (line === "") {
+			continue;
+		}
+
+		const match = PROMISE_TRACE_CAUSE_LINE.exec(line);
+		if (match !== null) {
+			return match[1];
+		}
 	}
 
-	return typeof current["error"] === "string" ? current["error"] : "Unknown error";
+	return undefined;
+}
+
+function extractExecutionError(object: Record<string, unknown>): string {
+	// Traverse nested parent chain to find root error. `typeof null === "object"`
+	// in JS, so an explicit null guard is required to stop at the leaf.
+	let current = object;
+	while (true) {
+		const parent = current["parent"];
+		if (parent === null || typeof parent !== "object") {
+			break;
+		}
+
+		current = parent as Record<string, unknown>;
+	}
+
+	const errorValue = current["error"];
+	if (typeof errorValue !== "string") {
+		return "Unknown error";
+	}
+
+	if (looksLikePromiseTrace(errorValue)) {
+		const cause = extractCauseFromPromiseTrace(errorValue);
+		if (cause !== undefined) {
+			return cause;
+		}
+	}
+
+	return errorValue;
 }
 
 function extractLuauTiming(parsed: Record<string, unknown>): Record<string, number> | undefined {

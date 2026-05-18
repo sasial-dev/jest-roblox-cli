@@ -276,6 +276,107 @@ describe(parseJestOutput, () => {
 		);
 	});
 
+	it("should stop walking the parent chain at null rather than dereferencing it", () => {
+		// `typeof null === "object"` in JS — a null parent must not be
+		// treated as a traversable level, otherwise the walker
+		// dereferences null and throws a TypeError that swallows the
+		// real error message.
+		expect.assertions(1);
+
+		const output = JSON.stringify({
+			err: {
+				error: "actual root cause",
+				kind: "ExecutionError",
+				parent: null,
+			},
+			success: false,
+		});
+
+		expect(() => parseJestOutput(output)).toThrowWithMessage(
+			LuauScriptError,
+			"actual root cause",
+		);
+	});
+
+	it("should extract trailing message from a multi-frame Promise trace in ExecutionError.error", () => {
+		// Regression for HAL-84: when Jest's process.exit(1) chains through the
+		// Promise machinery, the encoded `err.error` ends up as the upstream
+		// Promise.Error __tostring blob with the actual cause buried in the
+		// final trace line ("...nodeUtils:25: Exited with code: 1"). Pulling
+		// the trace verbatim gives users garbage; we want the trailing message.
+		expect.assertions(1);
+
+		const promiseTrace = [
+			"-- Promise.Error(ExecutionError) --",
+			"",
+			"The Promise at:",
+			"",
+			"ReplicatedStorage.rbxts_include.node_modules.@rbxts-js.JestCore.cli:305 function runWithoutWatch",
+			"ReplicatedStorage.rbxts_include.node_modules.@rbxts-js.Promise:172 function runExecutor",
+			"",
+			"...Rejected because it was chained to the following Promise, which encountered an error:",
+			"",
+			"ReplicatedStorage.rbxts_include.node_modules.@rbxts-js.RobloxShared.nodeUtils:25: Exited with code: 1",
+			"ReplicatedStorage.rbxts_include.node_modules.@rbxts-js.RobloxShared.nodeUtils:25 function exit",
+			"ReplicatedStorage.rbxts_include.node_modules.@rbxts-js.JestCore.runJest:345",
+		].join("\n");
+
+		const output = JSON.stringify({
+			err: { error: promiseTrace, kind: "ExecutionError" },
+			success: false,
+		});
+
+		expect(() => parseJestOutput(output)).toThrowWithMessage(
+			LuauScriptError,
+			"Exited with code: 1",
+		);
+	});
+
+	it("should extract a no-space cause line from a Promise trace", () => {
+		// Luau `error(msg, 0)` emits `path:N:msg` with no space after the
+		// second colon — the cause regex must accept that shape.
+		expect.assertions(1);
+
+		const promiseTrace = [
+			"-- Promise.Error(ExecutionError) --",
+			"",
+			"The Promise at:",
+			"",
+			"ReplicatedStorage.rbxts_include.node_modules.@rbxts-js.JestCore.runJest:345:Promise rejected without an error",
+		].join("\n");
+
+		const output = JSON.stringify({
+			err: { error: promiseTrace, kind: "ExecutionError" },
+			success: false,
+		});
+
+		expect(() => parseJestOutput(output)).toThrowWithMessage(
+			LuauScriptError,
+			"Promise rejected without an error",
+		);
+	});
+
+	it("should fall back to raw error text when Promise trace has no recoverable cause line", () => {
+		// Defensive: if every line looks like a trace header/separator, we
+		// keep the raw text so we never silently swallow context.
+		expect.assertions(1);
+
+		const headerOnly = [
+			"-- Promise.Error(ExecutionError) --",
+			"",
+			"The Promise at:",
+			"",
+			"...Rejected because it was chained to the following Promise, which encountered an error:",
+		].join("\n");
+
+		const output = JSON.stringify({
+			err: { error: headerOnly, kind: "ExecutionError" },
+			success: false,
+		});
+
+		expect(() => parseJestOutput(output)).toThrowWithMessage(LuauScriptError, headerOnly);
+	});
+
 	it("should strip TaskScript prefix from Fail result error", () => {
 		expect.assertions(1);
 
