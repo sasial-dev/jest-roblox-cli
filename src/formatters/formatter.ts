@@ -840,10 +840,14 @@ function createStyles(
 	};
 }
 
+function countsTowardDuration(test: TestCaseResult): boolean {
+	return test.status === "passed" || test.status === "failed";
+}
+
 function sumFileDuration(file: TestFileResult): number {
 	let total = 0;
 	for (const test of file.testResults) {
-		if (test.duration !== undefined) {
+		if (test.duration !== undefined && countsTowardDuration(test)) {
 			total += test.duration;
 		}
 	}
@@ -974,9 +978,14 @@ function formatTestInGroup(testCase: TestCaseResult, styles: Styles): string {
 		return `${marker}${title}${duration}`;
 	}
 
-	const failedText = `     × ${testCase.title}`;
+	if (testCase.status === "failed") {
+		const failedText = `     × ${testCase.title}`;
+		return `${styles.status.fail(failedText)}${duration}`;
+	}
 
-	return `${styles.status.fail(failedText)}${duration}`;
+	// skipped / todo / disabled — duration intentionally suppressed (didn't run)
+	const symbol = testCase.status === "todo" ? "□" : "↓";
+	return styles.status.pending(`     ${symbol} ${testCase.title}`);
 }
 
 function formatDescribeGroup(
@@ -987,8 +996,14 @@ function formatDescribeGroup(
 	const lines: Array<string> = [];
 	const groupHasFailure = tests.some((testCase) => testCase.status === "failed");
 	const groupTestCount = tests.length;
-	const groupHasTimedTest = tests.some((testCase) => testCase.duration !== undefined);
-	const groupDuration = tests.reduce((sum, testCase) => sum + (testCase.duration ?? 0), 0);
+	const groupHasTimedTest = tests.some(
+		(testCase) => testCase.duration !== undefined && countsTowardDuration(testCase),
+	);
+	const groupDuration = tests.reduce((sum, testCase) => {
+		return testCase.duration !== undefined && countsTowardDuration(testCase)
+			? sum + testCase.duration
+			: sum;
+	}, 0);
 	const groupDurationStr = groupHasTimedTest ? formatDuration(groupDuration, styles) : "";
 
 	if (groupHasFailure) {

@@ -1376,11 +1376,11 @@ describe("formatResult snapshots", () => {
 
 			 ✓ src/utils.spec.ts (2 tests - 20ms)
 			 ❯ src/game.spec.ts (4 tests | 1 failed)
-			   ❯ Game (4 tests | 1 failed) 38ms
+			   ❯ Game (4 tests | 1 failed) 28ms
 			     ✓ should start 10ms
 			     ✓ should pause 10ms
 			     × should end 8ms
-			     × should restart 10ms
+			     ↓ should restart
 
 			[31m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39m[41m[37m[1m Failed Tests 1 [22m[39m[49m[31m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39m
 			  
@@ -2107,6 +2107,121 @@ describe("formatTestInGroup duration undefined", () => {
 		// The passed test line should end with the title, no "ms" suffix
 		expect(plain).toContain("✓ no-dur passes");
 		expect(plain).toContain("× no-dur fails");
+	});
+});
+
+describe("formatTestInGroup skipped statuses", () => {
+	function buildResult(skippedStatus: TestCaseResult["status"]): JestResult {
+		const fileResult: TestFileResult = {
+			numFailingTests: 1,
+			numPassingTests: 0,
+			numPendingTests: 1,
+			testFilePath: "src/skipped.spec.ts",
+			testResults: [
+				{
+					ancestorTitles: ["Suite"],
+					duration: 5,
+					failureMessages: ["Expected: 1\nReceived: 2"],
+					fullName: "Suite real failure",
+					status: "failed",
+					title: "real failure",
+				},
+				{
+					ancestorTitles: ["Suite"],
+					duration: 99,
+					failureMessages: [],
+					fullName: "Suite skipped-case",
+					status: skippedStatus,
+					title: "skipped-case",
+				},
+			],
+		};
+
+		return {
+			numFailedTests: 1,
+			numPassedTests: 0,
+			numPendingTests: 1,
+			numTotalTests: 2,
+			startTime: 0,
+			success: false,
+			testResults: [fileResult],
+		};
+	}
+
+	it("should render pending test with yellow ↓ and no ms suffix", () => {
+		expect.assertions(4);
+
+		const formatted = formatResult(buildResult("pending"), createTiming(500), {
+			...defaultOptions,
+			color: true,
+		});
+		const plain = stripVTControlCharacters(formatted);
+
+		expect(plain).toContain("↓ skipped-case");
+		expect(plain).not.toContain("× skipped-case");
+		expect(plain).not.toMatch(/skipped-case\s+\d+ms/);
+		expect(formatted).toContain("[33m     ↓ skipped-case[39m");
+	});
+
+	it("should render skipped status with yellow ↓ and no ms suffix", () => {
+		expect.assertions(4);
+
+		const formatted = formatResult(buildResult("skipped"), createTiming(500), {
+			...defaultOptions,
+			color: true,
+		});
+		const plain = stripVTControlCharacters(formatted);
+
+		expect(plain).toContain("↓ skipped-case");
+		expect(plain).not.toContain("× skipped-case");
+		expect(plain).not.toMatch(/skipped-case\s+\d+ms/);
+		expect(formatted).toContain("[33m     ↓ skipped-case[39m");
+	});
+
+	it("should render todo status with yellow □ and no ms suffix", () => {
+		expect.assertions(4);
+
+		const formatted = formatResult(buildResult("todo"), createTiming(500), {
+			...defaultOptions,
+			color: true,
+		});
+		const plain = stripVTControlCharacters(formatted);
+
+		expect(plain).toContain("□ skipped-case");
+		expect(plain).not.toContain("× skipped-case");
+		expect(plain).not.toMatch(/skipped-case\s+\d+ms/);
+		expect(formatted).toContain("[33m     □ skipped-case[39m");
+	});
+
+	it("should render disabled status with yellow ↓ and no ms suffix", () => {
+		expect.assertions(4);
+
+		const formatted = formatResult(buildResult("disabled"), createTiming(500), {
+			...defaultOptions,
+			color: true,
+		});
+		const plain = stripVTControlCharacters(formatted);
+
+		expect(plain).toContain("↓ skipped-case");
+		expect(plain).not.toContain("× skipped-case");
+		expect(plain).not.toMatch(/skipped-case\s+\d+ms/);
+		expect(formatted).toContain("[33m     ↓ skipped-case[39m");
+	});
+
+	it("should exclude skipped test duration from group aggregate", () => {
+		expect.assertions(3);
+
+		// buildResult has failed.duration=5 and skipped.duration=99. The group
+		// header total must reflect only counted (passed/failed) durations.
+		const formatted = formatResult(buildResult("pending"), createTiming(500), {
+			...defaultOptions,
+			color: false,
+		});
+		const plain = stripVTControlCharacters(formatted);
+
+		expect(plain).toContain("Suite (2 tests | 1 failed) 5ms");
+		expect(plain).not.toContain("104ms");
+		expect(plain).not.toContain("99ms");
 	});
 });
 

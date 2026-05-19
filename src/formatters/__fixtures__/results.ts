@@ -125,6 +125,7 @@ export const MIXED_RESULT: JestResult = {
 				}),
 				createTestCase({
 					ancestorTitles: ["Game"],
+					duration: undefined,
 					fullName: "Game should restart",
 					status: "pending",
 					title: "should restart",
