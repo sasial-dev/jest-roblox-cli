@@ -91,7 +91,8 @@ export async function outputSingleResult(
 	runGitHubActionsFormatter(config, mergedResult, runtimeResult?.sourceMapper);
 
 	const snapshotsPersisted = (runtimeResult?.snapshotWriteFailures ?? 0) === 0;
-	const passed = mergedResult.success && coveragePassed && snapshotsPersisted;
+	const snapshotsCurrent = (mergedResult.snapshot?.unchecked ?? 0) === 0;
+	const passed = mergedResult.success && coveragePassed && snapshotsPersisted && snapshotsCurrent;
 	if (!config.silent && config.collectCoverage) {
 		printFinalStatus(passed);
 	}
@@ -231,7 +232,8 @@ export async function outputMultiResult(
 	runGitHubActionsFormatter(config, mergedResult, merged.sourceMapper);
 
 	const snapshotsPersisted = (merged.snapshotWriteFailures ?? 0) === 0;
-	const passed = mergedResult.success && coveragePassed && snapshotsPersisted;
+	const snapshotsCurrent = (mergedResult.snapshot?.unchecked ?? 0) === 0;
+	const passed = mergedResult.success && coveragePassed && snapshotsPersisted && snapshotsCurrent;
 	if (!config.silent && config.collectCoverage) {
 		printFinalStatus(passed);
 	}

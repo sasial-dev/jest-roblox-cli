@@ -102,7 +102,7 @@
 		"eslint-plugin-pnpm": "1.6.0",
 		"jest-extended": "7.0.0",
 		"memfs": "4.57.2",
-		"publint": "0.3.18",
+		"publint": "0.3.21",
 		"tsdown": "0.22.0",
 		"type-fest": "5.5.0",
 		"typescript": "6.0.3",

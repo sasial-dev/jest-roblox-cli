@@ -227,6 +227,33 @@ describe(outputSingleResult, () => {
 		expect(code).toBe(1);
 	});
 
+	it("should return 1 when obsolete snapshots are present even if tests passed", async () => {
+		expect.assertions(1);
+
+		setupDefaults();
+		setupOutputSpies();
+
+		const code = await outputSingleResult(
+			makeConfig(),
+			makeSingleResult({
+				runtimeResult: makeExecuteResult({
+					result: makeJestResult({
+						snapshot: {
+							added: 0,
+							matched: 1,
+							total: 1,
+							unchecked: 2,
+							unmatched: 0,
+							updated: 0,
+						},
+					}),
+				}),
+			}),
+		);
+
+		expect(code).toBe(1);
+	});
+
 	it("should propagate snapshotWriteFailures into deferred runtime output", async () => {
 		expect.assertions(1);
 
@@ -410,6 +437,50 @@ describe(outputMultiResult, () => {
 					{
 						displayName: "client",
 						result: makeExecuteResult({ snapshotWriteFailures: 1 }),
+					},
+					{
+						displayName: "server",
+						result: makeExecuteResult(),
+					},
+				],
+			}),
+		);
+
+		expect(code).toBe(1);
+	});
+
+	it("should return 1 when any project had obsolete snapshots", async () => {
+		expect.assertions(1);
+
+		setupDefaults();
+		mocks.mergeSnapshotSummaries.mockReturnValue({
+			added: 0,
+			matched: 0,
+			total: 0,
+			unchecked: 1,
+			unmatched: 0,
+			updated: 0,
+		});
+		setupOutputSpies();
+
+		const code = await outputMultiResult(
+			makeConfig(),
+			makeMultiResult({
+				projectResults: [
+					{
+						displayName: "client",
+						result: makeExecuteResult({
+							result: makeJestResult({
+								snapshot: {
+									added: 0,
+									matched: 0,
+									total: 0,
+									unchecked: 1,
+									unmatched: 0,
+									updated: 0,
+								},
+							}),
+						}),
 					},
 					{
 						displayName: "server",
