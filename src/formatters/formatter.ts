@@ -1082,8 +1082,7 @@ function formatExecErrorFileSummary(
 ): Array<string> {
 	const symbol = styles.status.fail("✗");
 	assert(file.failureMessage !== undefined, "exec error files have failureMessage");
-	const errorMessage = cleanExecErrorMessage(file.failureMessage);
-	return [` ${symbol} ${formattedPath}`, `   ${styles.status.fail(errorMessage)}`];
+	return [` ${symbol} ${formattedPath}`];
 }
 
 function formatPass(test: TestCaseResult, styles: Styles): string {

@@ -1617,6 +1617,21 @@ describe("formatResult exec errors", () => {
 
 		expect(output).toContain("View /tmp/results.json for full Jest output");
 	});
+
+	it("should render the exec-error message exactly once", () => {
+		expect.assertions(1);
+
+		const output = formatResult(EXEC_ERROR_RESULT, TIMING, {
+			...defaultOptions,
+			color: false,
+		});
+
+		const occurrences =
+			output.split("Require-by-string is not enabled for use inside Jest at this time.")
+				.length - 1;
+
+		expect(occurrences).toBe(1);
+	});
 });
 
 describe("formatResult exec error snapshots", () => {
@@ -1637,7 +1652,6 @@ describe("formatResult exec error snapshots", () => {
 			 RUN  v1.0.0 /project
 
 			 ✗ shared/react/features/windows/__tests__/unit-menu-app.test
-			   Require-by-string is not enabled for use inside Jest at this time.
 
 			[31m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39m[41m[37m[1m Failed Tests 1 [22m[39m[49m[31m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39m
 			   FAIL  shared/react/features/windows/__tests__/unit-menu-app.test
@@ -1665,7 +1679,6 @@ describe("formatResult exec error snapshots", () => {
 
 			 ✓ src/utils.spec.ts (3 tests - 30ms)
 			 ✗ src/broken.spec.ts
-			   Require-by-string is not enabled for use inside Jest at this time.
 
 			[31m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39m[41m[37m[1m Failed Tests 1 [22m[39m[49m[31m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39m
 			   FAIL  src/broken.spec.ts
