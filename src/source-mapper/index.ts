@@ -7,7 +7,7 @@ import type { TsconfigMapping } from "../types/tsconfig.ts";
 import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
 import { replacePrefix } from "../utils/tsconfig-mapping.ts";
 import { findExpectationColumn } from "./column-finder.ts";
-import { createPathResolver } from "./path-resolver.ts";
+import { createPathResolver, luauInitToIndex } from "./path-resolver.ts";
 import { parseStack } from "./stack-parser.ts";
 import { getSourceContent, mapFromSourceMap } from "./v3-mapper.ts";
 
@@ -30,6 +30,7 @@ export interface MappedFailure {
 export interface SourceMapper {
 	mapFailureMessage(message: string): string;
 	mapFailureWithLocations(message: string): MappedFailure;
+	resolveDisplayPath(testFilePath: string): string;
 	resolveTestFilePath(testFilePath: string): string | undefined;
 }
 
@@ -174,12 +175,19 @@ export function createSourceMapper(config: SourceMapperConfig): SourceMapper {
 			return { locations, message: mappedMessage };
 		},
 
-		resolveTestFilePath(testFilePath: string): string | undefined {
-			const normalized = testFilePath.replace(/^\//, "");
-			const dataModelPath = normalized.replaceAll("/", ".");
-			return pathResolver.resolve(dataModelPath)?.filePath;
+		resolveDisplayPath(testFilePath: string): string {
+			const resolved = resolveTestFilePath(testFilePath) ?? testFilePath;
+			return config.mappings.length > 0 ? luauInitToIndex(resolved) : resolved;
 		},
+
+		resolveTestFilePath,
 	};
+
+	function resolveTestFilePath(testFilePath: string): string | undefined {
+		const normalized = testFilePath.replace(/^\//, "");
+		const dataModelPath = normalized.replaceAll("/", ".");
+		return pathResolver.resolve(dataModelPath)?.filePath;
+	}
 }
 
 /**
@@ -227,6 +235,20 @@ export function combineSourceMappers(
 			}
 
 			return { locations, message: mappedMessage };
+		},
+
+		resolveDisplayPath(testFilePath: string): string {
+			// Ownership gate: only let a child rewrite if it can actually
+			// resolve the path. Without this, a roblox-ts mapper would apply
+			// `init→index` to paths owned by other projects (incl. pure-Luau
+			// projects whose on-disk file is genuinely `init.*`).
+			for (const mapper of mappers) {
+				if (mapper.resolveTestFilePath(testFilePath) !== undefined) {
+					return mapper.resolveDisplayPath(testFilePath);
+				}
+			}
+
+			return testFilePath;
 		},
 
 		resolveTestFilePath(testFilePath: string): string | undefined {

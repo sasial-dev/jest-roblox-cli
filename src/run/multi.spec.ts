@@ -441,6 +441,7 @@ describe(runMultiProject, () => {
 						sourceMapper: {
 							mapFailureMessage: (message) => `[${tag}] ${message}`,
 							mapFailureWithLocations: (message) => ({ locations: [], message }),
+							resolveDisplayPath: (testFilePath) => testFilePath,
 							resolveTestFilePath: () => {},
 						},
 					});

@@ -268,7 +268,7 @@ export function parseSourceLocation(message: string): SourceLocation | undefined
 }
 
 export function resolveDisplayPath(testFilePath: string, sourceMapper?: SourceMapper): string {
-	return sourceMapper?.resolveTestFilePath(testFilePath) ?? testFilePath;
+	return sourceMapper?.resolveDisplayPath(testFilePath) ?? testFilePath;
 }
 
 export function formatFailure({
@@ -1410,7 +1410,11 @@ function resolveSourceSnippets(options: {
 	}
 
 	if (hasSnapshotDiff && filePath !== undefined) {
-		const resolvedPath = resolveDisplayPath(filePath, sourceMapper);
+		// File I/O: need a real on-disk path. `resolveDisplayPath` may rewrite
+		// `init.spec.luau` → `index.spec.luau` for roblox-ts, but the on-disk
+		// file is still `init.*`, so reading would fail and the snippet would
+		// silently disappear.
+		const resolvedPath = sourceMapper?.resolveTestFilePath(filePath) ?? filePath;
 		return formatSnapshotCallSnippet(resolvedPath, styles, useColor);
 	}
 

@@ -17,6 +17,11 @@ interface PathResolverConfig {
 	mappings?: ReadonlyArray<TsconfigMapping>;
 }
 
+/** roblox-ts compiles index.ts → init.luau; reverse the rename for TS paths. */
+export function luauInitToIndex(filePath: string): string {
+	return filePath.replace(/(^|\/)(init)(\.|\/)/, "$1index$3");
+}
+
 export function createPathResolver(
 	rojoProject: RojoProject,
 	config?: PathResolverConfig,
@@ -92,11 +97,6 @@ function convertToFilePath(suffix: string): string {
 	}
 
 	return result.join("/");
-}
-
-/** roblox-ts compiles index.ts → init.luau; reverse the rename for TS paths. */
-function luauInitToIndex(filePath: string): string {
-	return filePath.replace(/(^|\/)(init)(\.|\/)/, "$1index$3");
 }
 
 function findLuaFile(basePath: string): string {

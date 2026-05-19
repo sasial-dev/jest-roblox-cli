@@ -426,6 +426,92 @@ Received: "world"
 	});
 });
 
+describe("resolveDisplayPath", () => {
+	it("should rewrite init to index for unmapped Luau path in roblox-ts project", () => {
+		expect.assertions(1);
+
+		const rojoProject = {
+			name: "test",
+			tree: {
+				ReplicatedStorage: {
+					"flux:tests": { $path: "out-test" },
+				},
+			},
+		};
+
+		const mapper = createSourceMapper({
+			mappings: [{ outDir: "out", rootDir: "src" }],
+			rojoProject,
+		});
+
+		expect(mapper.resolveDisplayPath("/ReplicatedStorage/flux:tests/init.spec")).toBe(
+			"out-test/index.spec.luau",
+		);
+	});
+
+	it("should rewrite init to index for unresolvable raw path in roblox-ts project", () => {
+		expect.assertions(1);
+
+		const rojoProject = {
+			name: "test",
+			tree: {
+				ReplicatedStorage: {
+					$path: "out/shared",
+				},
+			},
+		};
+
+		const mapper = createSourceMapper({
+			mappings: [{ outDir: "out", rootDir: "src" }],
+			rojoProject,
+		});
+
+		expect(mapper.resolveDisplayPath("src/init.spec")).toBe("src/index.spec");
+	});
+
+	it("should leave init untouched in pure-Luau project", () => {
+		expect.assertions(1);
+
+		const rojoProject = {
+			name: "test",
+			tree: {
+				ReplicatedStorage: {
+					$path: "out/shared",
+				},
+			},
+		};
+
+		const mapper = createSourceMapper({
+			mappings: [],
+			rojoProject,
+		});
+
+		expect(mapper.resolveDisplayPath("src/init.spec")).toBe("src/init.spec");
+	});
+
+	it("should be idempotent for already-resolved TS path", () => {
+		expect.assertions(1);
+
+		const rojoProject = {
+			name: "test",
+			tree: {
+				ReplicatedStorage: {
+					$path: "out/shared",
+				},
+			},
+		};
+
+		const mapper = createSourceMapper({
+			mappings: [{ outDir: "out", rootDir: "src" }],
+			rojoProject,
+		});
+
+		expect(mapper.resolveDisplayPath("src/shared/index.spec.ts")).toBe(
+			"src/shared/index.spec.ts",
+		);
+	});
+});
+
 describe(combineSourceMappers, () => {
 	function makeStub(tag: string): SourceMapper {
 		return {
@@ -436,6 +522,7 @@ describe(combineSourceMappers, () => {
 					message: message.replace(tag, `${tag}_TS`),
 				};
 			},
+			resolveDisplayPath: (file) => (file === `${tag}.spec` ? `${tag}.spec.ts` : file),
 			resolveTestFilePath: (file) => (file === `${tag}.spec` ? `${tag}.spec.ts` : undefined),
 		};
 	}
@@ -479,6 +566,37 @@ describe(combineSourceMappers, () => {
 
 		expect(composite?.resolveTestFilePath("B.spec")).toBe("B.spec.ts");
 		expect(composite?.resolveTestFilePath("missing")).toBeUndefined();
+	});
+
+	it("should return the first resolveDisplayPath hit and fall back otherwise", () => {
+		expect.assertions(2);
+
+		const composite = combineSourceMappers([makeStub("A"), makeStub("B")]);
+
+		expect(composite?.resolveDisplayPath("B.spec")).toBe("B.spec.ts");
+		expect(composite?.resolveDisplayPath("missing")).toBe("missing");
+	});
+
+	it("should not let a non-owning roblox-ts child rewrite another project's path", () => {
+		expect.assertions(1);
+
+		const robloxTs = createSourceMapper({
+			mappings: [{ outDir: "out", rootDir: "src" }],
+			rojoProject: { name: "ts", tree: { ReplicatedStorage: { $path: "out/shared" } } },
+		});
+		const luauOnly = createSourceMapper({
+			mappings: [],
+			rojoProject: { name: "luau", tree: { ServerStorage: { lib: { $path: "lib" } } } },
+		});
+
+		const composite = combineSourceMappers([robloxTs, luauOnly]);
+
+		// Path belongs to the pure-Luau project (`lib/init.spec.luau` is the real
+		// on-disk file). The roblox-ts mapper cannot resolve it, so the combiner
+		// must NOT apply init→index just because the rewrite changes the string.
+		expect(composite?.resolveDisplayPath("/ServerStorage/lib/init.spec")).toBe(
+			"lib/init.spec.luau",
+		);
 	});
 });
 

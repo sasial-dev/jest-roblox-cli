@@ -401,6 +401,7 @@ describe("formatAgent failure details", () => {
 						].join("\n"),
 					};
 				},
+				resolveDisplayPath: (testFilePath: string) => testFilePath,
 				resolveTestFilePath: () => {},
 			}),
 		});
@@ -535,6 +536,7 @@ describe("formatAgent snippets", () => {
 						message: "src/player.spec.ts:10",
 					};
 				},
+				resolveDisplayPath: (testFilePath: string) => testFilePath,
 				resolveTestFilePath: () => {},
 			}),
 		});
@@ -612,6 +614,7 @@ describe("formatAgent snippets", () => {
 						message: "D:/project/src/test.spec.ts:10",
 					};
 				},
+				resolveDisplayPath: (testFilePath: string) => testFilePath,
 				resolveTestFilePath: () => {},
 			}),
 		});
@@ -677,6 +680,7 @@ describe("formatAgent snippets", () => {
 						message: "src/test.spec.ts:10",
 					};
 				},
+				resolveDisplayPath: (testFilePath: string) => testFilePath,
 				resolveTestFilePath: () => {},
 			}),
 		});
@@ -740,6 +744,7 @@ describe("formatAgent snippets", () => {
 						message: "src/test.spec.ts:10",
 					};
 				},
+				resolveDisplayPath: (testFilePath: string) => testFilePath,
 				resolveTestFilePath: () => {},
 			}),
 		});
@@ -798,6 +803,7 @@ describe("formatAgent snippets", () => {
 						message: "out/player.spec.luau:15",
 					};
 				},
+				resolveDisplayPath: (testFilePath: string) => testFilePath,
 				resolveTestFilePath: () => {},
 			}),
 		});
@@ -846,6 +852,7 @@ describe("formatAgent snippets", () => {
 						message: "out/player.spec.luau:15",
 					};
 				},
+				resolveDisplayPath: (testFilePath: string) => testFilePath,
 				resolveTestFilePath: () => {},
 			}),
 		});
@@ -884,6 +891,7 @@ describe("formatAgent snippets", () => {
 			rootDir: "/project",
 			sourceMapper: fromPartial({
 				mapFailureWithLocations: (message: string) => ({ locations: [], message }),
+				resolveDisplayPath: (testFilePath: string) => testFilePath,
 				resolveTestFilePath: () => {},
 			}),
 		});
@@ -931,6 +939,7 @@ describe("formatAgent snippets", () => {
 			rootDir: "/project",
 			sourceMapper: fromPartial({
 				mapFailureWithLocations: (message: string) => ({ locations: [], message }),
+				resolveDisplayPath: (testFilePath: string) => testFilePath,
 				resolveTestFilePath: () => {},
 			}),
 		});
@@ -1056,6 +1065,7 @@ describe("formatAgent source mapping", () => {
 						message: "lib/test.spec.luau:5",
 					};
 				},
+				resolveDisplayPath: (testFilePath: string) => testFilePath,
 				resolveTestFilePath: () => {},
 			}),
 		});
@@ -1092,6 +1102,7 @@ describe("formatAgent source mapping", () => {
 			rootDir: "/project",
 			sourceMapper: fromPartial({
 				mapFailureWithLocations: (message: string) => ({ locations: [], message }),
+				resolveDisplayPath: () => "src/client/example/test.spec.ts",
 				resolveTestFilePath: () => "src/client/example/test.spec.ts",
 			}),
 		});
@@ -1193,6 +1204,7 @@ describe("formatAgent edge cases", () => {
 			rootDir: "D:\\roblox\\project",
 			sourceMapper: fromPartial({
 				mapFailureWithLocations: (message: string) => ({ locations: [], message }),
+				resolveDisplayPath: () => "D:/roblox/project/src/test.spec.ts",
 				resolveTestFilePath: () => "D:/roblox/project/src/test.spec.ts",
 			}),
 		});
@@ -1231,6 +1243,7 @@ describe("formatAgent edge cases", () => {
 			rootDir: "D:/roblox/project",
 			sourceMapper: fromPartial({
 				mapFailureWithLocations: (message: string) => ({ locations: [], message }),
+				resolveDisplayPath: () => "D:/roblox/project/src/test.spec.ts",
 				resolveTestFilePath: () => "D:/roblox/project/src/test.spec.ts",
 			}),
 		});

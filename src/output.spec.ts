@@ -1199,6 +1199,7 @@ describe(mergeProjectResults, () => {
 		const sourceMapper = {
 			mapFailureMessage: (message: string) => `[a] ${message}`,
 			mapFailureWithLocations: (message: string) => ({ locations: [], message }),
+			resolveDisplayPath: (testFilePath: string) => testFilePath,
 			resolveTestFilePath: (): undefined => undefined,
 		};
 		const a = makeExecuteResult({ sourceMapper });

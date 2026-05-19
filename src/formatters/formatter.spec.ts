@@ -2886,6 +2886,7 @@ describe("formatResult testFilePath resolution", () => {
 							message,
 						};
 					},
+					resolveDisplayPath: () => "src/client/example/test.spec.ts",
 					resolveTestFilePath: () => "src/client/example/test.spec.ts",
 				}),
 			}),
@@ -2893,6 +2894,53 @@ describe("formatResult testFilePath resolution", () => {
 
 		expect(output).toContain("src/client/example/test.spec.ts");
 		expect(output).not.toContain("ReplicatedStorage");
+	});
+
+	it("should display init.spec as index.spec when sourceMapper rewrites it", () => {
+		expect.assertions(2);
+
+		const result: JestResult = {
+			numFailedTests: 0,
+			numPassedTests: 1,
+			numPendingTests: 0,
+			numTotalTests: 1,
+			startTime: 1700000000000,
+			success: true,
+			testResults: [
+				{
+					numFailingTests: 0,
+					numPassingTests: 1,
+					numPendingTests: 0,
+					testFilePath: "src/init.spec",
+					testResults: [
+						{
+							ancestorTitles: ["root"],
+							duration: 1,
+							failureMessages: [],
+							fullName: "root passes",
+							status: "passed" as const,
+							title: "passes",
+						},
+					],
+				},
+			],
+		};
+
+		const output = stripVTControlCharacters(
+			formatResult(result, TIMING, {
+				...defaultOptions,
+				color: false,
+				sourceMapper: fromPartial({
+					mapFailureWithLocations: (message: string) => ({ locations: [], message }),
+					resolveDisplayPath: (testFilePath: string) =>
+						testFilePath.replace("init.spec", "index.spec"),
+					resolveTestFilePath: () => {},
+				}),
+			}),
+		);
+
+		expect(output).toContain("src/index.spec");
+		expect(output).not.toContain("src/init.spec");
 	});
 });
 
