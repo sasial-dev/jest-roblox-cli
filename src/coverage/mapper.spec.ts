@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { CoverageMap } from "./coverage-map.ts";
 import type { CoverageManifest } from "./manifest.ts";
+import { MANIFEST_VERSION } from "./manifest.ts";
 import { CoverageMapMalformedError, mapCoverageToTypeScript } from "./mapper.ts";
 import type { RawCoverageData } from "./types.ts";
 
@@ -42,7 +43,7 @@ function createManifest(files: CoverageManifest["files"] = {}): CoverageManifest
 		luauRoots: ["out"],
 		nonInstrumentedFiles: {},
 		shadowDir: ".jest-roblox/coverage/out",
-		version: 1,
+		version: MANIFEST_VERSION,
 	};
 }
 

@@ -12,7 +12,7 @@ import process from "node:process";
  * probe-inserter is intentionally not formalized here: it has no serialization
  * boundary, so the TypeScript interface is sufficient.
  */
-export const MANIFEST_VERSION = 1;
+export const MANIFEST_VERSION = 2 as const;
 
 export interface InstrumentedFileRecord {
 	key: string;

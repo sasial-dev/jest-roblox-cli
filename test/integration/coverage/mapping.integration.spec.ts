@@ -5,6 +5,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 
 import { INSTRUMENTER_VERSION, instrumentRoot } from "../../../src/coverage/instrumenter.ts";
 import type { CoverageManifest, InstrumentedFileRecord } from "../../../src/coverage/manifest.ts";
+import { MANIFEST_VERSION } from "../../../src/coverage/manifest.ts";
 import { mapCoverageToTypeScript } from "../../../src/coverage/mapper.ts";
 import type { RawCoverageData } from "../../../src/coverage/types.ts";
 import { normalizeWindowsPath } from "../../../src/utils/normalize-windows-path.ts";
@@ -33,7 +34,7 @@ function buildManifest(
 		luauRoots: [normalize(fixtureOut)],
 		nonInstrumentedFiles: {},
 		shadowDir: normalize(shadowDirectory),
-		version: 1,
+		version: MANIFEST_VERSION,
 	};
 }
 

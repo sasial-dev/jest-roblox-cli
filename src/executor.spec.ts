@@ -10,6 +10,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { Backend, BackendOptions, BackendResult } from "./backends/interface.ts";
 import type { ResolvedConfig } from "./config/schema.ts";
 import { DEFAULT_CONFIG } from "./config/schema.ts";
+import { MANIFEST_VERSION } from "./coverage/manifest.ts";
 import type { RawCoverageData } from "./coverage/types.ts";
 import {
 	type ExecuteResult,
@@ -2014,7 +2015,7 @@ describe(loadCoverageManifest, () => {
 		fs.mkdirSync(coverageDirectory, { recursive: true });
 		fs.writeFileSync(
 			path.join(coverageDirectory, "manifest.json"),
-			JSON.stringify({ version: 1, wrong: "schema" }),
+			JSON.stringify({ version: MANIFEST_VERSION, wrong: "schema" }),
 		);
 		const spy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
 
@@ -2065,7 +2066,7 @@ describe(loadCoverageManifest, () => {
 			luauRoots: ["out"],
 			nonInstrumentedFiles: {},
 			shadowDir: ".jest-roblox/coverage/out",
-			version: 1,
+			version: MANIFEST_VERSION,
 		};
 		fs.writeFileSync(path.join(coverageDirectory, "manifest.json"), JSON.stringify(manifest));
 		const result = loadCoverageManifest(temporaryDirectory);
@@ -2098,7 +2099,7 @@ describe(loadCoverageManifest, () => {
 			luauRoots: ["out"],
 			nonInstrumentedFiles: {},
 			shadowDir: ".jest-roblox/coverage/out",
-			version: 1,
+			version: MANIFEST_VERSION,
 		};
 		fs.writeFileSync(path.join(coverageDirectory, "manifest.json"), JSON.stringify(manifest));
 		const spy = vi.spyOn(process.stderr, "write").mockReturnValue(true);

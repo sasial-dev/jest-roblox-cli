@@ -5,6 +5,7 @@ import * as cp from "node:child_process";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { instrument, instrumentRoot } from "./instrumenter.ts";
+import { MANIFEST_VERSION } from "./manifest.ts";
 
 vi.mock<typeof import("node:os")>(import("node:os"), async (importOriginal) => {
 	const actual = await importOriginal();
@@ -269,7 +270,7 @@ describe(instrument, () => {
 				shadowDir: "/shadow",
 			});
 
-			expect(result.version).toBe(1);
+			expect(result.version).toBe(MANIFEST_VERSION);
 			expect(result.shadowDir).toBeDefined();
 			expect(result.generatedAt).toBeDefined();
 		});

@@ -17,6 +17,7 @@ import {
 } from "../config/schema.ts";
 import { createSetupResolver } from "../config/setup-resolver.ts";
 import { generateProjectStubs, syncStubsToShadowDirectory } from "../config/stubs.ts";
+import { MANIFEST_VERSION } from "../coverage/manifest.ts";
 import { prepareCoverage } from "../coverage/prepare.ts";
 import { type ExecuteResult, runProjects } from "../executor.ts";
 import { runTypecheck } from "../typecheck/runner.ts";
@@ -284,7 +285,7 @@ describe(runMultiProject, () => {
 				nonInstrumentedFiles: {},
 				placeFilePath: "/coverage/game.rbxl",
 				shadowDir: ".jest-roblox/coverage",
-				version: 1,
+				version: MANIFEST_VERSION,
 			},
 			placeFile: "/coverage/game.rbxl",
 		});
@@ -317,7 +318,7 @@ describe(runMultiProject, () => {
 					nonInstrumentedFiles: {},
 					placeFilePath: "/coverage/game.rbxl",
 					shadowDir: ".jest-roblox/coverage",
-					version: 1,
+					version: MANIFEST_VERSION,
 				},
 				placeFile: "/coverage/game.rbxl",
 			};

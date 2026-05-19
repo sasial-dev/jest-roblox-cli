@@ -10,6 +10,7 @@ import type { ResolvedConfig } from "../config/schema.ts";
 import { DEFAULT_CONFIG } from "../config/schema.ts";
 import { INSTRUMENTER_VERSION } from "./instrumenter.ts";
 import type { CoverageManifest, InstrumentedFileRecord } from "./manifest.ts";
+import { MANIFEST_VERSION } from "./manifest.ts";
 import { prepareWorkspaceCoverage } from "./workspace-prepare.ts";
 
 function sha256(content: string): string {
@@ -329,7 +330,7 @@ describe(prepareWorkspaceCoverage, () => {
 			luauRoots: [],
 			nonInstrumentedFiles: {},
 			shadowDir: "x",
-			version: 1,
+			version: MANIFEST_VERSION,
 		};
 
 		vol.fromJSON({
@@ -387,7 +388,7 @@ describe(prepareWorkspaceCoverage, () => {
 			luauRoots: [],
 			nonInstrumentedFiles: {},
 			shadowDir: "x",
-			version: 1,
+			version: MANIFEST_VERSION,
 		};
 
 		vol.fromJSON({
@@ -425,7 +426,7 @@ describe(prepareWorkspaceCoverage, () => {
 		},
 		{
 			name: "schema-invalid manifest",
-			body: JSON.stringify({ files: "not-an-object", version: 1 }),
+			body: JSON.stringify({ files: "not-an-object", version: MANIFEST_VERSION }),
 			expectedWarning: "is invalid",
 		},
 	])("should warn and discard the cache for $name", async ({ body, expectedWarning }) => {
@@ -495,7 +496,7 @@ describe(prepareWorkspaceCoverage, () => {
 			luauRoots: [`${packageShadow}/out`],
 			nonInstrumentedFiles: {},
 			shadowDir: packageShadow,
-			version: 1,
+			version: MANIFEST_VERSION,
 		};
 
 		// Manifest claims init.luau is fully cached, but the shadow files
@@ -564,7 +565,7 @@ describe(prepareWorkspaceCoverage, () => {
 			luauRoots: [`${packageShadow}/out`],
 			nonInstrumentedFiles: {},
 			shadowDir: packageShadow,
-			version: 1,
+			version: MANIFEST_VERSION,
 		};
 
 		vol.fromJSON({
@@ -643,7 +644,7 @@ describe(prepareWorkspaceCoverage, () => {
 				},
 			},
 			shadowDir: packageShadow,
-			version: 1,
+			version: MANIFEST_VERSION,
 		};
 
 		vol.fromJSON({

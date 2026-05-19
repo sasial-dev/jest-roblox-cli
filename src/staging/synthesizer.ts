@@ -1,4 +1,4 @@
-import { loadRojoProject } from "@isentinel/rojo-utils";
+import { loadRojoProject, resolveNestedProjects } from "@isentinel/rojo-utils";
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -11,6 +11,13 @@ import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
 export interface StubMount {
 	absStubPath: string;
 	dataModelPath: string;
+}
+
+export interface CoverageRoot {
+	/** Path relative to `packageDirectory` that points at the original luau root. */
+	luauRoot: string;
+	/** Absolute path to the instrumented shadow directory for the same root. */
+	shadowDir: string;
 }
 
 export interface PackageDescriptor {
@@ -27,15 +34,15 @@ export interface PackageDescriptor {
 	stubMounts?: Array<StubMount>;
 }
 
-interface CoverageRoot {
-	/** Path relative to `packageDirectory` that points at the original luau root. */
-	luauRoot: string;
-	/** Absolute path to the instrumented shadow directory for the same root. */
-	shadowDir: string;
-}
-
 interface SynthesizeInput {
 	packages: Array<PackageDescriptor>;
+	/**
+	 * Default `true`: wrap each package under `ServerStorage.__pkg_stage.<name>`
+	 * (multi-package workspace mode). Set to `false` for single-package
+	 * coverage — the package's project tree is emitted verbatim so the runtime
+	 * layout matches a direct `rojo build`.
+	 */
+	wrap?: boolean;
 }
 
 const STUB_INJECTION_KEY = "jest.config";
@@ -71,16 +78,23 @@ const SERVICE_CLASSES = new Set([
 const SERVICE_PROPERTIES = new Set(["AutoRuns", "ExecuteWithStudioRun", "LoadStringEnabled"]);
 
 interface AbsolutizeOptions {
+	/** Base for resolving `coverageRoots[].luauRoot`. Typically `packageDirectory`. */
+	coverageBase: string;
 	coverageRoots: Array<CoverageRoot> | undefined;
 }
 
 export function synthesize(input: SynthesizeInput): string {
+	if (input.wrap === false) {
+		return synthesizeNoWrap(input.packages);
+	}
+
 	const stage: RojoTreeNode = { $className: "Folder" };
 
 	for (const descriptor of input.packages) {
 		const project = loadRojoProject(descriptor.rojoProjectPath);
 		const folder = transformToFolder(project.tree);
 		const root = absolutizePaths(folder, path.dirname(descriptor.rojoProjectPath), {
+			coverageBase: descriptor.packageDirectory,
 			coverageRoots: descriptor.coverageRoots,
 		});
 		injectStubMounts(root, descriptor.stubMounts);
@@ -102,71 +116,6 @@ export function synthesize(input: SynthesizeInput): string {
 	return stableStringify({ name: "jest-roblox-workspace", tree });
 }
 
-function isTreeNode(value: RojoTreeNode[string]): value is RojoTreeNode {
-	return typeof value === "object" && !("optional" in value);
-}
-
-function resolveDollarPath(
-	value: string,
-	base: string,
-	coverageRoots: Array<CoverageRoot> | undefined,
-): string {
-	const absoluteTarget = normalizeWindowsPath(path.resolve(base, value));
-
-	if (coverageRoots === undefined) {
-		return absoluteTarget;
-	}
-
-	// CoverageRoot.luauRoot is package-relative; resolve against the same base
-	// (which is the rojo project dir, == package dir in the common case) and
-	// strip any trailing slash so a rojo `$path: "out/"` matches a
-	// `luauRoot: "out"` exactly.
-	const resolvedRoots = coverageRoots.map((root) => {
-		return {
-			luauRoot: normalizeWindowsPath(path.resolve(base, root.luauRoot)).replace(/\/$/, ""),
-			shadowDir: normalizeWindowsPath(root.shadowDir),
-		};
-	});
-
-	return redirectPathToShadow(absoluteTarget, resolvedRoots) ?? absoluteTarget;
-}
-
-function absolutizePaths(
-	node: RojoTreeNode,
-	base: string,
-	options: AbsolutizeOptions,
-): RojoTreeNode {
-	const result: RojoTreeNode = {};
-	for (const [key, value] of Object.entries(node)) {
-		if (key === "$path" && typeof value === "string") {
-			result[key] = resolveDollarPath(value, base, options.coverageRoots);
-			continue;
-		}
-
-		if (!key.startsWith("$") && isTreeNode(value)) {
-			result[key] = absolutizePaths(value, base, options);
-			continue;
-		}
-
-		result[key] = value;
-	}
-
-	return result;
-}
-
-function transformToFolder(node: RojoTreeNode): RojoTreeNode {
-	const folder: RojoTreeNode = { $className: "Folder" };
-	for (const [key, value] of Object.entries(node)) {
-		if (key === "$className" || key === "$properties") {
-			continue;
-		}
-
-		folder[key] = transformValue(key, value);
-	}
-
-	return folder;
-}
-
 function sortKeys(value: unknown): unknown {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) {
 		return value;
@@ -183,6 +132,110 @@ function sortKeys(value: unknown): unknown {
 
 function stableStringify(value: unknown): string {
 	return String(JSON.stringify(sortKeys(value), undefined, 2));
+}
+
+function isTreeNode(value: RojoTreeNode[string]): value is RojoTreeNode {
+	return typeof value === "object" && !("optional" in value);
+}
+
+function resolveDollarPath(
+	value: string,
+	treeBase: string,
+	coverageBase: string,
+	coverageRoots: Array<CoverageRoot> | undefined,
+): string {
+	const absoluteTarget = normalizeWindowsPath(path.resolve(treeBase, value));
+
+	if (coverageRoots === undefined) {
+		return absoluteTarget;
+	}
+
+	// `$path` resolves against `treeBase` (rojo project directory) per rojo's
+	// convention. `luauRoot` resolves against `coverageBase` (package
+	// directory) because that's the documented contract for coverage roots,
+	// and the two diverge whenever a project file lives in a subdirectory of
+	// its package. Trailing slash on `luauRoot` is stripped so `$path: "out/"`
+	// matches `luauRoot: "out"` exactly.
+	const resolvedRoots = coverageRoots.map((root) => {
+		return {
+			luauRoot: normalizeWindowsPath(path.resolve(coverageBase, root.luauRoot)).replace(
+				/\/$/,
+				"",
+			),
+			shadowDir: normalizeWindowsPath(root.shadowDir),
+		};
+	});
+
+	return redirectPathToShadow(absoluteTarget, resolvedRoots) ?? absoluteTarget;
+}
+
+function absolutizePaths(
+	node: RojoTreeNode,
+	treeBase: string,
+	options: AbsolutizeOptions,
+): RojoTreeNode {
+	const result: RojoTreeNode = {};
+	for (const [key, value] of Object.entries(node)) {
+		if (key === "$path" && typeof value === "string") {
+			result[key] = resolveDollarPath(
+				value,
+				treeBase,
+				options.coverageBase,
+				options.coverageRoots,
+			);
+			continue;
+		}
+
+		if (!key.startsWith("$") && isTreeNode(value)) {
+			result[key] = absolutizePaths(value, treeBase, options);
+			continue;
+		}
+
+		result[key] = value;
+	}
+
+	return result;
+}
+
+function synthesizeNoWrap(packages: Array<PackageDescriptor>): string {
+	if (packages.length !== 1) {
+		throw new ConfigError(
+			`synthesize wrap:false requires exactly one package, got ${String(packages.length)}`,
+		);
+	}
+
+	// eslint-disable-next-line ts/no-non-null-assertion -- length-1 invariant
+	const descriptor = packages[0]!;
+
+	// loadRojoProject validates name/tree shape; raw JSON preserves top-level
+	// fields (gameId, placeId, globIgnorePaths, etc.) that the loader narrows
+	// away.
+	loadRojoProject(descriptor.rojoProjectPath);
+
+	const raw = JSON.parse(fs.readFileSync(descriptor.rojoProjectPath, "utf-8")) as Record<
+		string,
+		unknown
+	>;
+	const rawTree = raw["tree"] as RojoTreeNode;
+	const resolvedTree = resolveNestedProjects(rawTree, path.dirname(descriptor.rojoProjectPath));
+	const tree = absolutizePaths(resolvedTree, path.dirname(descriptor.rojoProjectPath), {
+		coverageBase: descriptor.packageDirectory,
+		coverageRoots: descriptor.coverageRoots,
+	});
+	return stableStringify({ ...raw, tree });
+}
+
+function transformToFolder(node: RojoTreeNode): RojoTreeNode {
+	const folder: RojoTreeNode = { $className: "Folder" };
+	for (const [key, value] of Object.entries(node)) {
+		if (key === "$className" || key === "$properties") {
+			continue;
+		}
+
+		folder[key] = transformValue(key, value);
+	}
+
+	return folder;
 }
 
 function demoteAutoMountToExplicit(parent: RojoTreeNode, parentPath: string): void {

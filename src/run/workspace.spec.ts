@@ -8,6 +8,7 @@ import type { Backend, BackendOptions, BackendResult } from "../backends/interfa
 import { createOpenCloudBackend, resolveOpenCloudBaseUrl } from "../backends/open-cloud.ts";
 import type { CliOptions, ResolvedConfig } from "../config/schema.ts";
 import { DEFAULT_CONFIG } from "../config/schema.ts";
+import { MANIFEST_VERSION } from "../coverage/manifest.ts";
 import type { ExecuteResult } from "../executor.ts";
 import type { JestResult } from "../types/jest-result.ts";
 import { runWorkspace } from "../workspace-runner.ts";
@@ -471,7 +472,7 @@ describe(runWorkspaceMode, () => {
 				luauRoots: [],
 				nonInstrumentedFiles: {},
 				shadowDir: "/shadow",
-				version: 1 as const,
+				version: MANIFEST_VERSION,
 			};
 			vi.mocked(runWorkspace).mockResolvedValue([
 				{
@@ -531,7 +532,7 @@ describe(runWorkspaceMode, () => {
 				luauRoots: [],
 				nonInstrumentedFiles: {},
 				shadowDir: "/shadow",
-				version: 1 as const,
+				version: MANIFEST_VERSION,
 			};
 			vi.mocked(runWorkspace).mockResolvedValue([
 				// Two projects under the same pkg — coverageData must MERGE
@@ -589,7 +590,7 @@ describe(runWorkspaceMode, () => {
 				luauRoots: [],
 				nonInstrumentedFiles: {},
 				shadowDir: "/shadow",
-				version: 1 as const,
+				version: MANIFEST_VERSION,
 			};
 			vi.mocked(runWorkspace).mockResolvedValue([
 				{
@@ -651,7 +652,7 @@ describe(runWorkspaceMode, () => {
 				luauRoots: [],
 				nonInstrumentedFiles: {},
 				shadowDir: "/shadow",
-				version: 1 as const,
+				version: MANIFEST_VERSION,
 			};
 			// Per-package opt-in: the workspace runner instrumented foo and
 			// attached a manifest. The outer `runWorkspaceMode` must still

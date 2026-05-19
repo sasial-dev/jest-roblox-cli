@@ -10,6 +10,7 @@ import type { Backend, BackendOptions, BackendResult } from "./backends/interfac
 import { loadConfig } from "./config/loader.ts";
 import type { CliOptions, ResolvedConfig } from "./config/schema.ts";
 import { DEFAULT_CONFIG } from "./config/schema.ts";
+import { MANIFEST_VERSION } from "./coverage/manifest.ts";
 import { prepareWorkStealingQueue } from "./memory-store/work-stealing.ts";
 import { runWorkspace } from "./workspace-runner.ts";
 
@@ -976,7 +977,7 @@ describe(runWorkspace, () => {
 						luauRoots: [],
 						nonInstrumentedFiles: {},
 						shadowDir: "/shadow",
-						version: 1,
+						version: MANIFEST_VERSION,
 					},
 					manifestPath: "/shadow/manifest.json",
 					pkg: "@halcyon/foo",
@@ -1030,7 +1031,7 @@ describe(runWorkspace, () => {
 						luauRoots: [],
 						nonInstrumentedFiles: {},
 						shadowDir: "/shadow",
-						version: 1,
+						version: MANIFEST_VERSION,
 					},
 					manifestPath: "/shadow/manifest.json",
 					pkg: "@halcyon/foo",
@@ -1077,7 +1078,7 @@ describe(runWorkspace, () => {
 				luauRoots: [],
 				nonInstrumentedFiles: {},
 				shadowDir: "/shadow",
-				version: 1 as const,
+				version: MANIFEST_VERSION,
 			};
 			vi.mocked(prepareWorkspaceCoverage).mockReturnValue([
 				{

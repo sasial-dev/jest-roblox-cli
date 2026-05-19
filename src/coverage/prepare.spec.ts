@@ -7,14 +7,16 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import type { ResolvedConfig } from "../config/schema.ts";
 import { DEFAULT_CONFIG } from "../config/schema.ts";
+import type { RojoProject } from "../types/rojo.ts";
+import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
 import { INSTRUMENTER_VERSION } from "./instrumenter.ts";
 import type {
 	CoverageManifest,
 	InstrumentedFileRecord,
 	NonInstrumentedFileRecord,
 } from "./manifest.ts";
+import { MANIFEST_VERSION } from "./manifest.ts";
 import { collectLuauRootsFromRojo, prepareCoverage, resolveLuauRoots } from "./prepare.ts";
-import type { RojoProject } from "./rojo-rewriter.ts";
 import { discoverInstrumentableFiles } from "./shadow-root.ts";
 
 vi.mock(import("node:fs"), async () => {
@@ -224,7 +226,7 @@ describe(prepareCoverage, () => {
 			await setupMocks();
 			const config = makeConfig({ luauRoots: ["out-tsc/test"] });
 
-			expect(() => prepareCoverage(config)).toThrow(/Malformed Rojo project JSON/);
+			expect(() => prepareCoverage(config)).toThrow(/Rojo project must have/);
 		});
 
 		it("should throw when no Rojo project is found", async () => {
@@ -239,8 +241,8 @@ describe(prepareCoverage, () => {
 		});
 	});
 
-	describe("when computing projectRelocation", () => {
-		it("should pass projectRelocation to rewriteRojoProject based on project file location", async () => {
+	describe("when computing $path entries for the rewritten project", () => {
+		it("should absolutize $path entries so the rewritten project resolves regardless of its disk location", async () => {
 			expect.assertions(2);
 
 			const projectWithExternal = {
@@ -256,8 +258,6 @@ describe(prepareCoverage, () => {
 				},
 			};
 
-			// Use rootDir "." so rojo project is at ./default.project.json
-			// and coverage dir is .jest-roblox/coverage/ — both relative
 			vol.mkdirSync(".", { recursive: true });
 			vol.mkdirSync("out-tsc/test", { recursive: true });
 			vol.writeFileSync("out-tsc/test/init.luau", "local x = 1");
@@ -273,12 +273,57 @@ describe(prepareCoverage, () => {
 			) as Record<string, unknown>;
 			const tree = written["tree"] as Record<string, Record<string, string>>;
 
-			// Matching path: stripped shadow prefix (relative to relocated
-			// project)
-			expect(tree["ReplicatedStorage"]!["$path"]).toBe("out-tsc/test/client");
-			// Non-matching path: rebased with "../.." to reach original project
-			// dir (cache lives at .jest-roblox/coverage/, two segments deep).
-			expect(tree["ServerScriptService"]!["$path"]).toBe("../../include");
+			// Matching path: absolute path inside the shadow dir.
+			expect(tree["ReplicatedStorage"]!["$path"]).toBe(
+				normalizeWindowsPath(path.resolve(".jest-roblox/coverage/out-tsc/test/client")),
+			);
+			// Non-matching path: absolute path to the original source dir.
+			expect(tree["ServerScriptService"]!["$path"]).toBe(
+				normalizeWindowsPath(path.resolve("include")),
+			);
+		});
+	});
+
+	describe("when rojoProject lives outside rootDir", () => {
+		it("should redirect luauRoot against rootDir, not the rojo project's directory", async () => {
+			expect.assertions(1);
+
+			// Project file in a `config/` subdirectory mounts `../out` (the
+			// real source root). rootDir stays at the package root, luauRoot
+			// is the rootDir-relative "out".
+			const project = {
+				name: "test",
+				tree: {
+					$className: "DataModel",
+					ReplicatedStorage: { $path: "../out" },
+				},
+			};
+
+			vol.mkdirSync("config", { recursive: true });
+			vol.mkdirSync("out", { recursive: true });
+			vol.writeFileSync("out/init.luau", "local x = 1");
+			vol.writeFileSync("config/dev.project.json", JSON.stringify(project));
+
+			await setupMocks();
+			const config = makeConfig({
+				luauRoots: ["out"],
+				rojoProject: "config/dev.project.json",
+				rootDir: ".",
+			});
+
+			prepareCoverage(config);
+
+			const written: Record<string, unknown> = JSON.parse(
+				vol.readFileSync(".jest-roblox/coverage/dev.project.json", "utf-8") as string,
+			) as Record<string, unknown>;
+			const tree = written["tree"] as Record<string, Record<string, string>>;
+
+			// $path "../out" resolves against "config" → absolute "out";
+			// luauRoot "out" resolves against rootDir "." → absolute "out";
+			// match → redirect to shadow dir.
+			expect(tree["ReplicatedStorage"]!["$path"]).toBe(
+				normalizeWindowsPath(path.resolve(".jest-roblox/coverage/out")),
+			);
 		});
 	});
 
@@ -331,9 +376,11 @@ describe(prepareCoverage, () => {
 			const tree = written["tree"] as Record<string, Record<string, Record<string, string>>>;
 
 			// The nested $path: "default.project.json" is resolved to $path:
-			// "src". "src" is already relative to the shadow directory, so no
-			// rewrite needed.
-			expect(tree["ReplicatedStorage"]!["uuid-generator"]!["$path"]).toBe("src");
+			// "src", absolutized, then redirected to the instrumented shadow
+			// dir since "src" matches the configured luauRoot.
+			expect(tree["ReplicatedStorage"]!["uuid-generator"]!["$path"]).toBe(
+				normalizeWindowsPath(path.resolve(".jest-roblox/coverage/src")),
+			);
 		});
 	});
 
@@ -441,7 +488,7 @@ describe(prepareCoverage, () => {
 				nonInstrumentedFiles: previousNonInstrumentedFiles,
 				placeFilePath: previousPlaceFilePath,
 				shadowDir: ".jest-roblox/coverage",
-				version: 1,
+				version: MANIFEST_VERSION,
 			});
 		}
 
@@ -847,7 +894,7 @@ describe(prepareCoverage, () => {
 					instrumenterVersion: INSTRUMENTER_VERSION,
 					luauRoots: ["out-tsc/test"],
 					shadowDir: ".jest-roblox/coverage",
-					version: 1,
+					version: MANIFEST_VERSION,
 				}),
 			);
 
@@ -911,7 +958,7 @@ describe(prepareCoverage, () => {
 				nonInstrumentedFiles: {},
 				placeFilePath: ".jest-roblox/coverage/game.rbxl",
 				shadowDir: ".jest-roblox/coverage",
-				version: 1,
+				version: MANIFEST_VERSION,
 			});
 
 			const config = makeConfig({
@@ -1137,7 +1184,7 @@ describe(prepareCoverage, () => {
 						instrumenterVersion: INSTRUMENTER_VERSION,
 						luauRoots: ["out-tsc/test"],
 						shadowDir: ".jest-roblox/coverage",
-						version: 1,
+						version: MANIFEST_VERSION,
 					}),
 				);
 
@@ -1257,7 +1304,7 @@ describe(prepareCoverage, () => {
 					},
 					placeFilePath: ".jest-roblox/coverage/game.rbxl",
 					shadowDir: ".jest-roblox/coverage",
-					version: 1,
+					version: MANIFEST_VERSION,
 				});
 
 				const config = makeConfig({

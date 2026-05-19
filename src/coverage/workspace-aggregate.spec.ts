@@ -4,6 +4,7 @@ import { vol } from "memfs";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import type { CoverageManifest } from "./manifest.ts";
+import { MANIFEST_VERSION } from "./manifest.ts";
 import type { RawCoverageData } from "./types.ts";
 import { aggregateWorkspaceCoverage } from "./workspace-aggregate.ts";
 
@@ -21,7 +22,7 @@ function manifestStub(): CoverageManifest {
 		luauRoots: [],
 		nonInstrumentedFiles: {},
 		shadowDir: "/shadow",
-		version: 1,
+		version: MANIFEST_VERSION,
 	};
 }
 

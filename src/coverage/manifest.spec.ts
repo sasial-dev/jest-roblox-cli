@@ -147,14 +147,29 @@ describe(readManifest, () => {
 			vol.reset();
 		});
 
-		const manifest = { ...exampleManifest(), version: 2 };
+		const otherVersion = MANIFEST_VERSION + 1;
+		const manifest = { ...exampleManifest(), version: otherVersion };
 		vol.mkdirSync("/coverage", { recursive: true });
 		vol.writeFileSync("/coverage/manifest.json", JSON.stringify(manifest));
 
 		const mismatch = expectVersionMismatch(readManifest("/coverage/manifest.json"));
 
 		expect(mismatch.expected).toBe(MANIFEST_VERSION);
-		expect(mismatch.actual).toBe(2);
+		expect(mismatch.actual).toBe(otherVersion);
+	});
+
+	it("should reject caches written by the pre-rojo-rewriter-collapse layout (version 1)", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		const manifest = { ...exampleManifest(), version: 1 };
+		vol.mkdirSync("/coverage", { recursive: true });
+		vol.writeFileSync("/coverage/manifest.json", JSON.stringify(manifest));
+
+		expect(readManifest("/coverage/manifest.json").kind).toBe("version-mismatch");
 	});
 
 	it("should return invalid (not version-mismatch) when version field is absent", () => {

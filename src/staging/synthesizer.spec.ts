@@ -1683,4 +1683,324 @@ describe(synthesize, () => {
 
 		expect(ordered).toBe(reversed);
 	});
+
+	describe("no-wrap mode (single-package coverage)", () => {
+		it("should return the package's project tree without ServerStorage.__pkg_stage wrap", () => {
+			expect.assertions(2);
+
+			vol.reset();
+
+			vol.fromJSON({
+				[FOO_PROJECT]: projectJson({
+					name: "foo-test",
+					tree: {
+						$className: "DataModel",
+						ReplicatedStorage: { $className: "ReplicatedStorage", $path: "src" },
+					},
+				}),
+				[path.join(FOO_DIR, "src/init.luau")]: "",
+			});
+
+			const result = synthesize({
+				packages: [
+					{
+						name: "@halcyon/foo",
+						packageDirectory: FOO_DIR,
+						rojoProjectPath: FOO_PROJECT,
+					},
+				],
+				wrap: false,
+			});
+
+			const parsed = JSON.parse(result) as {
+				tree: {
+					$className: string;
+					ReplicatedStorage: { $className: string };
+					ServerStorage?: { __pkg_stage?: unknown };
+				};
+			};
+
+			expect(parsed.tree.ReplicatedStorage.$className).toBe("ReplicatedStorage");
+			expect(parsed.tree.ServerStorage?.__pkg_stage).toBeUndefined();
+		});
+
+		it("should preserve all top-level project fields (gameId, placeId, globIgnorePaths, servePort, name)", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			vol.fromJSON({
+				[FOO_PROJECT]: projectJson({
+					name: "foo-test",
+					gameId: 99,
+					globIgnorePaths: ["**/foo.txt"],
+					placeId: 100,
+					servePort: 12345,
+					tree: { $className: "DataModel" },
+				}),
+			});
+
+			const result = synthesize({
+				packages: [
+					{
+						name: "@halcyon/foo",
+						packageDirectory: FOO_DIR,
+						rojoProjectPath: FOO_PROJECT,
+					},
+				],
+				wrap: false,
+			});
+
+			expect(JSON.parse(result)).toMatchObject({
+				name: "foo-test",
+				gameId: 99,
+				globIgnorePaths: ["**/foo.txt"],
+				placeId: 100,
+				servePort: 12345,
+			});
+		});
+
+		it("should absolutize $path entries against path.dirname(rojoProjectPath)", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			vol.fromJSON({
+				[FOO_PROJECT]: projectJson({
+					name: "foo-test",
+					tree: {
+						$className: "DataModel",
+						ReplicatedStorage: { $className: "ReplicatedStorage", $path: "src" },
+					},
+				}),
+				[path.join(FOO_DIR, "src/init.luau")]: "",
+			});
+
+			const result = synthesize({
+				packages: [
+					{
+						name: "@halcyon/foo",
+						packageDirectory: FOO_DIR,
+						rojoProjectPath: FOO_PROJECT,
+					},
+				],
+				wrap: false,
+			});
+
+			const parsed = JSON.parse(result) as {
+				tree: { ReplicatedStorage: { $path: string } };
+			};
+
+			expect(parsed.tree.ReplicatedStorage.$path).toBe(
+				normalizeWindowsPath(path.join(FOO_DIR, "src")),
+			);
+		});
+
+		it("should redirect $path entries under coverageRoots[].luauRoot to the shadow directory", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			const shadowDirectory = path.join(FOO_DIR, ".jest-roblox/coverage/src");
+			vol.fromJSON({
+				[FOO_PROJECT]: projectJson({
+					name: "foo-test",
+					tree: {
+						$className: "DataModel",
+						ReplicatedStorage: { $className: "ReplicatedStorage", $path: "src" },
+					},
+				}),
+				[path.join(FOO_DIR, "src/init.luau")]: "",
+			});
+
+			const result = synthesize({
+				packages: [
+					{
+						name: "@halcyon/foo",
+						coverageRoots: [{ luauRoot: "src", shadowDir: shadowDirectory }],
+						packageDirectory: FOO_DIR,
+						rojoProjectPath: FOO_PROJECT,
+					},
+				],
+				wrap: false,
+			});
+
+			const parsed = JSON.parse(result) as {
+				tree: { ReplicatedStorage: { $path: string } };
+			};
+
+			expect(parsed.tree.ReplicatedStorage.$path).toBe(normalizeWindowsPath(shadowDirectory));
+		});
+
+		it("should redirect coverageRoots[].luauRoot resolved against packageDirectory when rojoProject sits in a subdirectory", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			const subProject = path.join(FOO_DIR, "config/dev.project.json");
+			const shadowDirectory = path.join(FOO_DIR, ".jest-roblox/coverage/out");
+			vol.fromJSON({
+				[path.join(FOO_DIR, "out/init.luau")]: "",
+				[subProject]: projectJson({
+					name: "foo-test",
+					tree: {
+						$className: "DataModel",
+						ReplicatedStorage: { $className: "ReplicatedStorage", $path: "../out" },
+					},
+				}),
+			});
+
+			const result = synthesize({
+				packages: [
+					{
+						name: "@halcyon/foo",
+						coverageRoots: [{ luauRoot: "out", shadowDir: shadowDirectory }],
+						packageDirectory: FOO_DIR,
+						rojoProjectPath: subProject,
+					},
+				],
+				wrap: false,
+			});
+
+			const parsed = JSON.parse(result) as {
+				tree: { ReplicatedStorage: { $path: string } };
+			};
+
+			expect(parsed.tree.ReplicatedStorage.$path).toBe(normalizeWindowsPath(shadowDirectory));
+		});
+	});
+
+	describe("wrap mode (workspace) dual-base resolution", () => {
+		it("should redirect coverageRoots[].luauRoot resolved against packageDirectory when rojoProject sits in a subdirectory", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			const subProject = path.join(FOO_DIR, "config/dev.project.json");
+			const shadowDirectory = path.join(FOO_DIR, ".jest-roblox/coverage/out");
+			vol.fromJSON({
+				[path.join(FOO_DIR, "out/init.luau")]: "",
+				[subProject]: projectJson({
+					name: "foo-test",
+					tree: {
+						$className: "DataModel",
+						ReplicatedStorage: { $className: "ReplicatedStorage", $path: "../out" },
+					},
+				}),
+			});
+
+			const result = synthesize({
+				packages: [
+					{
+						name: "@halcyon/foo",
+						coverageRoots: [{ luauRoot: "out", shadowDir: shadowDirectory }],
+						packageDirectory: FOO_DIR,
+						rojoProjectPath: subProject,
+					},
+				],
+			});
+
+			const parsed = JSON.parse(result) as {
+				tree: {
+					ServerStorage: {
+						__pkg_stage: Record<string, { ReplicatedStorage: { $path: string } }>;
+					};
+				};
+			};
+
+			expect(
+				parsed.tree.ServerStorage.__pkg_stage["@halcyon/foo"]?.ReplicatedStorage.$path,
+			).toBe(normalizeWindowsPath(shadowDirectory));
+		});
+	});
+
+	describe("no-wrap mode validation", () => {
+		it("should throw ConfigError when wrap=false with zero packages", () => {
+			expect.assertions(1);
+			expect(() => synthesize({ packages: [], wrap: false })).toThrow(ConfigError);
+		});
+
+		it("should resolve nested .project.json mounts in no-wrap mode", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			const nestedProject = path.join(FOO_DIR, "nested.project.json");
+			vol.fromJSON({
+				[FOO_PROJECT]: projectJson({
+					name: "foo-test",
+					tree: {
+						$className: "DataModel",
+						ReplicatedStorage: {
+							$className: "ReplicatedStorage",
+							Common: { $path: "nested.project.json" },
+						},
+					},
+				}),
+				[nestedProject]: projectJson({
+					name: "nested-test",
+					tree: {
+						$className: "Folder",
+						Sub: { $path: "src" },
+					},
+				}),
+				[path.join(FOO_DIR, "src/init.luau")]: "",
+			});
+
+			const result = synthesize({
+				packages: [
+					{
+						name: "@halcyon/foo",
+						packageDirectory: FOO_DIR,
+						rojoProjectPath: FOO_PROJECT,
+					},
+				],
+				wrap: false,
+			});
+
+			const parsed = JSON.parse(result) as {
+				tree: { ReplicatedStorage: { Common: { Sub: { $path: string } } } };
+			};
+
+			expect(parsed.tree.ReplicatedStorage.Common.Sub.$path).toBe(
+				normalizeWindowsPath(path.join(FOO_DIR, "src")),
+			);
+		});
+
+		it("should throw ConfigError when wrap=false with more than one package", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			const barProject = path.join(ROOT, "packages/bar/test.project.json");
+			vol.fromJSON({
+				[barProject]: projectJson({
+					name: "bar-test",
+					tree: { $className: "DataModel" },
+				}),
+				[FOO_PROJECT]: projectJson({
+					name: "foo-test",
+					tree: { $className: "DataModel" },
+				}),
+			});
+
+			expect(() => {
+				return synthesize({
+					packages: [
+						{
+							name: "@halcyon/foo",
+							packageDirectory: FOO_DIR,
+							rojoProjectPath: FOO_PROJECT,
+						},
+						{
+							name: "@halcyon/bar",
+							packageDirectory: path.join(ROOT, "packages/bar"),
+							rojoProjectPath: barProject,
+						},
+					],
+					wrap: false,
+				});
+			}).toThrow(ConfigError);
+		});
+	});
 });

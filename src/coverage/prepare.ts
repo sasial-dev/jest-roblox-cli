@@ -1,6 +1,5 @@
 import { collectPaths, resolveNestedProjects } from "@isentinel/rojo-utils";
 
-import { type } from "arktype";
 import { getTsconfig } from "get-tsconfig";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -8,7 +7,9 @@ import process from "node:process";
 import picomatch from "picomatch";
 
 import type { ResolvedConfig } from "../config/schema.ts";
-import { rojoProjectSchema } from "../types/rojo.ts";
+import type { CoverageRoot } from "../staging/synthesizer.ts";
+import { synthesize } from "../staging/synthesizer.ts";
+import type { RojoProject } from "../types/rojo.ts";
 import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
 import { buildWithRojo } from "../utils/rojo-builder.ts";
 import { INSTRUMENTER_VERSION } from "./instrumenter.ts";
@@ -18,8 +19,6 @@ import type {
 	NonInstrumentedFileRecord,
 } from "./manifest.ts";
 import { MANIFEST_VERSION, readManifest, writeManifest } from "./manifest.ts";
-import type { RojoProject, RootEntry } from "./rojo-rewriter.ts";
-import { rewriteRojoProject } from "./rojo-rewriter.ts";
 import { cleanupDeletedFiles, detectDeletedFiles, prepareShadowRoot } from "./shadow-root.ts";
 
 const COVERAGE_DIR = ".jest-roblox/coverage";
@@ -90,7 +89,7 @@ export function prepareCoverage(
 
 	const allFiles: Record<string, InstrumentedFileRecord> = {};
 	const allNonInstrumented: Record<string, NonInstrumentedFileRecord> = {};
-	const roots: Array<RootEntry> = [];
+	const coverageRoots: Array<CoverageRoot> = [];
 	let hasChanges = !useIncremental;
 
 	for (const luauRoot of luauRoots) {
@@ -108,12 +107,9 @@ export function prepareCoverage(
 
 		Object.assign(allFiles, result.files);
 		Object.assign(allNonInstrumented, result.nonInstrumentedFiles);
-		roots.push({
+		coverageRoots.push({
 			luauRoot: result.luauRoot,
-			relocatedShadowDirectory: normalizeWindowsPath(
-				path.relative(COVERAGE_DIR, result.shadowDir),
-			),
-			shadowDir: result.shadowDir,
+			shadowDir: normalizeWindowsPath(path.resolve(result.shadowDir)),
 		});
 	}
 
@@ -146,7 +142,7 @@ export function prepareCoverage(
 		return { manifest, placeFile: previousManifest.placeFilePath };
 	}
 
-	buildRojoProject(rojoProjectPath, roots, placeFile);
+	buildRojoProject(rojoProjectPath, config.rootDir, coverageRoots, placeFile);
 
 	return { manifest, placeFile };
 }
@@ -239,26 +235,24 @@ function validateRelativeRoots(luauRoots: Array<string>): void {
 
 function buildRojoProject(
 	rojoProjectPath: string,
-	roots: Array<RootEntry>,
+	packageDirectory: string,
+	coverageRoots: Array<CoverageRoot>,
 	placeFile: string,
 ): void {
-	const rojoProjectRaw = rojoProjectSchema(JSON.parse(fs.readFileSync(rojoProjectPath, "utf-8")));
-	if (rojoProjectRaw instanceof type.errors) {
-		throw new Error(`Malformed Rojo project JSON: ${rojoProjectRaw.toString()}`);
-	}
+	const synthesized = synthesize({
+		packages: [
+			{
+				name: "jest-roblox-coverage",
+				coverageRoots,
+				packageDirectory: path.resolve(packageDirectory),
+				rojoProjectPath: path.resolve(rojoProjectPath),
+			},
+		],
+		wrap: false,
+	});
 
-	const projectRelocation = normalizeWindowsPath(
-		path.relative(COVERAGE_DIR, path.dirname(rojoProjectPath)),
-	);
-
-	const resolved = {
-		...rojoProjectRaw,
-		tree: resolveNestedProjects(rojoProjectRaw.tree, path.dirname(rojoProjectPath)),
-	};
-	const rewritten = rewriteRojoProject(resolved, { projectRelocation, roots });
 	const rewrittenProjectPath = path.join(COVERAGE_DIR, path.basename(rojoProjectPath));
-
-	fs.writeFileSync(rewrittenProjectPath, JSON.stringify(rewritten, undefined, "\t"));
+	fs.writeFileSync(rewrittenProjectPath, synthesized);
 	buildWithRojo(rewrittenProjectPath, placeFile);
 }
 
