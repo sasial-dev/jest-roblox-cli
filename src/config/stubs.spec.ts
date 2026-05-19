@@ -781,6 +781,112 @@ describe(generateProjectStubs, () => {
 		expect(vol.existsSync("/root/out/Client/jest.config.luau")).toBeTrue();
 	});
 
+	it("should not emit CLI/runner default fields into the generated stub", () => {
+		expect.assertions(3);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		const project = makeResolvedProject({
+			displayName: "client",
+			rojoMounts: [{ dataModelPath: "ReplicatedStorage/Client", fsPath: "out/Client" }],
+		});
+
+		generateProjectStubs([project], "/root");
+
+		const content = vol.readFileSync("/root/out/Client/jest.config.luau", "utf8");
+
+		expect(content).not.toContain("silent =");
+		expect(content).not.toContain("verbose =");
+		expect(content).not.toContain("passWithNoTests =");
+	});
+
+	it("should not emit root CLI/runner keys when explicitly set", () => {
+		expect.assertions(4);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		const config: ResolvedConfig = {
+			...DEFAULT_CONFIG,
+			gameOutput: "out.json",
+			outputFile: "results.json",
+			port: 4242,
+			rootDir: "/root",
+		};
+		const project = makeResolvedProject({
+			config,
+			rojoMounts: [{ dataModelPath: "ReplicatedStorage/Client", fsPath: "out/Client" }],
+		});
+
+		generateProjectStubs([project], "/root");
+
+		const content = vol.readFileSync("/root/out/Client/jest.config.luau", "utf8");
+
+		expect(content).not.toContain("outputFile =");
+		expect(content).not.toContain("gameOutput =");
+		expect(content).not.toContain("port =");
+		expect(content).not.toContain("rojoProject =");
+	});
+
+	it("should not emit global-only test keys when set", () => {
+		expect.assertions(3);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		const config: ResolvedConfig = {
+			...DEFAULT_CONFIG,
+			bail: true,
+			rootDir: "/root",
+			testNamePattern: "foo",
+			updateSnapshot: true,
+		};
+		const project = makeResolvedProject({
+			config,
+			rojoMounts: [{ dataModelPath: "ReplicatedStorage/Client", fsPath: "out/Client" }],
+		});
+
+		generateProjectStubs([project], "/root");
+
+		const content = vol.readFileSync("/root/out/Client/jest.config.luau", "utf8");
+
+		expect(content).not.toContain("bail =");
+		expect(content).not.toContain("testNamePattern =");
+		expect(content).not.toContain("updateSnapshot =");
+	});
+
+	it("should emit shared jest-passthrough keys when set", () => {
+		expect.assertions(3);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		const config: ResolvedConfig = {
+			...DEFAULT_CONFIG,
+			clearMocks: true,
+			rootDir: "/root",
+			setupFiles: ["ReplicatedStorage/setup"],
+			testTimeout: 9000,
+		};
+		const project = makeResolvedProject({
+			config,
+			rojoMounts: [{ dataModelPath: "ReplicatedStorage/Client", fsPath: "out/Client" }],
+		});
+
+		generateProjectStubs([project], "/root");
+
+		const content = vol.readFileSync("/root/out/Client/jest.config.luau", "utf8");
+
+		expect(content).toContain("clearMocks = true");
+		expect(content).toContain('setupFiles = { "ReplicatedStorage/setup" }');
+		expect(content).toContain("testTimeout = 9000");
+	});
+
 	it("should route stubs to outputRoot when provided", () => {
 		expect.assertions(2);
 

@@ -524,6 +524,18 @@ const GLOBAL_ONLY_KEYS_LIST = [
 	"verbose",
 ] as const satisfies ReadonlyArray<GlobalOnlyKey>;
 
+// Keep in sync with `ProjectTestConfig`: any new field added there must
+// also be listed here to appear in generated stubs (`satisfies` checks
+// membership, not exhaustiveness).
+const PROJECT_TEST_KEYS_LIST = [
+	...SHARED_TEST_KEYS_LIST,
+	"displayName",
+	"exclude",
+	"include",
+	"outDir",
+	"root",
+] as const satisfies ReadonlyArray<keyof ProjectTestConfig>;
+
 export const SHARED_TEST_KEYS: ReadonlySet<string> = new Set<SharedKey>(SHARED_TEST_KEYS_LIST);
 
 /** Keys valid in `test:` (root) but not per-project (`projects[N].test`). */
@@ -531,6 +543,11 @@ export const GLOBAL_TEST_KEYS: ReadonlySet<string> = new Set<GlobalOnlyKey>(GLOB
 
 /** Root-level CLI/runner keys. The complement of `test:` jest-passthrough keys. */
 export const ROOT_CLI_KEYS: ReadonlySet<string> = new Set<RootCliKey>(ROOT_CLI_KEYS_LIST);
+
+/** Keys valid per-project (`projects[N].test`). Used to filter `ResolvedConfig` when generating stubs. */
+export const PROJECT_TEST_KEYS: ReadonlySet<string> = new Set<keyof ProjectTestConfig>(
+	PROJECT_TEST_KEYS_LIST,
+);
 
 /**
  * Keys excluded from jest argv when building the test runner script. Includes

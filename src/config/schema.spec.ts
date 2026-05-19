@@ -8,6 +8,7 @@ import {
 	defineProject,
 	GLOBAL_TEST_KEYS,
 	isValidBackend,
+	PROJECT_TEST_KEYS,
 	ROOT_CLI_KEYS,
 	ROOT_CLI_KEYS_LIST,
 	SHARED_TEST_KEYS,
@@ -148,6 +149,46 @@ describe("sHARED_TEST_KEYS", () => {
 		expect(SHARED_TEST_KEYS.has("verbose")).toBeFalse();
 		expect(SHARED_TEST_KEYS.has("collectCoverage")).toBeFalse();
 		expect(SHARED_TEST_KEYS.has("backend")).toBeFalse();
+	});
+});
+
+describe("pROJECT_TEST_KEYS", () => {
+	it("should contain shared jest-passthrough keys", () => {
+		expect.assertions(4);
+
+		expect(PROJECT_TEST_KEYS.has("setupFiles")).toBeTrue();
+		expect(PROJECT_TEST_KEYS.has("testMatch")).toBeTrue();
+		expect(PROJECT_TEST_KEYS.has("clearMocks")).toBeTrue();
+		expect(PROJECT_TEST_KEYS.has("testTimeout")).toBeTrue();
+	});
+
+	it("should contain project-only keys", () => {
+		expect.assertions(5);
+
+		expect(PROJECT_TEST_KEYS.has("displayName")).toBeTrue();
+		expect(PROJECT_TEST_KEYS.has("include")).toBeTrue();
+		expect(PROJECT_TEST_KEYS.has("exclude")).toBeTrue();
+		expect(PROJECT_TEST_KEYS.has("outDir")).toBeTrue();
+		expect(PROJECT_TEST_KEYS.has("root")).toBeTrue();
+	});
+
+	it("should not contain global-only test keys", () => {
+		expect.assertions(5);
+
+		expect(PROJECT_TEST_KEYS.has("verbose")).toBeFalse();
+		expect(PROJECT_TEST_KEYS.has("silent")).toBeFalse();
+		expect(PROJECT_TEST_KEYS.has("passWithNoTests")).toBeFalse();
+		expect(PROJECT_TEST_KEYS.has("bail")).toBeFalse();
+		expect(PROJECT_TEST_KEYS.has("collectCoverage")).toBeFalse();
+	});
+
+	it("should not contain root CLI keys", () => {
+		expect.assertions(4);
+
+		expect(PROJECT_TEST_KEYS.has("backend")).toBeFalse();
+		expect(PROJECT_TEST_KEYS.has("outputFile")).toBeFalse();
+		expect(PROJECT_TEST_KEYS.has("port")).toBeFalse();
+		expect(PROJECT_TEST_KEYS.has("rojoProject")).toBeFalse();
 	});
 });
 
