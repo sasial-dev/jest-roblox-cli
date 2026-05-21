@@ -6,8 +6,6 @@ import * as path from "node:path";
 import process from "node:process";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
-import type { ResolvedConfig } from "../config/schema.ts";
-import { DEFAULT_CONFIG } from "../config/schema.ts";
 import { INSTRUMENTER_VERSION } from "./instrumenter.ts";
 import type { CoverageManifest, InstrumentedFileRecord } from "./manifest.ts";
 import { MANIFEST_VERSION, manifestSchema } from "./manifest.ts";
@@ -32,10 +30,6 @@ const BAR_PROJECT = path.join(BAR_DIR, "test.project.json");
 interface SeedOptions {
 	luauRoots?: Array<string>;
 	rojoTree?: object;
-}
-
-function makeConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
-	return { ...DEFAULT_CONFIG, rootDir: WORKSPACE_ROOT, ...overrides };
 }
 
 function seedPackage(packageDirectory: string, options: SeedOptions = {}): void {
@@ -99,7 +93,6 @@ describe(prepareWorkspaceCoverage, () => {
 		await mockInstrumentRoot();
 
 		const result = prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{
 					name: "@halcyon/foo",
@@ -132,7 +125,6 @@ describe(prepareWorkspaceCoverage, () => {
 		await mockInstrumentRoot();
 
 		const result = prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{
 					name: "@halcyon/foo",
@@ -170,7 +162,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{
 					name: "@halcyon/foo",
@@ -203,7 +194,6 @@ describe(prepareWorkspaceCoverage, () => {
 		await mockInstrumentRoot();
 
 		const result = prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 				{ name: "@halcyon/bar", packageDirectory: BAR_DIR, rojoProjectPath: BAR_PROJECT },
@@ -241,7 +231,6 @@ describe(prepareWorkspaceCoverage, () => {
 		await mockInstrumentRoot();
 
 		const [result] = prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -290,7 +279,6 @@ describe(prepareWorkspaceCoverage, () => {
 		await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig({ coverageCache: false }),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -303,37 +291,48 @@ describe(prepareWorkspaceCoverage, () => {
 		expect(vol.existsSync(path.join(packageShadow, "out/init.luau"))).toBeTrue();
 	});
 
-	it("should bypass the cache when coverageCache is disabled", async () => {
+	it("should bypass a full cache hit when the descriptor opts out via per-pkg coverageCache (HAL-231)", async () => {
 		expect.assertions(1);
 
 		onTestFinished(() => {
 			vol.reset();
 		});
 
+		// HAL-231: cache opt-out is per-package. Set up a full cache-hit
+		// scenario (matching `should skip instrumentRoot on a full cache
+		// hit` below) — the workspace-root config keeps the default
+		// `coverageCache: true`, the manifest matches the current source, and
+		// the only thing forcing re-instrumentation is the per-pkg
+		// descriptor's `coverageCache: false`.
 		const sourceContent = "local x = 1";
-		const fileKey = `${path.join(FOO_DIR, "out").replaceAll("\\", "/")}/init.luau`;
-		// A valid manifest exists on disk, but coverageCache=false discards it.
+		const absoluteSourceRoot = path.join(FOO_DIR, "out").replaceAll("\\", "/");
+		const fileKey = `${absoluteSourceRoot}/init.luau`;
+		const packageShadow = path
+			.join(WORKSPACE_ROOT, ".jest-roblox/workspace/@halcyon-foo/coverage")
+			.replaceAll("\\", "/");
 		const previousManifest: CoverageManifest = {
 			files: {
 				[fileKey]: {
 					key: fileKey,
-					coverageMapPath: "x",
-					instrumentedLuauPath: "x",
+					coverageMapPath: `${packageShadow}/out/init.cov-map.json`,
+					instrumentedLuauPath: `${packageShadow}/out/init.luau`,
 					originalLuauPath: fileKey,
 					sourceHash: sha256(sourceContent),
-					sourceMapPath: "x",
+					sourceMapPath: `${packageShadow}/out/init.luau.map`,
 					statementCount: 1,
 				},
 			},
 			generatedAt: "2025-01-01T00:00:00.000Z",
 			instrumenterVersion: INSTRUMENTER_VERSION,
-			luauRoots: [],
+			luauRoots: [`${packageShadow}/out`],
 			nonInstrumentedFiles: {},
-			shadowDir: "x",
+			shadowDir: packageShadow,
 			version: MANIFEST_VERSION,
 		};
 
 		vol.fromJSON({
+			[`${packageShadow}/out/init.cov-map.json`]: "{}",
+			[`${packageShadow}/out/init.luau`]: "instrumented",
 			[FOO_PROJECT]: JSON.stringify({
 				name: "foo-test",
 				tree: {
@@ -350,9 +349,13 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig({ coverageCache: false }),
 			packages: [
-				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
+				{
+					name: "@halcyon/foo",
+					coverageCache: false,
+					packageDirectory: FOO_DIR,
+					rojoProjectPath: FOO_PROJECT,
+				},
 			],
 			workspaceRoot: WORKSPACE_ROOT,
 		});
@@ -408,7 +411,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig({ coverageCache: true }),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -448,7 +450,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig({ coverageCache: true }),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -518,7 +519,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig({ coverageCache: true }),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -590,7 +590,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig({ coverageCache: true }),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -669,7 +668,6 @@ describe(prepareWorkspaceCoverage, () => {
 		await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig({ coverageCache: true }),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -707,7 +705,6 @@ describe(prepareWorkspaceCoverage, () => {
 		await mockInstrumentRoot();
 
 		const [result] = prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -743,7 +740,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -772,7 +768,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -799,7 +794,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig({ coveragePathIgnorePatterns: ["node_modules"] }),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -829,7 +823,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -860,7 +853,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -892,7 +884,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		const result = prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -937,7 +928,6 @@ describe(prepareWorkspaceCoverage, () => {
 		await mockInstrumentRoot();
 
 		const result = prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -983,7 +973,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		const result = prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -1021,7 +1010,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -1042,7 +1030,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		prepareWorkspaceCoverage({
-			config: makeConfig({ coveragePathIgnorePatterns: [] }),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -1069,7 +1056,6 @@ describe(prepareWorkspaceCoverage, () => {
 		const mocked = await mockInstrumentRoot();
 
 		const result = prepareWorkspaceCoverage({
-			config: makeConfig(),
 			packages: [
 				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
 			],
@@ -1117,7 +1103,6 @@ describe(prepareWorkspaceCoverage, () => {
 			const mocked = await mockInstrumentRoot();
 
 			const [result] = prepareWorkspaceCoverage({
-				config: makeConfig(),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1150,7 +1135,6 @@ describe(prepareWorkspaceCoverage, () => {
 			const mocked = await mockInstrumentRoot();
 
 			const [result] = prepareWorkspaceCoverage({
-				config: makeConfig(),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1180,7 +1164,6 @@ describe(prepareWorkspaceCoverage, () => {
 			const writeSpy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
 
 			const [result] = prepareWorkspaceCoverage({
-				config: makeConfig(),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1216,7 +1199,6 @@ describe(prepareWorkspaceCoverage, () => {
 			const mocked = await mockInstrumentRoot();
 
 			prepareWorkspaceCoverage({
-				config: makeConfig(),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1233,23 +1215,22 @@ describe(prepareWorkspaceCoverage, () => {
 			expect(mocked).toHaveBeenCalledTimes(2);
 		});
 
-		it("should fall back to workspace-root coveragePathIgnorePatterns when the descriptor field is undefined", async () => {
+		it("should ignore workspace-root coveragePathIgnorePatterns and inherit DEFAULT_CONFIG when descriptor field is undefined (HAL-231)", async () => {
 			expect.assertions(2);
 
 			onTestFinished(() => {
 				vol.reset();
 			});
 
+			// HAL-231: workspace-mode reads ignore patterns from each
+			// package's own config (or DEFAULT_CONFIG when omitted) — not
+			// from a workspace-root jest.config. The descriptor has no
+			// per-pkg override here, so the workspace-root custom value
+			// below must be ignored and both rojo mounts instrumented.
 			seedMultiMount();
 			const mocked = await mockInstrumentRoot();
 
 			const [result] = prepareWorkspaceCoverage({
-				// Workspace-root config opts into a custom pattern; the
-				// descriptor below has no per-pkg override, so the matcher
-				// must fall back to this root value.
-				config: makeConfig({
-					coveragePathIgnorePatterns: ["**/vendored-packages/**"],
-				}),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1260,11 +1241,14 @@ describe(prepareWorkspaceCoverage, () => {
 				workspaceRoot: WORKSPACE_ROOT,
 			});
 
-			expect(mocked).toHaveBeenCalledOnce();
-			expect(result?.coverageRoots.map((entry) => entry.luauRoot)).toStrictEqual(["src"]);
+			expect(mocked).toHaveBeenCalledTimes(2);
+			expect(result?.coverageRoots.map((entry) => entry.luauRoot).sort()).toStrictEqual([
+				"src",
+				"vendored-packages",
+			]);
 		});
 
-		it("should honor per-pkg coveragePathIgnorePatterns over workspace defaults", async () => {
+		it("should honor per-pkg coveragePathIgnorePatterns over the DEFAULT_CONFIG fallback", async () => {
 			expect.assertions(2);
 
 			onTestFinished(() => {
@@ -1275,9 +1259,6 @@ describe(prepareWorkspaceCoverage, () => {
 			const mocked = await mockInstrumentRoot();
 
 			const [result] = prepareWorkspaceCoverage({
-				// Workspace-root config has empty patterns — only the
-				// per-pkg override filters the vendored mount.
-				config: makeConfig({ coveragePathIgnorePatterns: [] }),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1291,6 +1272,40 @@ describe(prepareWorkspaceCoverage, () => {
 
 			expect(mocked).toHaveBeenCalledOnce();
 			expect(result?.coverageRoots.map((entry) => entry.luauRoot)).toStrictEqual(["src"]);
+		});
+
+		it("should instrument every mount when the descriptor opts out of every pattern via an empty array", async () => {
+			expect.assertions(2);
+
+			onTestFinished(() => {
+				vol.reset();
+			});
+
+			// Per-pkg `coveragePathIgnorePatterns: []` means "no ignore
+			// patterns" — even DEFAULT_CONFIG's defaults don't apply, so a
+			// directory named like a spec/test mount would still be
+			// instrumented. The empty-patterns branch of `createIgnoreMatcher`
+			// has no other caller after HAL-231's workspace-root drop.
+			seedMultiMount();
+			const mocked = await mockInstrumentRoot();
+
+			const [result] = prepareWorkspaceCoverage({
+				packages: [
+					{
+						name: "@halcyon/foo",
+						coveragePathIgnorePatterns: [],
+						packageDirectory: FOO_DIR,
+						rojoProjectPath: FOO_PROJECT,
+					},
+				],
+				workspaceRoot: WORKSPACE_ROOT,
+			});
+
+			expect(mocked).toHaveBeenCalledTimes(2);
+			expect(result?.coverageRoots.map((entry) => entry.luauRoot).sort()).toStrictEqual([
+				"src",
+				"vendored-packages",
+			]);
 		});
 
 		it("should accept luauRoots nested inside a $path mount", async () => {
@@ -1316,7 +1331,6 @@ describe(prepareWorkspaceCoverage, () => {
 			const mocked = await mockInstrumentRoot();
 
 			const [result] = prepareWorkspaceCoverage({
-				config: makeConfig(),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1358,7 +1372,6 @@ describe(prepareWorkspaceCoverage, () => {
 			const mocked = await mockInstrumentRoot();
 
 			const [result] = prepareWorkspaceCoverage({
-				config: makeConfig(),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1385,7 +1398,6 @@ describe(prepareWorkspaceCoverage, () => {
 			const mocked = await mockInstrumentRoot();
 
 			const [result] = prepareWorkspaceCoverage({
-				config: makeConfig(),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1428,7 +1440,6 @@ describe(prepareWorkspaceCoverage, () => {
 			const mocked = await mockInstrumentRoot();
 
 			const [result] = prepareWorkspaceCoverage({
-				config: makeConfig(),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1493,7 +1504,6 @@ describe(prepareWorkspaceCoverage, () => {
 			await mockInstrumentRoot();
 
 			prepareWorkspaceCoverage({
-				config: makeConfig(),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1554,7 +1564,6 @@ describe(prepareWorkspaceCoverage, () => {
 			await mockInstrumentRoot();
 
 			prepareWorkspaceCoverage({
-				config: makeConfig(),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1611,7 +1620,6 @@ describe(prepareWorkspaceCoverage, () => {
 			await mockInstrumentRoot();
 
 			prepareWorkspaceCoverage({
-				config: makeConfig(),
 				packages: [
 					{
 						name: "@halcyon/foo",
@@ -1651,7 +1659,6 @@ describe(prepareWorkspaceCoverage, () => {
 			const writeSpy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
 
 			const [result] = prepareWorkspaceCoverage({
-				config: makeConfig(),
 				packages: [
 					{
 						name: "@halcyon/foo",

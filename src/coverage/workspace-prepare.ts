@@ -5,7 +5,7 @@ import * as path from "node:path";
 import process from "node:process";
 import picomatch from "picomatch";
 
-import type { ResolvedConfig } from "../config/schema.ts";
+import { DEFAULT_CONFIG } from "../config/schema.ts";
 import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
 import { INSTRUMENTER_VERSION } from "./instrumenter.ts";
 import type {
@@ -26,9 +26,17 @@ const WORKSPACE_COVERAGE_DIR = ".jest-roblox/workspace";
 export interface WorkspacePackageDescriptor {
 	name: string;
 	/**
-	 * Per-package override for `coveragePathIgnorePatterns`. When undefined, the
-	 * workspace-root config's value is used. An empty array means "no ignore
-	 * patterns" (user opted out of every pattern, including workspace defaults).
+	 * Per-package `coverageCache` opt-out. When undefined, defaults to
+	 * `DEFAULT_CONFIG.coverageCache` (true). Workspace mode reads this knob
+	 * per-package only (HAL-231); the workspace-root `config.coverageCache`
+	 * is intentionally not consulted.
+	 */
+	coverageCache?: boolean;
+	/**
+	 * Per-package `coveragePathIgnorePatterns`. When undefined, the matcher
+	 * falls back to `DEFAULT_CONFIG.coveragePathIgnorePatterns` — workspace
+	 * mode reads this knob per-package only (see HAL-231). An empty array
+	 * means "no ignore patterns" (user opted out of every default pattern).
 	 */
 	coveragePathIgnorePatterns?: Array<string>;
 	/**
@@ -58,7 +66,6 @@ export interface WorkspacePackageCoverage {
 }
 
 export interface PrepareWorkspaceCoverageOptions {
-	config: ResolvedConfig;
 	packages: Array<WorkspacePackageDescriptor>;
 	workspaceRoot: string;
 }
@@ -73,18 +80,19 @@ export interface PrepareWorkspaceCoverageOptions {
 export function prepareWorkspaceCoverage(
 	options: PrepareWorkspaceCoverageOptions,
 ): Array<WorkspacePackageCoverage> {
-	const { config, packages, workspaceRoot } = options;
-	// Hoist the workspace-default matcher so packages that don't override
-	// `coveragePathIgnorePatterns` reuse a single picomatch compile. The
-	// per-pkg branch builds its own matcher inside `prepareForPackage`.
-	const workspaceDefaultMatcher = createIgnoreMatcher(config.coveragePathIgnorePatterns);
+	const { packages, workspaceRoot } = options;
+	// HAL-231: workspace mode reads `coveragePathIgnorePatterns` per-package
+	// only. Hoist the DEFAULT_CONFIG matcher so packages that don't override
+	// the field share one picomatch compile; the workspace-root config is
+	// intentionally not threaded through here.
+	const defaultMatcher = createIgnoreMatcher(DEFAULT_CONFIG.coveragePathIgnorePatterns);
 
 	return packages.map((descriptor) => {
 		const matchesIgnored =
 			descriptor.coveragePathIgnorePatterns !== undefined
 				? createIgnoreMatcher(descriptor.coveragePathIgnorePatterns)
-				: workspaceDefaultMatcher;
-		return prepareForPackage(descriptor, workspaceRoot, matchesIgnored, config);
+				: defaultMatcher;
+		return prepareForPackage(descriptor, workspaceRoot, matchesIgnored);
 	});
 }
 
@@ -333,9 +341,9 @@ function loadPackageManifest(manifestPath: string): CoverageManifest | undefined
 
 function canUseIncremental(
 	previousManifest: CoverageManifest | undefined,
-	config: ResolvedConfig,
+	coverageCache: boolean,
 ): boolean {
-	if (!config.coverageCache) {
+	if (!coverageCache) {
 		return false;
 	}
 
@@ -368,7 +376,6 @@ function prepareForPackage(
 	descriptor: WorkspacePackageDescriptor,
 	workspaceRoot: string,
 	matchesIgnored: (filePath: string) => boolean,
-	config: ResolvedConfig,
 ): WorkspacePackageCoverage {
 	const safeName = safePackageName(descriptor.name);
 	const packageShadowRoot = path.join(
@@ -380,7 +387,8 @@ function prepareForPackage(
 	const manifestPath = normalizeWindowsPath(path.join(packageShadowRoot, "manifest.json"));
 
 	const previousManifest = loadPackageManifest(manifestPath);
-	let useIncremental = canUseIncremental(previousManifest, config);
+	const coverageCache = descriptor.coverageCache ?? DEFAULT_CONFIG.coverageCache;
+	let useIncremental = canUseIncremental(previousManifest, coverageCache);
 
 	const luauRoots = discoverPackageLuauRoots(descriptor, matchesIgnored);
 

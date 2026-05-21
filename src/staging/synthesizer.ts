@@ -23,6 +23,12 @@ export interface CoverageRoot {
 export interface PackageDescriptor {
 	name: string;
 	/**
+	 * Per-package `coverageCache` opt-out, forwarded to
+	 * `prepareWorkspaceCoverage` so the cache gate honors each package's own
+	 * declaration (HAL-231). Not read by synthesis itself.
+	 */
+	coverageCache?: boolean;
+	/**
 	 * Per-package coverage ignore patterns, forwarded to
 	 * `prepareWorkspaceCoverage` so the matcher reflects the merged pkgConfig
 	 * instead of the workspace-root default. Not read by synthesis itself.

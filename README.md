@@ -123,23 +123,44 @@ Precedence: CLI flags > config file > extended config > defaults.
 
 ### Root config fields
 
-Root fields control the CLI/runner. Jest passthrough fields live under `test:`.
+Two distinct buckets live at the root level. Jest passthrough fields live
+under `test:` (see "Test fields" below).
+
+#### Workspace Run Options
+
+Atomic to one invocation — these describe what the run targets and how the
+CLI presents output, not how any individual package runs. In `--workspace`
+mode they resolve as: CLI flag > unanimous per-package declaration >
+default. Mixed per-package declarations error loudly.
 
 | Field | What it does | Default |
 |---|---|---|
 | `backend` | `"auto"`, `"open-cloud"`, or `"studio"` | `"auto"` |
+| `placeId` | Open Cloud place ID | — |
+| `universeId` | Open Cloud universe ID | — |
+| `port` | WebSocket port for Studio backend | `3001` |
+| `formatters` | Output formatters (`"default"`, `"agent"`, `"json"`, `"github-actions"`) | `["default"]` |
+| `silent` | Suppress console output | `false` |
+| `parallel` | Number of concurrent Open Cloud sessions, or `"auto"` (= `min(jobs, 3)`) | — |
+| `pollInterval` | How often to poll for results in ms (Open Cloud) | `500` |
+
+#### Per-package fields
+
+Loaded per package (directly or via `extends: "../jest.shared.ts"`). The
+workspace-root config is NOT a source of truth for these — declare them in
+each package's own jest.config or in a shared config that every package
+extends.
+
+| Field | What it does | Default |
+|---|---|---|
 | `placeFile` | Path to your `.rbxl` file | `"./game.rbxl"` |
 | `timeout` | Max time for tests to run (ms) | `300000` (5 min) |
 | `sourceMap` | Map Luau errors back to TypeScript (roblox-ts only) | `true` |
-| `port` | WebSocket port for Studio backend | `3001` |
 | `rojoProject` | Path to your Rojo project file | auto |
 | `jestPath` | Where Jest lives in the DataModel | auto |
-| `formatters` | Output formatters (`"default"`, `"agent"`, `"json"`, `"github-actions"`) | `["default"]` |
 | `gameOutput` | Path to write game print/warn/error output | — |
 | `showLuau` | Show Luau code snippets in failure output | `true` |
 | `coverageCache` | Reuse incrementally-instrumented coverage shadow dir between runs | `true` |
-| `pollInterval` | How often to poll for results in ms (Open Cloud) | `500` |
-| `parallel` | Number of concurrent Open Cloud sessions, or `"auto"` (= `min(jobs, 3)`) | — |
 | `luauRoots` | Where Luau files live for coverage instrumentation | auto from tsconfig `outDir` |
 
 ### Test fields

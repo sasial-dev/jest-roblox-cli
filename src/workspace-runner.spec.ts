@@ -698,6 +698,57 @@ describe(runWorkspace, () => {
 		expect(results?.map((entry) => entry.pkg)).toStrictEqual(["@halcyon/foo", "@halcyon/bar"]);
 	});
 
+	// HAL-231: workspace-root `config.rojoProject` no longer falls back into
+	// per-package descriptor resolution. Each package must declare its own
+	// rojoProject (directly or via extends); the workspace-root config
+	// silently dropping a custom value into per-pkg lookups was the same
+	// "workspace-root vs per-pkg" leak as the other A2 sites.
+	it("should NOT fall back to workspace-root config.rojoProject when the package config omits it (HAL-231)", async () => {
+		expect.assertions(1);
+
+		vol.reset();
+		vol.fromJSON({
+			[path.join(BAR_DIR, "custom.project.json")]: packageJson({
+				name: "bar-test",
+				tree: {
+					$className: "DataModel",
+					ReplicatedStorage: { Pkg: { $path: "src" } },
+				},
+			}),
+			[path.join(BAR_DIR, "jest.config.ts")]: "export default {}",
+			[path.join(BAR_DIR, "package.json")]: packageJson({ name: "@halcyon/bar" }),
+			[path.join(BAR_DIR, "src/bar.spec.luau")]: "",
+			[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+		});
+
+		// Bar's per-pkg config has no rojoProject — pre-HAL-231 the middle
+		// arm of `pkg ?? config ?? DEFAULT` would pick up the workspace-root
+		// value below and resolve "custom.project.json". After the collapse,
+		// resolution falls straight to `ROJO_PROJECT_DEFAULT`
+		// ("test.project.json") — which does not exist at BAR_DIR, so preflight
+		// fails.
+		setLoadedConfigPerPackage({
+			[BAR_DIR]: { ...DEFAULT_CONFIG, rootDir: BAR_DIR },
+		});
+
+		const { backend } = createStubBackend([]);
+
+		const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+		const results = await runWorkspace({
+			backend,
+			cli: makeCli(),
+			config: makeConfig({ rojoProject: "custom.project.json" }),
+			packageInfos: [BAR_INFO],
+			version: "0.0.0-test",
+			workspaceRoot: ROOT,
+		});
+
+		stderr.mockRestore();
+
+		expect(results).toBeUndefined();
+	});
+
 	it("should drop empty packages from the materializer payload while keeping packages with specs", async () => {
 		expect.assertions(2);
 
@@ -1188,6 +1239,69 @@ describe(runWorkspace, () => {
 		// (loader.ts:42) preserves the `DEFAULT_CONFIG` array reference when
 		// the package config omits the key, so reference identity gates the
 		// descriptor field.
+		// HAL-231: per-pkg `coverageCache` reaches the descriptor so the
+		// cache gate in `prepareWorkspaceCoverage` can honor an opt-out
+		// declared in a package's own jest.config (or extended from
+		// jest.shared.ts). The workspace-root config no longer drives this
+		// knob.
+		it("should propagate pkgConfig.coverageCache: false onto the descriptor", async () => {
+			expect.assertions(1);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+
+			setLoadedConfigPerPackage({
+				[FOO_DIR]: {
+					...DEFAULT_CONFIG,
+					collectCoverage: true,
+					coverageCache: false,
+					rootDir: FOO_DIR,
+				},
+			});
+
+			const { prepareWorkspaceCoverage } = await import("./coverage/workspace-prepare.ts");
+			vi.mocked(prepareWorkspaceCoverage).mockReturnValue([
+				{
+					coverageRoots: [{ luauRoot: "src", shadowDir: "/shadow/src" }],
+					manifest: {
+						files: {},
+						generatedAt: "x",
+						instrumenterVersion: 2,
+						luauRoots: [],
+						nonInstrumentedFiles: {},
+						shadowDir: "/shadow",
+						version: MANIFEST_VERSION,
+					},
+					manifestPath: "/shadow/manifest.json",
+					pkg: "@halcyon/foo",
+				},
+			]);
+
+			const { backend } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli({ collectCoverage: true }),
+				config: makeConfig({ collectCoverage: true }),
+				packageInfos: [FOO_INFO],
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			const callArgs = vi.mocked(prepareWorkspaceCoverage).mock.calls[0]![0];
+			const descriptor = callArgs.packages[0]!;
+
+			expect(descriptor.coverageCache).toBeFalse();
+		});
+
 		it("should leave descriptor.coveragePathIgnorePatterns undefined when the package config defaults", async () => {
 			expect.assertions(1);
 
@@ -1944,7 +2058,7 @@ describe(runWorkspace, () => {
 	});
 
 	describe("per-package gameOutput files", () => {
-		it("should write parsed entries to .jest-roblox/output/<pkg>--<project>.gameOutput.json when config.gameOutput is set", async () => {
+		it("should write parsed entries to .jest-roblox/output/<pkg>--<project>.gameOutput.json when --gameOutput is set on the CLI", async () => {
 			expect.assertions(2);
 
 			vol.reset();
@@ -1955,6 +2069,9 @@ describe(runWorkspace, () => {
 				}),
 				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
 			});
+			// `mergeCliWithConfig` layers `cli.gameOutput` onto every loaded
+			// pkgConfig in loadPackages, so the CLI flag flows through the
+			// per-package gate just like a shared-config declaration would.
 			setLoadedConfigPerPackage({ [FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR } });
 
 			const gameOutputRaw = JSON.stringify([
@@ -1966,8 +2083,8 @@ describe(runWorkspace, () => {
 
 			await runWorkspace({
 				backend,
-				cli: makeCli(),
-				config: makeConfig({ gameOutput: path.join(ROOT, "out.json") }),
+				cli: makeCli({ gameOutput: path.join(ROOT, "out.json") }),
+				config: makeConfig(),
 				packageInfos: [FOO_INFO],
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
@@ -1986,7 +2103,62 @@ describe(runWorkspace, () => {
 			]);
 		});
 
-		it("should NOT write per-package gameOutput files when config.gameOutput is undefined", async () => {
+		it("should write per-package gameOutput files when only the package config declares gameOutput (HAL-231)", async () => {
+			expect.assertions(2);
+
+			// HAL-231 regression: a user declares gameOutput in jest.shared.ts
+			// (extended by every package). The workspace root has no jest.config,
+			// so c12's lookup there sees nothing — pre-fix the gate at
+			// workspace-runner read `config.gameOutput` and silently skipped the
+			// per-package write that #478 already wired up. The new gate scans
+			// per-package configs and fires whenever any selected package
+			// declares the field.
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+			setLoadedConfigPerPackage({
+				[FOO_DIR]: {
+					...DEFAULT_CONFIG,
+					gameOutput: path.join(ROOT, "out.json"),
+					rootDir: FOO_DIR,
+				},
+			});
+
+			const gameOutputRaw = JSON.stringify([
+				{ message: "hello", messageType: 0, timestamp: 1000 },
+			]);
+			const { backend } = createStubBackend([
+				{ gameOutput: gameOutputRaw, jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				config: makeConfig(),
+				packageInfos: [FOO_INFO],
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			const file = path.join(
+				ROOT,
+				".jest-roblox",
+				"output",
+				"@halcyon-foo--@halcyon-foo.gameOutput.json",
+			);
+
+			expect(vol.existsSync(file)).toBeTrue();
+			expect(JSON.parse(vol.readFileSync(file, "utf8") as string)).toStrictEqual([
+				{ message: "hello", messageType: 0, timestamp: 1000 },
+			]);
+		});
+
+		it("should NOT write per-package gameOutput files when no config layer declares gameOutput", async () => {
 			expect.assertions(2);
 
 			vol.reset();
@@ -2053,8 +2225,8 @@ describe(runWorkspace, () => {
 
 			await runWorkspace({
 				backend,
-				cli: makeCli(),
-				config: makeConfig({ gameOutput: path.join(ROOT, "out.json") }),
+				cli: makeCli({ gameOutput: path.join(ROOT, "out.json") }),
+				config: makeConfig(),
 				packageInfos: [FOO_INFO],
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
@@ -2089,8 +2261,8 @@ describe(runWorkspace, () => {
 
 			await runWorkspace({
 				backend,
-				cli: makeCli(),
-				config: makeConfig({ gameOutput: path.join(ROOT, "out.json") }),
+				cli: makeCli({ gameOutput: path.join(ROOT, "out.json") }),
+				config: makeConfig(),
 				packageInfos: [FOO_INFO],
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
@@ -2145,8 +2317,8 @@ describe(runWorkspace, () => {
 
 			await runWorkspace({
 				backend,
-				cli: makeCli(),
-				config: makeConfig({ gameOutput: path.join(ROOT, "out.json"), silent: true }),
+				cli: makeCli({ gameOutput: path.join(ROOT, "out.json") }),
+				config: makeConfig({ silent: true }),
 				packageInfos: [FOO_INFO, BAR_INFO],
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
@@ -2222,8 +2394,8 @@ describe(runWorkspace, () => {
 
 			await runWorkspace({
 				backend,
-				cli: makeCli(),
-				config: makeConfig({ gameOutput: path.join(ROOT, "out.json") }),
+				cli: makeCli({ gameOutput: path.join(ROOT, "out.json") }),
+				config: makeConfig(),
 				packageInfos: [FOO_INFO],
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,

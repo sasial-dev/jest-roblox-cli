@@ -123,14 +123,14 @@ type WorkspaceDispatchSpec = Pick<
 export async function runWorkspace(
 	options: RunWorkspaceOptions,
 ): Promise<Array<WorkspaceProjectResult> | undefined> {
-	const { backend, cli, config, packageInfos, version, workspaceRoot } = options;
+	const { backend, cli, packageInfos, version, workspaceRoot } = options;
 	const startTime = Date.now();
 
 	// Load each package's config FIRST so that per-package `rojoProject`
 	// declarations override the workspace default. Building the descriptor
 	// (and the path preflight uses) before loadConfig pinned every package
 	// to the parent's rojo file.
-	const loaded = await loadPackages({ cli, config, packageInfos });
+	const loaded = await loadPackages({ cli, packageInfos });
 
 	ensurePackageDirectories(loaded.map((entry) => entry.descriptor));
 
@@ -186,7 +186,6 @@ export async function runWorkspace(
 		coveragePackages.length > 0
 			? buildCoverageMap(
 					prepareWorkspaceCoverage({
-						config,
 						packages: coveragePackages,
 						workspaceRoot,
 					}),
@@ -267,7 +266,14 @@ export async function runWorkspace(
 
 	writePerPackageOutputFiles(workspaceRoot, pending, results);
 
-	if (config.gameOutput !== undefined) {
+	// HAL-231: the gate scans per-package configs, not the workspace-root
+	// `config`. A user declaring `gameOutput` in jest.shared.ts (extended by
+	// every package) — but not at the workspace root — would otherwise see
+	// no per-package files: c12's workspace-root lookup never sees
+	// jest.shared.ts. `mergeCliWithConfig` already layers `--gameOutput`
+	// onto every loaded `pkgConfig` in `loadPackages`, so the CLI-flag path
+	// flows through this same check.
+	if (loaded.some((entry) => entry.pkgConfig.gameOutput !== undefined)) {
 		writePerPackageGameOutputFiles(workspaceRoot, pending, results);
 	}
 
@@ -379,21 +385,22 @@ async function prepareWorkspaceDispatch(input: {
 
 async function loadPackages(input: {
 	cli: CliOptions;
-	config: ResolvedConfig;
 	packageInfos: Array<PackageInfo>;
 }): Promise<Array<LoadedPackage>> {
-	const { cli, config, packageInfos } = input;
+	const { cli, packageInfos } = input;
 	const loaded: Array<LoadedPackage> = [];
 
 	for (const info of packageInfos) {
 		const fileConfig = await loadConfig(undefined, info.packageDirectory);
 		const packageConfig = mergeCliWithConfig(cli, fileConfig);
 
-		// Resolve rojoProjectPath from the merged per-package config so a
-		// package whose own jest.config declares `rojoProject` overrides
-		// the workspace-level default. Fall back to the parent's value
-		// (then the package-default) when the package doesn't set it.
-		const rojoProject = packageConfig.rojoProject ?? config.rojoProject ?? ROJO_PROJECT_DEFAULT;
+		// HAL-231: `rojoProject` is resolved per-package only — the
+		// workspace-root config is intentionally not consulted. Pre-fix
+		// `pkg ?? config ?? DEFAULT` let a workspace-root value silently
+		// override `ROJO_PROJECT_DEFAULT` for packages that didn't declare
+		// the field, the same workspace-root vs per-pkg leak as the other
+		// A2 sites.
+		const rojoProject = packageConfig.rojoProject ?? ROJO_PROJECT_DEFAULT;
 
 		// Propagate per-pkg coverage knobs to the descriptor so
 		// `prepareWorkspaceCoverage` sees the merged values, not just the
@@ -413,8 +420,15 @@ async function loadPackages(input: {
 		// root" by leaving the descriptor field undefined.
 		const hasExplicitIgnore =
 			packageConfig.coveragePathIgnorePatterns !== DEFAULT_CONFIG.coveragePathIgnorePatterns;
+		// HAL-231: per-pkg `coverageCache` opt-out drives the workspace
+		// cache gate. Pass it through only when the pkg's value diverges
+		// from the default; an undefined descriptor field means "inherit
+		// DEFAULT_CONFIG" inside `prepareWorkspaceCoverage`.
+		const hasExplicitCoverageCache =
+			packageConfig.coverageCache !== DEFAULT_CONFIG.coverageCache;
 		loaded.push({
 			descriptor: {
+				...(hasExplicitCoverageCache ? { coverageCache: packageConfig.coverageCache } : {}),
 				...(hasExplicitIgnore
 					? { coveragePathIgnorePatterns: packageConfig.coveragePathIgnorePatterns }
 					: {}),

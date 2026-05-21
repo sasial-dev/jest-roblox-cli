@@ -21,6 +21,33 @@ exiting with code 1") that would otherwise be eaten by the Promise
 rejection unwind. Not exposed as a user-facing flag.
 _Avoid_: "captured stdout", "intercepted writes"
 
+**Per-package Config**:
+The loaded jest config for a single workspace package, possibly resolved via
+`extends: "../jest.shared.ts"`. Source of truth for everything jest-shaped —
+`testMatch`, `setupFiles`, `coverageCache`, `coveragePathIgnorePatterns`,
+`rojoProject`, `gameOutput`, and so on. In workspace mode, the runtime reads
+these knobs per-package; the workspace-root config file is not consulted for
+them (HAL-231).
+_Avoid_: "root config", "workspace-level config" — both imply a workspace
+root config that drives package behavior, which is no longer the model.
+
+**Workspace Run Options**:
+The narrow set of knobs that are atomic to one workspace invocation:
+`backend`, `placeId`, `universeId`, `silent`, `color`, `formatters`,
+`parallel`. They describe what the run targets and how the CLI presents
+output — not how any individual package runs. Resolved as CLI flag (or
+documented env var) > per-package consensus > `DEFAULT_CONFIG`. Per-package
+consensus means: every selected package's raw config must declare the field
+equally, OR none of them declare it; mixed declarations error loudly.
+_Avoid_: "workspace config" — the value isn't loaded from a workspace-root
+config file.
+
+**CLI Options**:
+The argv parse result (`CliOptions` type). Flags passed explicitly on the
+command line, plus any short-form aliases. CLI options layer on top of both
+Workspace Run Options (via the resolution order above) and Per-package
+Config (via `mergeCliWithConfig` in `loadPackages`).
+
 ## Relationships
 
 - **Game Output** and **Banner Output** are two distinct captures with two
