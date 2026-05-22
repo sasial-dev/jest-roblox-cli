@@ -44,8 +44,17 @@ export interface WorkspaceRunResult {
 	 * `collectCoverage` is off or no package produced coverage data.
 	 */
 	coverageMapped?: MappedCoverageResult;
+	/**
+	 * Consensus-resolved Aggregated Game Output path the runner wrote (if any).
+	 * Surfaced so formatters point "View …" hints at the file that exists,
+	 * rather than the workspace-root `config.gameOutput` (which the runner does
+	 * not consult).
+	 */
+	gameOutput?: string;
 	merged: MultiProjectMerged;
 	mode: "workspace";
+	/** Consensus-resolved aggregated result path the runner wrote (if any). */
+	outputFile?: string;
 	preCoverageMs: number;
 	projectResults: Array<ProjectResult>;
 	typecheckResult?: JestResult;

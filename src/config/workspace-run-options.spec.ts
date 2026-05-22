@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { CliOptions } from "./schema.ts";
@@ -294,6 +295,246 @@ describe(buildWorkspaceRunOptions, () => {
 			stdEnvironmentMock.isAgent = false;
 
 			expect(result.formatters).toContain("agent");
+		});
+	});
+
+	describe("gameOutput (aggregated)", () => {
+		it("should resolve a unanimous string path against the workspace root", () => {
+			expect.assertions(1);
+
+			const result = buildWorkspaceRunOptions({
+				cli: emptyCli(),
+				perPackageConfigs: [
+					{ name: "alpha", config: { gameOutput: "logs.json" } },
+					{ name: "beta", config: { gameOutput: "logs.json" } },
+				],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.gameOutput).toBe(path.join("/repo", "logs.json"));
+		});
+
+		it("should expand `true` to game-output.log under the workspace root", () => {
+			expect.assertions(1);
+
+			const result = buildWorkspaceRunOptions({
+				cli: emptyCli(),
+				perPackageConfigs: [
+					{ name: "alpha", config: { gameOutput: true } },
+					{ name: "beta", config: { gameOutput: true } },
+				],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.gameOutput).toBe(path.join("/repo", "game-output.log"));
+		});
+
+		it("should leave an absolute path untouched", () => {
+			expect.assertions(1);
+
+			const absolute = path.resolve("/abs/logs.json");
+			const result = buildWorkspaceRunOptions({
+				cli: emptyCli(),
+				perPackageConfigs: [{ name: "alpha", config: { gameOutput: absolute } }],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.gameOutput).toBe(absolute);
+		});
+
+		it("should be undefined when no package declares gameOutput", () => {
+			expect.assertions(1);
+
+			const result = buildWorkspaceRunOptions({
+				cli: emptyCli(),
+				perPackageConfigs: [{ name: "alpha", config: {} }],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.gameOutput).toBeUndefined();
+		});
+
+		it("should let the CLI flag override per-package values", () => {
+			expect.assertions(1);
+
+			const result = buildWorkspaceRunOptions({
+				cli: { gameOutput: "cli.json" },
+				perPackageConfigs: [{ name: "alpha", config: { gameOutput: "pkg.json" } }],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.gameOutput).toBe(path.join("/repo", "cli.json"));
+		});
+
+		it("should throw WorkspaceConsensusError when `true` and a string disagree", () => {
+			expect.assertions(1);
+
+			expect(() => {
+				return buildWorkspaceRunOptions({
+					cli: emptyCli(),
+					perPackageConfigs: [
+						{ name: "alpha", config: { gameOutput: true } },
+						{ name: "beta", config: { gameOutput: "game-output.log" } },
+					],
+					workspaceRoot: "/repo",
+				});
+			}).toThrow(WorkspaceConsensusError);
+		});
+	});
+
+	describe("workspace.gameOutput (per-package files)", () => {
+		it("should be true when every package declares it", () => {
+			expect.assertions(1);
+
+			const result = buildWorkspaceRunOptions({
+				cli: emptyCli(),
+				perPackageConfigs: [
+					{ name: "alpha", config: { workspace: { gameOutput: true } } },
+					{ name: "beta", config: { workspace: { gameOutput: true } } },
+				],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.workspaceGameOutput).toBeTrue();
+		});
+
+		it("should be false when no package declares it", () => {
+			expect.assertions(1);
+
+			const result = buildWorkspaceRunOptions({
+				cli: emptyCli(),
+				perPackageConfigs: [{ name: "alpha", config: {} }],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.workspaceGameOutput).toBeFalse();
+		});
+
+		it("should throw WorkspaceConsensusError when only some packages declare it", () => {
+			expect.assertions(1);
+
+			expect(() => {
+				return buildWorkspaceRunOptions({
+					cli: emptyCli(),
+					perPackageConfigs: [
+						{ name: "alpha", config: { workspace: { gameOutput: true } } },
+						{ name: "beta", config: {} },
+					],
+					workspaceRoot: "/repo",
+				});
+			}).toThrow(WorkspaceConsensusError);
+		});
+	});
+
+	describe("outputFile (aggregated)", () => {
+		it("should expand `true` to jest-output.log under the workspace root", () => {
+			expect.assertions(1);
+
+			const result = buildWorkspaceRunOptions({
+				cli: emptyCli(),
+				perPackageConfigs: [
+					{ name: "alpha", config: { outputFile: true } },
+					{ name: "beta", config: { outputFile: true } },
+				],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.outputFile).toBe(path.join("/repo", "jest-output.log"));
+		});
+
+		it("should resolve a unanimous string path against the workspace root", () => {
+			expect.assertions(1);
+
+			const result = buildWorkspaceRunOptions({
+				cli: emptyCli(),
+				perPackageConfigs: [{ name: "alpha", config: { outputFile: "results.json" } }],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.outputFile).toBe(path.join("/repo", "results.json"));
+		});
+
+		it("should be undefined when no package declares outputFile", () => {
+			expect.assertions(1);
+
+			const result = buildWorkspaceRunOptions({
+				cli: emptyCli(),
+				perPackageConfigs: [{ name: "alpha", config: {} }],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.outputFile).toBeUndefined();
+		});
+
+		it("should let the CLI flag override per-package values", () => {
+			expect.assertions(1);
+
+			const result = buildWorkspaceRunOptions({
+				cli: { outputFile: "cli.json" },
+				perPackageConfigs: [{ name: "alpha", config: { outputFile: "pkg.json" } }],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.outputFile).toBe(path.join("/repo", "cli.json"));
+		});
+
+		it("should throw WorkspaceConsensusError when `true` and a string disagree", () => {
+			expect.assertions(1);
+
+			expect(() => {
+				return buildWorkspaceRunOptions({
+					cli: emptyCli(),
+					perPackageConfigs: [
+						{ name: "alpha", config: { outputFile: true } },
+						{ name: "beta", config: { outputFile: "jest-output.log" } },
+					],
+					workspaceRoot: "/repo",
+				});
+			}).toThrow(WorkspaceConsensusError);
+		});
+	});
+
+	describe("workspace.outputFile (per-package files)", () => {
+		it("should be true when every package declares it", () => {
+			expect.assertions(1);
+
+			const result = buildWorkspaceRunOptions({
+				cli: emptyCli(),
+				perPackageConfigs: [
+					{ name: "alpha", config: { workspace: { outputFile: true } } },
+					{ name: "beta", config: { workspace: { outputFile: true } } },
+				],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.workspaceOutputFile).toBeTrue();
+		});
+
+		it("should be false when no package declares it", () => {
+			expect.assertions(1);
+
+			const result = buildWorkspaceRunOptions({
+				cli: emptyCli(),
+				perPackageConfigs: [{ name: "alpha", config: {} }],
+				workspaceRoot: "/repo",
+			});
+
+			expect(result.workspaceOutputFile).toBeFalse();
+		});
+
+		it("should throw WorkspaceConsensusError when only some packages declare it", () => {
+			expect.assertions(1);
+
+			expect(() => {
+				return buildWorkspaceRunOptions({
+					cli: emptyCli(),
+					perPackageConfigs: [
+						{ name: "alpha", config: { workspace: { outputFile: true } } },
+						{ name: "beta", config: {} },
+					],
+					workspaceRoot: "/repo",
+				});
+			}).toThrow(WorkspaceConsensusError);
 		});
 	});
 

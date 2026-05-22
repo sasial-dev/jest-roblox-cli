@@ -17,7 +17,10 @@ Root fields control the CLI/runner. Jest passthrough fields live under `test:`.
 | `port` | WebSocket port for Studio backend | `3001` |
 | `rojoProject` | Path to Rojo project file | auto-detected |
 | `formatters` | Output formatters (`"default"`, `"agent"`, `"json"`, `"github-actions"`) | `["default"]` |
-| `gameOutput` | Write game print/warn/error to file | — |
+| `gameOutput` | Write game print/warn/error to a file — a path, or `true` for `game-output.log` under the root. In `--workspace` mode, one grouped aggregate file across packages (consensus-resolved) | — |
+| `outputFile` | Write the Jest result JSON — a path, or `true` for `jest-output.log` under the root. In `--workspace` mode, the single merged result across packages (consensus-resolved) | — |
+| `workspace.gameOutput` | `true` to emit per-package game output under `.jest-roblox/output/` (`--workspace` only) | — |
+| `workspace.outputFile` | `true` to emit per-package result files under `.jest-roblox/output/` (`--workspace` only) | — |
 | `coverageCache` | Reuse incrementally-instrumented coverage shadow dir between runs | `true` |
 | `luauRoots` | Compiled Luau directories to instrument | auto from tsconfig `outDir` |
 

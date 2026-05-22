@@ -61,6 +61,23 @@ export interface InlineProjectConfig {
 	test: ProjectTestConfig;
 }
 
+/** Workspace-only knobs. Ignored outside `--workspace` mode. */
+export interface WorkspaceConfig {
+	/**
+	 * When `true`, emit one Per-package Game Output file per selected
+	 * (package, project) under `<workspaceRoot>/.jest-roblox/output/`.
+	 * Consensus-resolved across packages; only `true` is accepted.
+	 */
+	gameOutput?: true;
+	/**
+	 * When `true`, emit one per-package result file (the Jest result JSON)
+	 * per selected (package, project) under
+	 * `<workspaceRoot>/.jest-roblox/output/`. Consensus-resolved across
+	 * packages; only `true` is accepted.
+	 */
+	outputFile?: true;
+}
+
 export type ProjectEntry = InlineProjectConfig | string;
 
 /** Jest-passthrough keys valid only at root `test:` (not per-project). */
@@ -119,10 +136,20 @@ export interface Config {
 	coverageCache?: boolean;
 	extends?: Array<string> | string;
 	formatters?: Array<FormatterEntry>;
-	gameOutput?: string;
+	/**
+	 * Where to write Game Output. A path, or `true` to default to
+	 * `game-output.log` under the root. In workspace mode this becomes the
+	 * single Aggregated Game Output file (consensus-resolved).
+	 */
+	gameOutput?: string | true;
 	jestPath?: string;
 	luauRoots?: Array<string>;
-	outputFile?: string;
+	/**
+	 * Where to write the Jest result JSON. A path, or `true` to default to
+	 * `jest-output.log` under the root. In workspace mode this becomes the
+	 * single aggregated result file (consensus-resolved).
+	 */
+	outputFile?: string | true;
 	parallel?: "auto" | number;
 	placeFile?: string;
 	placeId?: string;
@@ -138,6 +165,7 @@ export interface Config {
 	typecheckOnly?: boolean;
 	typecheckTsconfig?: string;
 	universeId?: string;
+	workspace?: WorkspaceConfig;
 }
 
 /**
@@ -155,6 +183,10 @@ export interface ResolvedConfig
 	coverageDirectory: string;
 	coveragePathIgnorePatterns: Array<string>;
 	coverageReporters: Array<CoverageReporter>;
+	/** `true` is expanded to `<rootDir>/game-output.log` at resolve time; an explicit path is kept as-is. */
+	gameOutput?: string;
+	/** `true` is expanded to `<rootDir>/jest-output.log` at resolve time; an explicit path is kept as-is. */
+	outputFile?: string;
 	passWithNoTests: boolean;
 	placeFile: string;
 	pollInterval: number;
@@ -182,12 +214,20 @@ export interface WorkspaceRunOptions {
 	backend: Backend;
 	color: boolean;
 	formatters: Array<FormatterEntry>;
+	/** Absolute path for the Aggregated Game Output file; undefined = off. */
+	gameOutput?: string;
+	/** Absolute path for the aggregated result file; undefined = off. */
+	outputFile?: string;
 	parallel?: "auto" | number;
 	placeId?: string;
 	pollInterval: number;
 	port: number;
 	silent: boolean;
 	universeId?: string;
+	/** When true, emit Per-package Game Output files under `.jest-roblox/output/`. */
+	workspaceGameOutput: boolean;
+	/** When true, emit per-package result files under `.jest-roblox/output/`. */
+	workspaceOutputFile: boolean;
 }
 
 type MergerFunction<T> = (defaults: T) => T;
@@ -352,6 +392,12 @@ const inlineProjectSchema = type({
 	"test": projectTestConfigSchema,
 });
 
+const workspaceConfigSchema = type({
+	"+": "reject",
+	"gameOutput?": "true",
+	"outputFile?": "true",
+});
+
 const formatterEntrySchema = type("string").or(type(["string", type("object")]));
 
 const projectEntrySchema = type("string").or(inlineProjectSchema);
@@ -406,10 +452,10 @@ export const configSchema: Type<Config> = type({
 	"coverageCache?": "boolean",
 	"extends?": type("string").or(type("string[]")),
 	"formatters?": formatterEntrySchema.array(),
-	"gameOutput?": "string",
+	"gameOutput?": type("string").or("true"),
 	"jestPath?": "string",
 	"luauRoots?": "string[]",
-	"outputFile?": "string",
+	"outputFile?": type("string").or("true"),
 	"parallel?": type("'auto'").or("number.integer >= 1"),
 	"placeFile?": "string",
 	"placeId?": "string",
@@ -425,6 +471,7 @@ export const configSchema: Type<Config> = type({
 	"typecheckOnly?": "boolean",
 	"typecheckTsconfig?": "string",
 	"universeId?": "string",
+	"workspace?": workspaceConfigSchema,
 }).as<Config>();
 
 export interface ConfigInput extends Except<Config, "formatters" | "luauRoots" | "test"> {
@@ -482,6 +529,7 @@ export const ROOT_CLI_KEYS_LIST: ReadonlyArray<RootCliKey> = [
 	"typecheckOnly",
 	"typecheckTsconfig",
 	"universeId",
+	"workspace",
 ];
 
 const SHARED_TEST_KEYS_LIST = [

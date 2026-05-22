@@ -138,6 +138,10 @@ default. Mixed per-package declarations error loudly.
 | `backend` | `"auto"`, `"open-cloud"`, or `"studio"` | `"auto"` |
 | `color` | Use ANSI colors in console output | `true` |
 | `formatters` | Output formatters (`"default"`, `"agent"`, `"json"`, `"github-actions"`) | `["default"]` |
+| `gameOutput` | Write Game Output to a file — a path, or `true` for `game-output.log` under the root. In `--workspace` mode this is one grouped aggregate file across every package | — |
+| `outputFile` | Write the Jest result JSON — a path, or `true` for `jest-output.log` under the root. In `--workspace` mode this is the single merged result across every package | — |
+| `workspace.gameOutput` | `true` to also emit per-package Game Output files under `.jest-roblox/output/` (`--workspace` only) | — |
+| `workspace.outputFile` | `true` to also emit per-package result files under `.jest-roblox/output/` (`--workspace` only) | — |
 | `parallel` | Number of concurrent Open Cloud sessions, or `"auto"` (= `min(jobs, 3)`) | — |
 | `placeId` | Open Cloud place ID | — |
 | `pollInterval` | How often to poll for results in ms (Open Cloud) | `500` |
@@ -159,7 +163,6 @@ extends.
 | `sourceMap` | Map Luau errors back to TypeScript (roblox-ts only) | `true` |
 | `rojoProject` | Path to your Rojo project file | auto |
 | `jestPath` | Where Jest lives in the DataModel | auto |
-| `gameOutput` | Path to write game print/warn/error output | — |
 | `showLuau` | Show Luau code snippets in failure output | `true` |
 | `coverageCache` | Reuse incrementally-instrumented coverage shadow dir between runs | `true` |
 | `luauRoots` | Where Luau files live for coverage instrumentation | auto from tsconfig `outDir` |
@@ -365,6 +368,19 @@ Per-package coverage is aggregated into a single report under
 `<rootDir>/<coverageDirectory>`. `rootDir` defaults to the current working
 directory, so run from the workspace root (or set `rootDir`) if you want
 the report to land there.
+
+Game Output has two independent sinks. Setting `gameOutput` (a path, or
+`true`) writes one **grouped** aggregate file at the workspace root —
+`[{ package, project, entries }]`, one group per (package, project) that ran.
+Setting `workspace.gameOutput: true` writes a **per-package** file per
+(package, project) under `.jest-roblox/output/`. Either, both, or neither
+may be set; with both, humans see the aggregate announced and agents see the
+per-package paths.
+
+`outputFile` (the Jest result JSON) follows the same two-sink model:
+`outputFile` (a path, or `true`) writes one merged result at the workspace
+root, and `workspace.outputFile: true` writes a per-package result file per
+(package, project) under `.jest-roblox/output/`.
 
 ## CLI flags
 

@@ -120,6 +120,8 @@ function makeRunOptions(overrides: Partial<WorkspaceRunOptions> = {}): Workspace
 		pollInterval: DEFAULT_CONFIG.pollInterval,
 		port: DEFAULT_CONFIG.port,
 		silent: DEFAULT_CONFIG.silent,
+		workspaceGameOutput: false,
+		workspaceOutputFile: false,
 		...overrides,
 	};
 }
@@ -2009,7 +2011,7 @@ describe(runWorkspace, () => {
 				backend,
 				cli: makeCli(),
 				packageInfos: [FOO_INFO],
-				runOptions: makeRunOptions(),
+				runOptions: makeRunOptions({ workspaceOutputFile: true }),
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
 			});
@@ -2050,7 +2052,7 @@ describe(runWorkspace, () => {
 				backend,
 				cli: makeCli(),
 				packageInfos: [FOO_INFO],
-				runOptions: makeRunOptions(),
+				runOptions: makeRunOptions({ workspaceOutputFile: true }),
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
 			});
@@ -2063,110 +2065,43 @@ describe(runWorkspace, () => {
 				),
 			).toBeTrue();
 		});
+
+		it("should NOT write per-package result files when workspace.outputFile is disabled", async () => {
+			expect.assertions(1);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+			setLoadedConfigPerPackage({ [FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR } });
+
+			const { backend } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions(),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(
+				vol.existsSync(
+					path.join(ROOT, ".jest-roblox", "output", "@halcyon-foo--@halcyon-foo.json"),
+				),
+			).toBeFalse();
+		});
 	});
 
 	describe("per-package gameOutput files", () => {
-		it("should write parsed entries to .jest-roblox/output/<pkg>--<project>.gameOutput.json when --gameOutput is set on the CLI", async () => {
-			expect.assertions(2);
-
-			vol.reset();
-			vol.fromJSON({
-				...seedPackage(FOO_DIR, {
-					name: "@halcyon/foo",
-					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
-				}),
-				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
-			});
-			// `mergeCliWithConfig` layers `cli.gameOutput` onto every loaded
-			// pkgConfig in loadPackages, so the CLI flag flows through the
-			// per-package gate just like a shared-config declaration would.
-			setLoadedConfigPerPackage({ [FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR } });
-
-			const gameOutputRaw = JSON.stringify([
-				{ message: "hello", messageType: 0, timestamp: 1000 },
-			]);
-			const { backend } = createStubBackend([
-				{ gameOutput: gameOutputRaw, jestOutput: passingResult(), pkg: "@halcyon/foo" },
-			]);
-
-			await runWorkspace({
-				backend,
-				cli: makeCli({ gameOutput: path.join(ROOT, "out.json") }),
-				packageInfos: [FOO_INFO],
-				runOptions: makeRunOptions(),
-				version: "0.0.0-test",
-				workspaceRoot: ROOT,
-			});
-
-			const file = path.join(
-				ROOT,
-				".jest-roblox",
-				"output",
-				"@halcyon-foo--@halcyon-foo.gameOutput.json",
-			);
-
-			expect(vol.existsSync(file)).toBeTrue();
-			expect(JSON.parse(vol.readFileSync(file, "utf8") as string)).toStrictEqual([
-				{ message: "hello", messageType: 0, timestamp: 1000 },
-			]);
-		});
-
-		it("should write per-package gameOutput files when only the package config declares gameOutput (HAL-231)", async () => {
-			expect.assertions(2);
-
-			// HAL-231 regression: a user declares gameOutput in jest.shared.ts
-			// (extended by every package). The workspace root has no jest.config,
-			// so c12's lookup there sees nothing — pre-fix the gate at
-			// workspace-runner read `config.gameOutput` and silently skipped the
-			// per-package write that #478 already wired up. The new gate scans
-			// per-package configs and fires whenever any selected package
-			// declares the field.
-			vol.reset();
-			vol.fromJSON({
-				...seedPackage(FOO_DIR, {
-					name: "@halcyon/foo",
-					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
-				}),
-				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
-			});
-			setLoadedConfigPerPackage({
-				[FOO_DIR]: {
-					...DEFAULT_CONFIG,
-					gameOutput: path.join(ROOT, "out.json"),
-					rootDir: FOO_DIR,
-				},
-			});
-
-			const gameOutputRaw = JSON.stringify([
-				{ message: "hello", messageType: 0, timestamp: 1000 },
-			]);
-			const { backend } = createStubBackend([
-				{ gameOutput: gameOutputRaw, jestOutput: passingResult(), pkg: "@halcyon/foo" },
-			]);
-
-			await runWorkspace({
-				backend,
-				cli: makeCli(),
-				packageInfos: [FOO_INFO],
-				runOptions: makeRunOptions(),
-				version: "0.0.0-test",
-				workspaceRoot: ROOT,
-			});
-
-			const file = path.join(
-				ROOT,
-				".jest-roblox",
-				"output",
-				"@halcyon-foo--@halcyon-foo.gameOutput.json",
-			);
-
-			expect(vol.existsSync(file)).toBeTrue();
-			expect(JSON.parse(vol.readFileSync(file, "utf8") as string)).toStrictEqual([
-				{ message: "hello", messageType: 0, timestamp: 1000 },
-			]);
-		});
-
-		it("should NOT write per-package gameOutput files when no config layer declares gameOutput", async () => {
+		it("should write parsed entries to .jest-roblox/output/<pkg>--<project>.gameOutput.json when workspace.gameOutput is enabled", async () => {
 			expect.assertions(2);
 
 			vol.reset();
@@ -2190,13 +2125,57 @@ describe(runWorkspace, () => {
 				backend,
 				cli: makeCli(),
 				packageInfos: [FOO_INFO],
-				runOptions: makeRunOptions(),
+				runOptions: makeRunOptions({ workspaceGameOutput: true }),
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
 			});
 
-			// Result JSON sibling is still emitted; only the .gameOutput.json
-			// companion is skipped when no --gameOutput path is requested.
+			const file = path.join(
+				ROOT,
+				".jest-roblox",
+				"output",
+				"@halcyon-foo--@halcyon-foo.gameOutput.json",
+			);
+
+			expect(vol.existsSync(file)).toBeTrue();
+			expect(JSON.parse(vol.readFileSync(file, "utf8") as string)).toStrictEqual([
+				{ message: "hello", messageType: 0, timestamp: 1000 },
+			]);
+		});
+
+		it("should NOT write per-package gameOutput files when workspace.gameOutput is disabled", async () => {
+			expect.assertions(2);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+			setLoadedConfigPerPackage({ [FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR } });
+
+			const gameOutputRaw = JSON.stringify([
+				{ message: "hello", messageType: 0, timestamp: 1000 },
+			]);
+			const { backend } = createStubBackend([
+				{ gameOutput: gameOutputRaw, jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions({ workspaceOutputFile: true }),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			// The two per-package sinks are independent: with
+			// workspace.outputFile on, the result JSON sibling is emitted, but
+			// the .gameOutput.json companion stays absent because
+			// workspace.gameOutput is off.
 			expect(
 				vol.existsSync(
 					path.join(ROOT, ".jest-roblox", "output", "@halcyon-foo--@halcyon-foo.json"),
@@ -2233,9 +2212,9 @@ describe(runWorkspace, () => {
 
 			await runWorkspace({
 				backend,
-				cli: makeCli({ gameOutput: path.join(ROOT, "out.json") }),
+				cli: makeCli(),
 				packageInfos: [FOO_INFO],
-				runOptions: makeRunOptions(),
+				runOptions: makeRunOptions({ workspaceGameOutput: true }),
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
 			});
@@ -2269,9 +2248,9 @@ describe(runWorkspace, () => {
 
 			await runWorkspace({
 				backend,
-				cli: makeCli({ gameOutput: path.join(ROOT, "out.json") }),
+				cli: makeCli(),
 				packageInfos: [FOO_INFO],
-				runOptions: makeRunOptions(),
+				runOptions: makeRunOptions({ workspaceGameOutput: true }),
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
 			});
@@ -2325,9 +2304,9 @@ describe(runWorkspace, () => {
 
 			await runWorkspace({
 				backend,
-				cli: makeCli({ gameOutput: path.join(ROOT, "out.json") }),
+				cli: makeCli(),
 				packageInfos: [FOO_INFO, BAR_INFO],
-				runOptions: makeRunOptions({ silent: true }),
+				runOptions: makeRunOptions({ silent: true, workspaceGameOutput: true }),
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
 			});
@@ -2402,9 +2381,9 @@ describe(runWorkspace, () => {
 
 			await runWorkspace({
 				backend,
-				cli: makeCli({ gameOutput: path.join(ROOT, "out.json") }),
+				cli: makeCli(),
 				packageInfos: [FOO_INFO],
-				runOptions: makeRunOptions(),
+				runOptions: makeRunOptions({ workspaceGameOutput: true }),
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
 			});
@@ -2430,6 +2409,262 @@ describe(runWorkspace, () => {
 			expect(JSON.parse(vol.readFileSync(serverFile, "utf8") as string)).toStrictEqual([
 				{ message: "server", messageType: 1, timestamp: 2 },
 			]);
+		});
+	});
+
+	describe("aggregated gameOutput", () => {
+		function seedFoo(): void {
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+			setLoadedConfigPerPackage({ [FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR } });
+		}
+
+		const helloRaw = JSON.stringify([{ message: "hello", messageType: 0, timestamp: 1000 }]);
+		const aggregateFile = path.join(ROOT, "game-output.log");
+		const perPackageFile = path.join(
+			ROOT,
+			".jest-roblox",
+			"output",
+			"@halcyon-foo--@halcyon-foo.gameOutput.json",
+		);
+
+		it("should write a single grouped aggregate file when runOptions.gameOutput is set", async () => {
+			expect.assertions(1);
+
+			seedFoo();
+			const { backend } = createStubBackend([
+				{ gameOutput: helloRaw, jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions({ gameOutput: aggregateFile, silent: true }),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(JSON.parse(vol.readFileSync(aggregateFile, "utf8") as string)).toStrictEqual([
+				{
+					entries: [{ message: "hello", messageType: 0, timestamp: 1000 }],
+					package: "@halcyon/foo",
+					project: "@halcyon/foo",
+				},
+			]);
+		});
+
+		it("should write both the aggregate and per-package files when both are enabled", async () => {
+			expect.assertions(2);
+
+			seedFoo();
+			const { backend } = createStubBackend([
+				{ gameOutput: helloRaw, jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions({
+					gameOutput: aggregateFile,
+					silent: true,
+					workspaceGameOutput: true,
+				}),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(vol.existsSync(aggregateFile)).toBeTrue();
+			expect(vol.existsSync(perPackageFile)).toBeTrue();
+		});
+
+		it("should announce only the aggregate to humans when both sinks are active", async () => {
+			expect.assertions(2);
+
+			seedFoo();
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const { backend } = createStubBackend([
+				{ gameOutput: helloRaw, jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions({
+					formatters: ["default"],
+					gameOutput: aggregateFile,
+					workspaceGameOutput: true,
+				}),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("game-output.log"));
+			expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining(".gameOutput.json"));
+		});
+
+		it("should announce per-package files to agents when both sinks are active", async () => {
+			expect.assertions(2);
+
+			seedFoo();
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const { backend } = createStubBackend([
+				{ gameOutput: helloRaw, jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions({
+					formatters: ["agent"],
+					gameOutput: aggregateFile,
+					workspaceGameOutput: true,
+				}),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(".gameOutput.json"));
+			expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining("game-output.log"));
+		});
+
+		it("should announce per-package paths to humans when only per-package is active", async () => {
+			expect.assertions(1);
+
+			seedFoo();
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const { backend } = createStubBackend([
+				{ gameOutput: helloRaw, jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions({ formatters: ["default"], workspaceGameOutput: true }),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(".gameOutput.json"));
+		});
+
+		it("should announce the aggregate to agents when only the aggregate is active", async () => {
+			expect.assertions(1);
+
+			seedFoo();
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const { backend } = createStubBackend([
+				{ gameOutput: helloRaw, jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions({ formatters: ["agent"], gameOutput: aggregateFile }),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("game-output.log"));
+		});
+
+		it("should not announce the aggregate when it captured zero entries", async () => {
+			expect.assertions(2);
+
+			seedFoo();
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const { backend } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions({ formatters: ["default"], gameOutput: aggregateFile }),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			// File still written (empty group), but no notice for zero entries.
+			expect(vol.existsSync(aggregateFile)).toBeTrue();
+			expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining("game-output.log"));
+		});
+	});
+
+	describe("aggregated outputFile", () => {
+		it("should write the merged result to runOptions.outputFile", async () => {
+			expect.assertions(2);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+			setLoadedConfigPerPackage({ [FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR } });
+
+			const { backend } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+			const outputFile = path.join(ROOT, "jest-output.log");
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions({ outputFile, silent: true }),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(vol.existsSync(outputFile)).toBeTrue();
+			expect(JSON.parse(vol.readFileSync(outputFile, "utf8") as string)).toMatchObject({
+				numPassedTests: 1,
+				success: true,
+			});
+		});
+
+		it("should not write a result file when runOptions.outputFile is unset", async () => {
+			expect.assertions(1);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+			setLoadedConfigPerPackage({ [FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR } });
+
+			const { backend } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions({ silent: true }),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(vol.existsSync(path.join(ROOT, "jest-output.log"))).toBeFalse();
 		});
 	});
 
@@ -2552,7 +2787,7 @@ describe(runWorkspace, () => {
 				backend,
 				cli: makeCli(),
 				packageInfos: [FOO_INFO, BAR_INFO],
-				runOptions: makeRunOptions({ silent: true }),
+				runOptions: makeRunOptions({ silent: true, workspaceOutputFile: true }),
 				version: "0.0.0-test",
 				workspaceRoot: ROOT,
 			});

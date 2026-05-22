@@ -17,6 +17,7 @@ export type {
 	ProjectEntry,
 	DisplayName,
 	SharedTestConfig,
+	WorkspaceConfig,
 } from "./config/schema.ts";
 export {
 	DEFAULT_CONFIG,

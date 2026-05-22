@@ -8,10 +8,27 @@ CLI tool that runs Jest tests inside a real Roblox runtime via Open Cloud
 **Game Output**:
 The dump of every line that surfaced in the Roblox Output during a test run —
 native `print`/`warn`/`error`, engine warnings, anything `LogService` would
-return. Surfaced via the `--gameOutput <path>` flag as a JSON array of
-`{ message, messageType, timestamp }` records. Sourced from
+return. Surfaced via the `gameOutput` config field (`string | true`; `true` ⇒
+`game-output.log` under the root) or `--gameOutput <path>` flag, as a JSON
+array of `{ message, messageType, timestamp }` records. Sourced from
 `LogService.MessageOut`. Used for human inspection when a test run misbehaves.
 _Avoid_: "Jest output", "stdout", "log dump"
+
+**Aggregated Game Output**:
+The single Game Output file written when more than one source contributes —
+grouped, not the flat `single` array. In `multi` mode (one config, several
+projects) the groups are `[{ project, entries }]`; in `workspace` mode they
+are `[{ package, project, entries }]`, written under the workspace root with
+its path/enablement consensus-resolved as a Workspace Run Option. One group
+per (package?, project) that ran, even if `entries` is empty.
+_Avoid_: "merged log", "combined output"
+
+**Per-package Game Output**:
+In workspace mode, one `.jest-roblox/output/<pkg>--<project>.gameOutput.json`
+per selected (package, project), each a flat `{ message, messageType,
+timestamp }` array. Gated by `workspace.gameOutput: true`. Independent of
+Aggregated Game Output — a single run can emit both.
+_Avoid_: "split logs"
 
 **Banner Output**:
 The narrower buffer that captures Jest's own writes to its `process.stdout` /
@@ -25,17 +42,23 @@ _Avoid_: "captured stdout", "intercepted writes"
 The loaded jest config for a single workspace package, possibly resolved via
 `extends: "../jest.shared.ts"`. Source of truth for everything jest-shaped —
 `testMatch`, `setupFiles`, `coverageCache`, `coveragePathIgnorePatterns`,
-`rojoProject`, `gameOutput`, and so on. In workspace mode, the runtime reads
-these knobs per-package; the workspace-root config file is not consulted for
-them.
+`rojoProject`, and so on. In workspace mode, the runtime reads these knobs
+per-package; the workspace-root config file is not consulted for them.
+(`gameOutput`, `outputFile`, `workspace.gameOutput`, and `workspace.outputFile`
+are the exception — declared per-package but consensus-resolved as Workspace
+Run Options.)
 _Avoid_: "root config", "workspace-level config" — both imply a workspace
 root config that drives package behavior, which is no longer the model.
 
 **Workspace Run Options**:
 The narrow set of knobs that are atomic to one workspace invocation:
 `backend`, `color`, `formatters`, `parallel`, `placeId`, `pollInterval`,
-`port`, `silent`, `universeId`. They describe what the run targets and how
-the CLI presents output — not how any individual package runs. Resolved by
+`port`, `silent`, `universeId`, `gameOutput` (the Aggregated Game Output
+path), `workspace.gameOutput` (the Per-package Game Output toggle),
+`outputFile` (the aggregated result path), and `workspace.outputFile` (the
+per-package result toggle). They
+describe what the run targets and how the CLI presents output — not how any
+individual package runs. Resolved by
 `buildWorkspaceRunOptions` as CLI flag (or documented env var) > per-package
 consensus > `DEFAULT_CONFIG`. Per-package consensus means: every selected
 package's raw config must declare the field equally, OR none of them declare

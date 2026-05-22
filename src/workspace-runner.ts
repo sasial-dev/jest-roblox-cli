@@ -31,8 +31,11 @@ import {
 	type WorkspacePackageCoverage,
 } from "./coverage/workspace-prepare.ts";
 import { type ExecuteResult, runProjects, type RunProjectsOptions } from "./executor.ts";
+import { writeJsonFile } from "./formatters/json.ts";
+import { usesAgentFormatter } from "./formatters/utils.ts";
 import { StreamingResultClient } from "./memory-store/sorted-map-client.ts";
 import { prepareWorkStealingQueue } from "./memory-store/work-stealing.ts";
+import { mergeProjectResults } from "./output.ts";
 import {
 	StreamingAggregator,
 	type StreamingAggregatorOnEntry,
@@ -44,7 +47,14 @@ import {
 	type MaterializerInput,
 } from "./staging/test-script-staged.ts";
 import type { RojoTreeNode } from "./types/rojo.ts";
-import { parseGameOutput, writeGameOutput } from "./utils/game-output.ts";
+import {
+	buildGroupedGameOutput,
+	countGroupedEntries,
+	formatGameOutputNotice,
+	parseGameOutput,
+	writeGameOutput,
+	writeGroupedGameOutput,
+} from "./utils/game-output.ts";
 import { globSync } from "./utils/glob.ts";
 import { buildWithRojo } from "./utils/rojo-builder.ts";
 import { ensurePackageDirectories } from "./workspace/ensure-paths.ts";
@@ -271,23 +281,21 @@ export async function runWorkspace(
 		...dispatchSpec,
 	});
 
-	writePerPackageOutputFiles(workspaceRoot, pending, results);
-
-	// The gate scans per-package configs, not the workspace-root config. A
-	// user declaring `gameOutput` in jest.shared.ts (extended by every
-	// package) — but not at the workspace root — would otherwise see no
-	// per-package files: c12's workspace-root lookup never sees
-	// jest.shared.ts. `mergeCliWithConfig` already layers `--gameOutput`
-	// onto every loaded `pkgConfig` in `loadPackages`, so the CLI-flag path
-	// flows through this same check.
-	//
-	// All-or-none: when the gate opens, every selected package gets a
-	// `.gameOutput.json` companion file (empty array for packages that
-	// don't declare gameOutput themselves). This is correct for the common
-	// `jest.shared.ts` extends case and surprising in mixed setups.
-	if (loaded.some((entry) => entry.pkgConfig.gameOutput !== undefined)) {
-		writePerPackageGameOutputFiles(workspaceRoot, pending, results);
+	if (runOptions.workspaceOutputFile) {
+		writePerPackageOutputFiles(workspaceRoot, pending, results);
 	}
+
+	if (runOptions.outputFile !== undefined) {
+		await writeJsonFile(mergeProjectResults(results).result, runOptions.outputFile);
+	}
+
+	emitWorkspaceGameOutput({
+		pending,
+		results,
+		runOptions,
+		verbose: options.cli.verbose,
+		workspaceRoot,
+	});
 
 	return attachCoverageManifests(results, pending, coverageByPackage);
 }
@@ -718,6 +726,19 @@ function attachCoverageManifests(
 const PER_PACKAGE_OUTPUT_DIRECTORY = path.join(".jest-roblox", "output");
 const FILESYSTEM_UNSAFE = /[^\w@.-]+/g;
 
+interface PerPackageGameOutputFile {
+	count: number;
+	path: string;
+}
+
+interface EmitWorkspaceGameOutputInput {
+	pending: Array<PendingEntry>;
+	results: Array<ExecuteResult>;
+	runOptions: WorkspaceRunOptions;
+	verbose?: boolean;
+	workspaceRoot: string;
+}
+
 function sanitizePathSegment(segment: string): string {
 	return segment.replace(FILESYSTEM_UNSAFE, "-");
 }
@@ -749,20 +770,80 @@ function writePerPackageOutputFiles(
 // `.jest-roblox/output/`. The path is built absolute against workspaceRoot
 // before calling writeGameOutput — that helper calls path.resolve which
 // would otherwise fall back to process.cwd() and silently mis-route files.
+// Returns each written file's path and entry count so the caller can build
+// notices for the non-empty ones.
 function writePerPackageGameOutputFiles(
 	workspaceRoot: string,
 	pending: Array<PendingEntry>,
 	results: Array<ExecuteResult>,
-): void {
+): Array<PerPackageGameOutputFile> {
 	const directory = path.join(workspaceRoot, PER_PACKAGE_OUTPUT_DIRECTORY);
 
-	for (const [index, result] of results.entries()) {
+	return results.map((result, index) => {
 		// eslint-disable-next-line ts/no-non-null-assertion -- runProjects preserves order
 		const entry = pending[index]!;
 		const filename = `${sanitizePathSegment(entry.pkg)}--${sanitizePathSegment(
 			entry.project.displayName,
 		)}.gameOutput.json`;
-		writeGameOutput(path.join(directory, filename), parseGameOutput(result.gameOutput));
+		const filePath = path.join(directory, filename);
+		const entries = parseGameOutput(result.gameOutput);
+		writeGameOutput(filePath, entries);
+		return { count: entries.length, path: filePath };
+	});
+}
+
+// Writes the configured Game Output sinks for a workspace run and announces
+// exactly one of them. Aggregated (single grouped file, top-level
+// `gameOutput`) and Per-package (`.jest-roblox/output/` files,
+// `workspace.gameOutput`) are independent; either, both, or neither may be
+// active. Humans prefer the single aggregate (one place to look); agents
+// prefer the per-package files (smaller, targeted context).
+function emitWorkspaceGameOutput(input: EmitWorkspaceGameOutputInput): void {
+	const { pending, results, runOptions, verbose, workspaceRoot } = input;
+	const aggregatePath = runOptions.gameOutput;
+
+	let aggregateNotice = "";
+	if (aggregatePath !== undefined) {
+		const groups = buildGroupedGameOutput(
+			results.map((result, index) => {
+				// eslint-disable-next-line ts/no-non-null-assertion -- runProjects preserves order
+				const entry = pending[index]!;
+				return {
+					package: entry.pkg,
+					project: entry.project.displayName,
+					raw: result.gameOutput,
+				};
+			}),
+		);
+		writeGroupedGameOutput(aggregatePath, groups);
+		aggregateNotice = formatGameOutputNotice(aggregatePath, countGroupedEntries(groups));
+	}
+
+	let perPackageNotices: Array<string> = [];
+	if (runOptions.workspaceGameOutput) {
+		perPackageNotices = writePerPackageGameOutputFiles(workspaceRoot, pending, results)
+			.map((file) => formatGameOutputNotice(file.path, file.count))
+			.filter((notice) => notice !== "");
+	}
+
+	if (runOptions.silent) {
+		return;
+	}
+
+	const aggregateActive = aggregatePath !== undefined;
+	const perPackageActive = runOptions.workspaceGameOutput;
+	const preferPerPackage = usesAgentFormatter(runOptions.formatters, verbose);
+
+	const announcePerPackage = preferPerPackage
+		? perPackageActive
+		: !aggregateActive && perPackageActive;
+
+	if (announcePerPackage) {
+		for (const notice of perPackageNotices) {
+			console.error(notice);
+		}
+	} else if (aggregateActive && aggregateNotice !== "") {
+		console.error(aggregateNotice);
 	}
 }
 

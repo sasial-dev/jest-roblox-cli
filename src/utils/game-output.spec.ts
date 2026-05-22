@@ -3,7 +3,14 @@ import * as path from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import type { GameOutputEntry } from "../types/game-output.ts";
-import { formatGameOutputNotice, parseGameOutput, writeGameOutput } from "./game-output.ts";
+import {
+	buildGroupedGameOutput,
+	countGroupedEntries,
+	formatGameOutputNotice,
+	parseGameOutput,
+	writeGameOutput,
+	writeGroupedGameOutput,
+} from "./game-output.ts";
 
 describe(parseGameOutput, () => {
 	it("should parse valid JSON array of log entries", () => {
@@ -108,6 +115,82 @@ describe(writeGameOutput, () => {
 		});
 
 		expect(fs.existsSync(nested)).toBeTrue();
+	});
+});
+
+describe(buildGroupedGameOutput, () => {
+	it("should build one group per source in order, parsing each raw payload", () => {
+		expect.assertions(1);
+
+		const raw = JSON.stringify([{ message: "hi", messageType: 0, timestamp: 1 }]);
+		const groups = buildGroupedGameOutput([
+			{ package: "@scope/a", project: "client", raw },
+			{ package: "@scope/b", project: "server", raw: undefined },
+		]);
+
+		expect(groups).toStrictEqual([
+			{
+				entries: [{ message: "hi", messageType: 0, timestamp: 1 }],
+				package: "@scope/a",
+				project: "client",
+			},
+			{ entries: [], package: "@scope/b", project: "server" },
+		]);
+	});
+
+	it("should omit the package field when the source has none (multi mode)", () => {
+		expect.assertions(1);
+
+		const groups = buildGroupedGameOutput([{ project: "client", raw: undefined }]);
+
+		expect(groups).toStrictEqual([{ entries: [], project: "client" }]);
+	});
+});
+
+describe(countGroupedEntries, () => {
+	it("should sum entry counts across groups", () => {
+		expect.assertions(1);
+
+		const count = countGroupedEntries([
+			{ entries: [{ message: "a", messageType: 0, timestamp: 1 }], project: "x" },
+			{ entries: [], project: "y" },
+			{
+				entries: [
+					{ message: "b", messageType: 0, timestamp: 2 },
+					{ message: "c", messageType: 0, timestamp: 3 },
+				],
+				project: "z",
+			},
+		]);
+
+		expect(count).toBe(3);
+	});
+});
+
+describe(writeGroupedGameOutput, () => {
+	const testDirectory = path.join(import.meta.dirname, "__test-grouped__");
+	const testFile = path.join(testDirectory, "game-output.log");
+
+	it("should write grouped entries to file as JSON, creating parent dirs", () => {
+		expect.assertions(1);
+
+		const groups = [
+			{
+				entries: [{ message: "test", messageType: 0, timestamp: 1000 }],
+				package: "@scope/a",
+				project: "client",
+			},
+		];
+
+		writeGroupedGameOutput(testFile, groups);
+
+		onTestFinished(() => {
+			fs.rmSync(testDirectory, { force: true, recursive: true });
+		});
+
+		const written = JSON.parse(fs.readFileSync(testFile, "utf-8"));
+
+		expect(written).toStrictEqual(groups);
 	});
 });
 

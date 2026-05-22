@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import process from "node:process";
 import { isDeepStrictEqual } from "node:util";
 import { isAgent } from "std-env";
@@ -18,6 +19,8 @@ interface PackageConfigEntry {
 interface BuildWorkspaceRunOptionsInput {
 	cli: CliOptions;
 	perPackageConfigs: ReadonlyArray<PackageConfigEntry>;
+	/** Base directory for resolving the Aggregated Game Output path. */
+	workspaceRoot?: string;
 }
 
 interface ConsensusSpec<T> {
@@ -55,7 +58,7 @@ export class WorkspaceConsensusError extends Error {
 export function buildWorkspaceRunOptions(
 	input: BuildWorkspaceRunOptionsInput,
 ): WorkspaceRunOptions {
-	const { cli, perPackageConfigs } = input;
+	const { cli, perPackageConfigs, workspaceRoot = process.cwd() } = input;
 
 	const backend = resolveField(cli, perPackageConfigs, {
 		name: "backend",
@@ -112,6 +115,30 @@ export function buildWorkspaceRunOptions(
 
 	const formatters = resolveFormatters(cli, perPackageConfigs);
 
+	const rawGameOutput = resolveOptionalField(cli, perPackageConfigs, {
+		name: "gameOutput",
+		readCli: (entry) => entry.gameOutput,
+		readConfig: (entry) => entry.gameOutput,
+	});
+
+	const rawOutputFile = resolveOptionalField(cli, perPackageConfigs, {
+		name: "outputFile",
+		readCli: (entry) => entry.outputFile,
+		readConfig: (entry) => entry.outputFile,
+	});
+
+	const workspaceGameOutput =
+		computeConsensus(perPackageConfigs, {
+			name: "workspace.gameOutput",
+			readConfig: (entry) => entry.workspace?.gameOutput,
+		}) === true;
+
+	const workspaceOutputFile =
+		computeConsensus(perPackageConfigs, {
+			name: "workspace.outputFile",
+			readConfig: (entry) => entry.workspace?.outputFile,
+		}) === true;
+
 	const runOptions: WorkspaceRunOptions = {
 		backend,
 		color,
@@ -119,7 +146,27 @@ export function buildWorkspaceRunOptions(
 		pollInterval,
 		port,
 		silent,
+		workspaceGameOutput,
+		workspaceOutputFile,
 	};
+
+	const gameOutput = resolveAggregateArtifactPath(
+		rawGameOutput,
+		workspaceRoot,
+		"game-output.log",
+	);
+	if (gameOutput !== undefined) {
+		runOptions.gameOutput = gameOutput;
+	}
+
+	const outputFile = resolveAggregateArtifactPath(
+		rawOutputFile,
+		workspaceRoot,
+		"jest-output.log",
+	);
+	if (outputFile !== undefined) {
+		runOptions.outputFile = outputFile;
+	}
 
 	if (parallel !== undefined) {
 		runOptions.parallel = parallel;
@@ -258,6 +305,22 @@ function resolveFormatters(
 	}
 
 	return defaultFormatters();
+}
+
+// `true` expands to `defaultName`; relative paths (including that default)
+// anchor at the workspace root so the aggregate lands there regardless of the
+// directory the CLI was invoked from.
+function resolveAggregateArtifactPath(
+	value: string | true | undefined,
+	workspaceRoot: string,
+	defaultName: string,
+): string | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+
+	const target = value === true ? defaultName : value;
+	return path.isAbsolute(target) ? target : path.join(workspaceRoot, target);
 }
 
 export type { ConsensusGroup };

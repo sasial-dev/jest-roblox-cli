@@ -90,6 +90,38 @@ describe(resolveConfig, () => {
 		expect(result.rootDir).toBe("/custom/path");
 	});
 
+	it("should expand gameOutput: true to game-output.log under rootDir", () => {
+		expect.assertions(1);
+
+		const result = resolveConfig({ gameOutput: true, rootDir: "/custom/path" });
+
+		expect(result.gameOutput).toBe(path.join("/custom/path", "game-output.log"));
+	});
+
+	it("should leave an explicit gameOutput path untouched", () => {
+		expect.assertions(1);
+
+		const result = resolveConfig({ gameOutput: "logs/out.json" });
+
+		expect(result.gameOutput).toBe("logs/out.json");
+	});
+
+	it("should expand outputFile: true to jest-output.log under rootDir", () => {
+		expect.assertions(1);
+
+		const result = resolveConfig({ outputFile: true, rootDir: "/custom/path" });
+
+		expect(result.outputFile).toBe(path.join("/custom/path", "jest-output.log"));
+	});
+
+	it("should leave an explicit outputFile path untouched", () => {
+		expect.assertions(1);
+
+		const result = resolveConfig({ outputFile: "results.json" });
+
+		expect(result.outputFile).toBe("results.json");
+	});
+
 	it("should accept valid backend values", () => {
 		expect.assertions(3);
 

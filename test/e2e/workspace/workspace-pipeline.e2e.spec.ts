@@ -13,7 +13,13 @@ const gameOutputEntrySchema = type({
 	messageType: "number",
 	timestamp: "number",
 });
-const gameOutputSchema = gameOutputEntrySchema.array();
+// Multi-project runs write the grouped Aggregated Game Output shape:
+// `[{ project, entries }]` (no package for a single-config run).
+const gameOutputSchema = type({
+	"entries": gameOutputEntrySchema.array(),
+	"package?": "string",
+	"project": "string",
+}).array();
 
 // Live multi-root workspace pipeline test. Gated on JEST_ROBLOX_LIVE=1 plus
 // the three Open Cloud env vars (`ROBLOX_OPEN_CLOUD_API_KEY`,
@@ -115,7 +121,7 @@ describe("live workspace pipeline", () => {
 			expect(fs.existsSync(gameOutputPath)).toBeTrue();
 
 			const raw = JSON.parse(fs.readFileSync(gameOutputPath, "utf-8"));
-			const entries = gameOutputSchema.assert(raw);
+			const entries = gameOutputSchema.assert(raw).flatMap((group) => group.entries);
 
 			expect(entries.length).toBeGreaterThan(0);
 			expect(

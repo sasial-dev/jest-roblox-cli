@@ -844,6 +844,84 @@ describe(validateConfig, () => {
 		);
 	});
 
+	it("should accept gameOutput as a string", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ gameOutput: "logs.json" })).not.toThrow();
+	});
+
+	it("should accept gameOutput as true", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ gameOutput: true })).not.toThrow();
+	});
+
+	it("should reject gameOutput as false", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ gameOutput: false })).toThrow(/Invalid config/);
+	});
+
+	it("should accept outputFile as a string", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ outputFile: "results.json" })).not.toThrow();
+	});
+
+	it("should accept outputFile as true", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ outputFile: true })).not.toThrow();
+	});
+
+	it("should reject outputFile as false", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ outputFile: false })).toThrow(/Invalid config/);
+	});
+
+	it("should accept workspace.gameOutput as true", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ workspace: { gameOutput: true } })).not.toThrow();
+	});
+
+	it("should accept workspace.outputFile as true", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ workspace: { outputFile: true } })).not.toThrow();
+	});
+
+	it("should reject workspace.outputFile as a string", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ workspace: { outputFile: "results.json" } })).toThrow(
+			/Invalid config/,
+		);
+	});
+
+	it("should reject workspace.gameOutput as a string", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ workspace: { gameOutput: "logs.json" } })).toThrow(
+			/Invalid config/,
+		);
+	});
+
+	it("should reject workspace.gameOutput as false", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ workspace: { gameOutput: false } })).toThrow(
+			/Invalid config/,
+		);
+	});
+
+	it("should reject unknown keys inside workspace", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ workspace: { unknown: true } })).toThrow(/Invalid config/);
+	});
+
 	it("should reject test.slowTestThreshold of 0", () => {
 		expect.assertions(1);
 

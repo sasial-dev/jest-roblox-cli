@@ -156,6 +156,23 @@ describe(runWorkspaceMode, () => {
 			).toStrictEqual(["@halcyon/foo", "@halcyon/bar"]);
 		});
 
+		it("should surface consensus-resolved sink paths on the result", async () => {
+			expect.assertions(2);
+
+			setupHappyPath();
+			vi.mocked(loadRawConfig).mockResolvedValue({ gameOutput: true, outputFile: true });
+			vi.mocked(runWorkspace).mockResolvedValue([
+				{ displayName: "@halcyon/foo", pkg: "@halcyon/foo", result: makeExecuteResult() },
+			]);
+
+			const result = await runWorkspaceMode(
+				makeCli({ packages: "@halcyon/foo", workspace: true }),
+			);
+
+			expect(result.gameOutput).toBe(path.join("/repo", "game-output.log"));
+			expect(result.outputFile).toBe(path.join("/repo", "jest-output.log"));
+		});
+
 		it("should forward the resolved base URL onto workStealingCredentials", async () => {
 			expect.assertions(1);
 

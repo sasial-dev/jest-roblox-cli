@@ -2,7 +2,14 @@ import { type } from "arktype";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import type { GameOutputEntry } from "../types/game-output.ts";
+import type { GameOutputEntry, PackageGameOutput } from "../types/game-output.ts";
+
+/** One contributor to an Aggregated Game Output file. */
+export interface GameOutputSource {
+	package?: string;
+	project: string;
+	raw: string | undefined;
+}
 
 const gameOutputEntriesSchema = type({
 	message: "string",
@@ -36,6 +43,44 @@ export function parseGameOutput(raw: string | undefined): Array<GameOutputEntry>
 }
 
 export function writeGameOutput(filePath: string, entries: Array<GameOutputEntry>): void {
+	writeJsonFile(filePath, entries);
+}
+
+/**
+ * Build the grouped shape for an Aggregated Game Output file: one group per
+ * source, in the order given (deterministic package/project order). Sources
+ * with no captured output still produce a group with an empty `entries`
+ * array, so the file is a complete manifest of what ran.
+ */
+export function buildGroupedGameOutput(
+	sources: ReadonlyArray<GameOutputSource>,
+): Array<PackageGameOutput> {
+	return sources.map((source) => {
+		const group: PackageGameOutput = {
+			entries: parseGameOutput(source.raw),
+			project: source.project,
+		};
+
+		if (source.package !== undefined) {
+			group.package = source.package;
+		}
+
+		return group;
+	});
+}
+
+export function writeGroupedGameOutput(filePath: string, groups: Array<PackageGameOutput>): void {
+	writeJsonFile(filePath, groups);
+}
+
+export function countGroupedEntries(groups: ReadonlyArray<PackageGameOutput>): number {
+	return groups.reduce((total, group) => total + group.entries.length, 0);
+}
+
+function writeJsonFile(
+	filePath: string,
+	value: Array<GameOutputEntry> | Array<PackageGameOutput>,
+): void {
 	const absolutePath = path.resolve(filePath);
 	const directoryPath = path.dirname(absolutePath);
 
@@ -43,5 +88,5 @@ export function writeGameOutput(filePath: string, entries: Array<GameOutputEntry
 		fs.mkdirSync(directoryPath, { recursive: true });
 	}
 
-	fs.writeFileSync(absolutePath, JSON.stringify(entries, null, 2));
+	fs.writeFileSync(absolutePath, JSON.stringify(value, null, 2));
 }

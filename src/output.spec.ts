@@ -26,7 +26,13 @@ import type {
 	WorkspaceRunResult,
 } from "./run/types.ts";
 import type { JestResult } from "./types/jest-result.ts";
-import { formatGameOutputNotice, parseGameOutput, writeGameOutput } from "./utils/game-output.ts";
+import {
+	buildGroupedGameOutput,
+	formatGameOutputNotice,
+	parseGameOutput,
+	writeGameOutput,
+	writeGroupedGameOutput,
+} from "./utils/game-output.ts";
 
 vi.mock(import("node:fs"), async () => {
 	const memfs = await vi.importActual<typeof import("memfs")>("memfs");
@@ -53,6 +59,7 @@ interface OutputSpies {
 }
 
 const mocks = {
+	buildGroupedGameOutput: vi.mocked(buildGroupedGameOutput),
 	checkThresholds: vi.mocked(checkThresholds),
 	formatAgentMultiProject: vi.mocked(formatAgentMultiProject),
 	formatAnnotations: vi.mocked(formatAnnotations),
@@ -69,6 +76,7 @@ const mocks = {
 	parseGameOutput: vi.mocked(parseGameOutput),
 	printCoverageHeader: vi.mocked(printCoverageHeader),
 	writeGameOutput: vi.mocked(writeGameOutput),
+	writeGroupedGameOutput: vi.mocked(writeGroupedGameOutput),
 	writeJsonFile: vi.mocked(writeJsonFile),
 };
 
@@ -544,23 +552,38 @@ describe(outputMultiResult, () => {
 		expect(mocks.writeJsonFile).toHaveBeenCalledWith(expect.any(Object), "/tmp/results.json");
 	});
 
-	it("should write aggregated game output when config.gameOutput is set", async () => {
+	it("should NOT write the result file for workspace results (the runner handles it)", async () => {
 		expect.assertions(1);
 
 		setupDefaults();
-		mocks.parseGameOutput.mockReturnValue([{ message: "hi", messageType: 0, timestamp: 0 }]);
+		setupOutputSpies();
+
+		await outputMultiResult(
+			makeConfig({ outputFile: "/tmp/results.json" }),
+			makeWorkspaceResult(),
+		);
+
+		expect(mocks.writeJsonFile).not.toHaveBeenCalled();
+	});
+
+	it("should write a grouped aggregated game output file for multi results when config.gameOutput is set", async () => {
+		expect.assertions(1);
+
+		setupDefaults();
+		mocks.buildGroupedGameOutput.mockReturnValue([
+			{ entries: [{ message: "hi", messageType: 0, timestamp: 0 }], project: "client" },
+		]);
 		setupOutputSpies();
 
 		await outputMultiResult(makeConfig({ gameOutput: "/tmp/game.json" }), makeMultiResult());
 
-		expect(mocks.writeGameOutput).toHaveBeenCalledOnce();
+		expect(mocks.writeGroupedGameOutput).toHaveBeenCalledOnce();
 	});
 
-	it("should write aggregated game output for workspace results when config.gameOutput is set", async () => {
+	it("should NOT write aggregated game output for workspace results (the runner handles it)", async () => {
 		expect.assertions(1);
 
 		setupDefaults();
-		mocks.parseGameOutput.mockReturnValue([{ message: "ws", messageType: 0, timestamp: 0 }]);
 		setupOutputSpies();
 
 		await outputMultiResult(
@@ -568,7 +591,7 @@ describe(outputMultiResult, () => {
 			makeWorkspaceResult(),
 		);
 
-		expect(mocks.writeGameOutput).toHaveBeenCalledOnce();
+		expect(mocks.writeGroupedGameOutput).not.toHaveBeenCalled();
 	});
 
 	it("should fall back to outputSingleResult when no project results but typecheck present", async () => {
@@ -613,6 +636,54 @@ describe(outputMultiResult, () => {
 		expect(mocks.formatAgentMultiProject).toHaveBeenCalledWith(
 			expect.any(Array),
 			expect.objectContaining({ maxFailures: 5 }),
+		);
+	});
+
+	it("should point agent hints at the workspace-resolved sink paths, not config", async () => {
+		expect.assertions(1);
+
+		setupDefaults();
+		setupOutputSpies();
+
+		await outputMultiResult(
+			makeConfig({
+				formatters: ["agent"],
+				gameOutput: "/root/cfg.log",
+				outputFile: "/root/cfg.json",
+			}),
+			makeWorkspaceResult({
+				gameOutput: "/ws/game-output.log",
+				outputFile: "/ws/jest-output.log",
+			}),
+		);
+
+		expect(mocks.formatAgentMultiProject).toHaveBeenCalledWith(
+			expect.any(Array),
+			expect.objectContaining({
+				gameOutput: "/ws/game-output.log",
+				outputFile: "/ws/jest-output.log",
+			}),
+		);
+	});
+
+	it("should point agent hints at config paths for multi (non-workspace) runs", async () => {
+		expect.assertions(1);
+
+		setupDefaults();
+		setupOutputSpies();
+
+		await outputMultiResult(
+			makeConfig({
+				formatters: ["agent"],
+				gameOutput: "/root/cfg.log",
+				outputFile: "/root/cfg.json",
+			}),
+			makeMultiResult(),
+		);
+
+		expect(mocks.formatAgentMultiProject).toHaveBeenCalledWith(
+			expect.any(Array),
+			expect.objectContaining({ gameOutput: "/root/cfg.log", outputFile: "/root/cfg.json" }),
 		);
 	});
 

@@ -34,6 +34,8 @@ function makeRunOptions(overrides: Partial<WorkspaceRunOptions> = {}): Workspace
 		pollInterval: DEFAULT_CONFIG.pollInterval,
 		port: DEFAULT_CONFIG.port,
 		silent: DEFAULT_CONFIG.silent,
+		workspaceGameOutput: false,
+		workspaceOutputFile: false,
 		...overrides,
 	};
 }

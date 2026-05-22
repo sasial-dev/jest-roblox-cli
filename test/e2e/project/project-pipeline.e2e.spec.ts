@@ -59,7 +59,13 @@ const gameOutputEntrySchema = type({
 	messageType: "number",
 	timestamp: "number",
 });
-const gameOutputSchema = gameOutputEntrySchema.array();
+// Multi-project runs write the grouped Aggregated Game Output shape:
+// `[{ project, entries }]` (no package for a single-config run).
+const gameOutputSchema = type({
+	"entries": gameOutputEntrySchema.array(),
+	"package?": "string",
+	"project": "string",
+}).array();
 
 describe("live project pipeline", () => {
 	it.runIf(isLive)(
@@ -140,7 +146,7 @@ describe("live project pipeline", () => {
 			expect(fs.existsSync(gameOutputPath)).toBeTrue();
 
 			const raw = JSON.parse(fs.readFileSync(gameOutputPath, "utf-8"));
-			const entries = gameOutputSchema.assert(raw);
+			const entries = gameOutputSchema.assert(raw).flatMap((group) => group.entries);
 
 			expect(entries.length).toBeGreaterThan(0);
 			expect(

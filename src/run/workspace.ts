@@ -80,7 +80,7 @@ export async function runWorkspaceMode(cli: CliOptions): Promise<WorkspaceRunRes
 				};
 			}),
 		);
-		runOptions = buildWorkspaceRunOptions({ cli, perPackageConfigs });
+		runOptions = buildWorkspaceRunOptions({ cli, perPackageConfigs, workspaceRoot });
 		const assertion = assertWorkspaceRunOptions(runOptions);
 		if (!assertion.ok) {
 			return {
@@ -165,6 +165,19 @@ export async function runWorkspaceMode(cli: CliOptions): Promise<WorkspaceRunRes
 		mode: "workspace",
 		preCoverageMs: 0,
 		projectResults,
+		...resolvedSinkPaths(runOptions),
+	};
+}
+
+// Surface the consensus-resolved aggregate sink paths the runner wrote so
+// formatters point "View …" hints at files that actually exist.
+function resolvedSinkPaths(runOptions: WorkspaceRunOptions): {
+	gameOutput?: string;
+	outputFile?: string;
+} {
+	return {
+		...(runOptions.gameOutput !== undefined ? { gameOutput: runOptions.gameOutput } : {}),
+		...(runOptions.outputFile !== undefined ? { outputFile: runOptions.outputFile } : {}),
 	};
 }
 

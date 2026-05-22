@@ -39,7 +39,20 @@ export function resolveConfig(config: Config): ResolvedConfig {
 	// Flatten test: block onto resolved config so downstream consumers
 	// (executor, projects, test-script, formatters) see jest options at the
 	// top level. HAL-167: refactor consumers to read `config.test.*` directly.
-	return Object.assign({}, DEFAULT_CONFIG, definedTest, definedRest);
+	const resolved: ResolvedConfig = Object.assign({}, DEFAULT_CONFIG, definedTest, definedRest);
+
+	// `gameOutput: true` / `outputFile: true` are shorthand for the
+	// conventional `game-output.log` / `jest-output.log` under the root.
+	// Expand here so downstream consumers only ever see a path string.
+	if (config.gameOutput === true) {
+		resolved.gameOutput = path.join(resolved.rootDir, "game-output.log");
+	}
+
+	if (config.outputFile === true) {
+		resolved.outputFile = path.join(resolved.rootDir, "jest-output.log");
+	}
+
+	return resolved;
 }
 
 /**

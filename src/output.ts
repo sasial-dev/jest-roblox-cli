@@ -41,7 +41,14 @@ import type {
 import { combineSourceMappers, type SourceMapper } from "./source-mapper/index.ts";
 import type { JestResult, SnapshotSummary } from "./types/jest-result.ts";
 import type { TimingResult } from "./types/timing.ts";
-import { formatGameOutputNotice, parseGameOutput, writeGameOutput } from "./utils/game-output.ts";
+import {
+	buildGroupedGameOutput,
+	countGroupedEntries,
+	formatGameOutputNotice,
+	parseGameOutput,
+	writeGameOutput,
+	writeGroupedGameOutput,
+} from "./utils/game-output.ts";
 
 const VERSION: string = packageJson.version;
 
@@ -55,7 +62,11 @@ interface FormattedOutputOptions {
 
 interface MultiOutputContext {
 	config: ResolvedConfig;
+	/** Resolved Game Output path for "View …" hints (workspace consensus or config). */
+	gameOutputHint?: string;
 	merged: ExecuteResult;
+	/** Resolved result-file path for "View …" hints (workspace consensus or config). */
+	outputFileHint?: string;
 	preCoverageMs: number;
 	projectResults: Array<ProjectResult>;
 	typecheckResult?: JestResult;
@@ -184,7 +195,7 @@ export async function outputMultiResult(
 	rootConfig: ResolvedConfig,
 	result: MultiRunResult | WorkspaceRunResult,
 ): Promise<number> {
-	const { preCoverageMs, projectResults, typecheckResult } = result;
+	const { mode, preCoverageMs, projectResults, typecheckResult } = result;
 	const collectCoverageFrom =
 		"collectCoverageFrom" in result ? result.collectCoverageFrom : undefined;
 	const config: ResolvedConfig =
@@ -204,6 +215,7 @@ export async function outputMultiResult(
 	if (!config.silent) {
 		printMultiProjectOutput({
 			config,
+			...resolveSinkHints(result, config),
 			merged,
 			preCoverageMs,
 			projectResults,
@@ -221,13 +233,18 @@ export async function outputMultiResult(
 		extractWorkspaceCoverageMapped(result),
 	);
 
-	if (config.outputFile !== undefined) {
-		await writeJsonFile(mergedResult, config.outputFile);
-	}
+	// Workspace runs write their own result + Game Output sinks (the runner
+	// has package identity, the workspace root, and the consensus-resolved
+	// paths); here we only handle the single-config `multi` case.
+	if (mode === "multi") {
+		if (config.outputFile !== undefined) {
+			await writeJsonFile(mergedResult, config.outputFile);
+		}
 
-	writeAggregatedGameOutput(config, projectResults, {
-		hintsShown: !mergedResult.success,
-	});
+		writeAggregatedGameOutput(config, projectResults, {
+			hintsShown: !mergedResult.success,
+		});
+	}
 
 	runGitHubActionsFormatter(config, mergedResult, merged.sourceMapper);
 
@@ -481,6 +498,22 @@ function extractWorkspaceCoverageMapped(
 	return "coverageMapped" in result ? result.coverageMapped : undefined;
 }
 
+// Workspace sinks are consensus-resolved by the runner (not from the
+// workspace-root config), so "View …" hints must point at those resolved
+// paths; single/multi use the resolved config values.
+function resolveSinkHints(
+	result: MultiRunResult | WorkspaceRunResult,
+	config: ResolvedConfig,
+): { gameOutputHint?: string; outputFileHint?: string } {
+	const gameOutput = result.mode === "workspace" ? result.gameOutput : config.gameOutput;
+	const outputFile = result.mode === "workspace" ? result.outputFile : config.outputFile;
+
+	return {
+		...(gameOutput !== undefined ? { gameOutputHint: gameOutput } : {}),
+		...(outputFile !== undefined ? { outputFileHint: outputFile } : {}),
+	};
+}
+
 function getAgentMaxFailures(config: ResolvedConfig): number {
 	assert(config.formatters !== undefined, "formatters is set by resolveFormatters");
 	const options = findFormatterOptions(config.formatters, "agent");
@@ -502,15 +535,23 @@ function toProjectEntries(projectResults: Array<ProjectResult>): Array<Formatter
 }
 
 function printMultiProjectOutput(options: MultiOutputContext): void {
-	const { config, merged, preCoverageMs, projectResults, typecheckResult } = options;
+	const {
+		config,
+		gameOutputHint,
+		merged,
+		outputFileHint,
+		preCoverageMs,
+		projectResults,
+		typecheckResult,
+	} = options;
 	const timing = addCoverageTiming(merged.timing, preCoverageMs);
 
 	if (usesAgentFormatter(config.formatters, config.verbose)) {
 		printOutput(
 			formatAgentMultiProject(toProjectEntries(projectResults), {
-				gameOutput: config.gameOutput,
+				gameOutput: gameOutputHint,
 				maxFailures: getAgentMaxFailures(config),
-				outputFile: config.outputFile,
+				outputFile: outputFileHint,
 				rootDir: config.rootDir,
 				sourceMapper: merged.sourceMapper,
 				typeErrorCount: typecheckResult?.numFailedTests,
@@ -549,11 +590,15 @@ function writeAggregatedGameOutput(
 		return;
 	}
 
-	const entries = projectResults.flatMap((entry) => parseGameOutput(entry.result.gameOutput));
-	writeGameOutput(config.gameOutput, entries);
+	const groups = buildGroupedGameOutput(
+		projectResults.map((entry) => {
+			return { project: entry.displayName, raw: entry.result.gameOutput };
+		}),
+	);
+	writeGroupedGameOutput(config.gameOutput, groups);
 
 	if (!config.silent && options.hintsShown !== true) {
-		const notice = formatGameOutputNotice(config.gameOutput, entries.length);
+		const notice = formatGameOutputNotice(config.gameOutput, countGroupedEntries(groups));
 		if (notice) {
 			console.error(notice);
 		}
