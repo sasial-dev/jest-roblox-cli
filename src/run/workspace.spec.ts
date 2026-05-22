@@ -303,6 +303,43 @@ describe(runWorkspaceMode, () => {
 		});
 	});
 
+	describe("workspace.packages enumeration", () => {
+		it("should enumerate from workspace.packages without discovering a PM root", async () => {
+			expect.assertions(3);
+
+			setupHappyPath();
+			vi.mocked(runWorkspace).mockResolvedValue([
+				{ displayName: "foo", pkg: "foo", result: makeExecuteResult() },
+			]);
+
+			const result = await runWorkspaceMode(makeCli({ packages: "foo", workspace: true }), {
+				packages: ["packages/*"],
+				root: "/ws",
+			});
+
+			expect(result.validationExitCode).toBeUndefined();
+			expect(discoverWorkspaceRoot).not.toHaveBeenCalled();
+			expect(resolvePackage).toHaveBeenCalledWith("/ws", "foo", ["packages/*"]);
+		});
+
+		it("should drive the aggregate sink root off workspace.root", async () => {
+			expect.assertions(1);
+
+			setupHappyPath();
+			vi.mocked(loadRawConfig).mockResolvedValue({ outputFile: true });
+			vi.mocked(runWorkspace).mockResolvedValue([
+				{ displayName: "foo", pkg: "foo", result: makeExecuteResult() },
+			]);
+
+			const result = await runWorkspaceMode(makeCli({ packages: "foo", workspace: true }), {
+				packages: ["packages/*"],
+				root: "/ws",
+			});
+
+			expect(result.outputFile).toBe(path.join("/ws", "jest-output.log"));
+		});
+	});
+
 	describe("--affected-since happy path", () => {
 		it("should call getAffectedPackages and resolve every name", async () => {
 			expect.assertions(3);

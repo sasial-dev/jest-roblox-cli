@@ -1,10 +1,11 @@
+import assert from "node:assert";
 import process from "node:process";
 
 import packageJson from "../../package.json" with { type: "json" };
 import type { Backend } from "../backends/interface.ts";
 import { createOpenCloudBackend, resolveOpenCloudBaseUrl } from "../backends/open-cloud.ts";
 import { loadRawConfig } from "../config/loader.ts";
-import type { CliOptions, WorkspaceRunOptions } from "../config/schema.ts";
+import type { CliOptions, WorkspaceConfig, WorkspaceRunOptions } from "../config/schema.ts";
 import { buildWorkspaceRunOptions } from "../config/workspace-run-options.ts";
 import type { MappedCoverageResult } from "../coverage/mapper.ts";
 import { mergeRawCoverage } from "../coverage/merge-raw-coverage.ts";
@@ -41,7 +42,10 @@ interface ResolvedPackages {
 	workspaceRoot?: string;
 }
 
-export async function runWorkspaceMode(cli: CliOptions): Promise<WorkspaceRunResult> {
+export async function runWorkspaceMode(
+	cli: CliOptions,
+	workspace?: WorkspaceConfig,
+): Promise<WorkspaceRunResult> {
 	const basicValidation = validateBasicWorkspaceFlags(cli);
 	if (!basicValidation.ok) {
 		return {
@@ -51,7 +55,7 @@ export async function runWorkspaceMode(cli: CliOptions): Promise<WorkspaceRunRes
 		};
 	}
 
-	const resolved = resolvePackages(cli);
+	const resolved = resolvePackages(cli, workspace);
 	if (resolved.error !== undefined) {
 		return {
 			...EMPTY_RESULT,
@@ -223,9 +227,26 @@ function aggregatePerPackageCoverage(
 	return aggregateWorkspaceCoverage([...byPackage.values()]);
 }
 
-function resolvePackages(cli: CliOptions): ResolvedPackages {
+// `workspace.packages` (declared in a shared config, anchored absolute root)
+// enumerates packages by globbing for jest configs — no package-manager
+// workspace file required. Falls back to discovering a pnpm/turbo/nx root.
+function resolveEnumerationRoot(workspace?: WorkspaceConfig): {
+	patterns?: Array<string>;
+	workspaceRoot: string;
+} {
+	if (workspace?.packages !== undefined) {
+		// The schema's co-requirement check guarantees `root` is present, and
+		// the loader resolved it to an absolute path at config load.
+		assert(workspace.root !== undefined, "workspace.root is required with workspace.packages");
+		return { patterns: workspace.packages, workspaceRoot: workspace.root };
+	}
+
+	return { workspaceRoot: discoverWorkspaceRoot(process.cwd()) };
+}
+
+function resolvePackages(cli: CliOptions, workspace?: WorkspaceConfig): ResolvedPackages {
 	try {
-		const workspaceRoot = discoverWorkspaceRoot(process.cwd());
+		const { patterns, workspaceRoot } = resolveEnumerationRoot(workspace);
 		const packageNames = resolveWorkspacePackageNames(cli, workspaceRoot);
 
 		if (packageNames.length === 0) {
@@ -234,7 +255,9 @@ function resolvePackages(cli: CliOptions): ResolvedPackages {
 			return { noAffected: true };
 		}
 
-		const packageInfos = packageNames.map((name) => resolvePackage(workspaceRoot, name));
+		const packageInfos = packageNames.map((name) =>
+			resolvePackage(workspaceRoot, name, patterns),
+		);
 		return { packageInfos, workspaceRoot };
 	} catch (err) {
 		return { error: { exitCode: 2, message: `Error: ${String(err)}\n` } };

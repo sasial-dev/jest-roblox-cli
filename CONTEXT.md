@@ -50,6 +50,17 @@ Run Options.)
 _Avoid_: "root config", "workspace-level config" — both imply a workspace
 root config that drives package behavior, which is no longer the model.
 
+**Workspace enumeration**:
+How workspace mode discovers the package set. Two sources: a
+`pnpm-workspace.yaml` at the workspace root (default), or a `workspace` block in
+the jest config declaring `root` (the workspace root — relative in source,
+anchored to an absolute path against the declaring file at load) and `packages`
+(globs, relative to `root`, matched by the presence of a `jest.config.*`). The
+config source needs no package-manager workspace file, so it works in
+Luau-only / npm / yarn repos. Each selected package must resolve the same
+`root`/`packages`, normally by inheriting one shared config via `extends:`.
+_Avoid_: "workspace root config" — `root` is a coordinate, not a config file.
+
 **Workspace Run Options**:
 The narrow set of knobs that are atomic to one workspace invocation:
 `backend`, `color`, `formatters`, `parallel`, `placeId`, `pollInterval`,

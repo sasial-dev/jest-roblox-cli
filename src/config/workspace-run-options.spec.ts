@@ -58,6 +58,74 @@ describe(buildWorkspaceRunOptions, () => {
 		});
 	});
 
+	describe("workspace.packages convergence", () => {
+		it("should throw when packages disagree on workspace.packages", () => {
+			expect.assertions(2);
+
+			let thrown: unknown;
+			try {
+				buildWorkspaceRunOptions({
+					cli: emptyCli(),
+					perPackageConfigs: [
+						{
+							name: "alpha",
+							config: { workspace: { packages: ["packages/*"], root: "/r" } },
+						},
+						{
+							name: "beta",
+							config: { workspace: { packages: ["libs/*"], root: "/r" } },
+						},
+					],
+				});
+			} catch (err) {
+				thrown = err;
+			}
+
+			expect(thrown).toBeInstanceOf(WorkspaceConsensusError);
+			expect((thrown as Error).message).toContain("workspace.packages");
+		});
+
+		it("should throw when packages disagree on workspace.root", () => {
+			expect.assertions(1);
+
+			expect(() => {
+				return buildWorkspaceRunOptions({
+					cli: emptyCli(),
+					perPackageConfigs: [
+						{
+							name: "alpha",
+							config: { workspace: { packages: ["packages/*"], root: "/a" } },
+						},
+						{
+							name: "beta",
+							config: { workspace: { packages: ["packages/*"], root: "/b" } },
+						},
+					],
+				});
+			}).toThrow(WorkspaceConsensusError);
+		});
+
+		it("should not throw when every package agrees on workspace.root/packages", () => {
+			expect.assertions(1);
+
+			expect(() => {
+				return buildWorkspaceRunOptions({
+					cli: emptyCli(),
+					perPackageConfigs: [
+						{
+							name: "alpha",
+							config: { workspace: { packages: ["packages/*"], root: "/r" } },
+						},
+						{
+							name: "beta",
+							config: { workspace: { packages: ["packages/*"], root: "/r" } },
+						},
+					],
+				});
+			}).not.toThrow();
+		});
+	});
+
 	describe("default-config fallback", () => {
 		it("should fall back to DEFAULT_CONFIG when no package declares the field", () => {
 			expect.assertions(4);

@@ -139,6 +139,21 @@ export function buildWorkspaceRunOptions(
 			readConfig: (entry) => entry.workspace?.outputFile,
 		}) === true;
 
+	// Convergence guard. `workspace.packages`/`root` live in a shared config
+	// reached via `extends:`, so every selected package resolves the same
+	// value. A package that overrides it — or forgets to extend the shared
+	// config — surfaces here as a conflict rather than silently running against
+	// a different package set. Throws on disagreement; the values themselves
+	// were already consumed for enumeration.
+	computeConsensus(perPackageConfigs, {
+		name: "workspace.packages",
+		readConfig: (entry) => entry.workspace?.packages,
+	});
+	computeConsensus(perPackageConfigs, {
+		name: "workspace.root",
+		readConfig: (entry) => entry.workspace?.root,
+	});
+
 	const runOptions: WorkspaceRunOptions = {
 		backend,
 		color,

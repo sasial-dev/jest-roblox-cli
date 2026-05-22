@@ -10,10 +10,12 @@ export function isWorkspaceInvocation(cli: CliOptions): boolean {
 }
 
 export async function runJestRoblox(cli: CliOptions, config: ResolvedConfig): Promise<RunResult> {
-	// Workspace mode resolves its own per-package config; the workspace-root
-	// `config` is intentionally not consulted there.
+	// Workspace mode resolves its own per-package config. The one exception is
+	// `workspace.root`/`workspace.packages`: those come from the bootstrap
+	// config (loaded from cwd or --workspace-root, root anchored absolute at
+	// load) and drive package enumeration in repos without a pnpm-workspace.yaml.
 	if (isWorkspaceInvocation(cli)) {
-		return runWorkspaceMode(cli);
+		return runWorkspaceMode(cli, config.workspace);
 	}
 
 	// Single/multi paths keep the CLI > config precedence so programmatic

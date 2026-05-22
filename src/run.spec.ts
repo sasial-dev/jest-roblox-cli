@@ -127,4 +127,17 @@ describe(runJestRoblox, () => {
 
 		expect(forwardedCli).toBe(cli);
 	});
+
+	it("should forward config.workspace to workspace mode for enumeration", async () => {
+		expect.assertions(1);
+
+		mocks.runWorkspaceMode.mockResolvedValue(WORKSPACE);
+
+		const config = makeConfig({ workspace: { packages: ["packages/*"], root: "/ws" } });
+		await runJestRoblox(makeCli({ packages: "foo", workspace: true }), config);
+
+		const [, forwardedWorkspace] = mocks.runWorkspaceMode.mock.calls[0] ?? [];
+
+		expect(forwardedWorkspace).toStrictEqual({ packages: ["packages/*"], root: "/ws" });
+	});
 });

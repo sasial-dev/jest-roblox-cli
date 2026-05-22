@@ -922,6 +922,40 @@ describe(validateConfig, () => {
 		expect(() => validateConfig({ workspace: { unknown: true } })).toThrow(/Invalid config/);
 	});
 
+	it("should accept workspace.root with workspace.packages", () => {
+		expect.assertions(1);
+
+		expect(() =>
+			validateConfig({ workspace: { packages: ["packages/*"], root: "." } }),
+		).not.toThrow();
+	});
+
+	it("should reject workspace.packages without workspace.root", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ workspace: { packages: ["packages/*"] } })).toThrow(
+			/workspace\.root.*workspace\.packages.*together/s,
+		);
+	});
+
+	it("should reject workspace.root without workspace.packages", () => {
+		expect.assertions(1);
+
+		expect(() => validateConfig({ workspace: { root: "." } })).toThrow(
+			/workspace\.root.*workspace\.packages.*together/s,
+		);
+	});
+
+	it("should accept workspace.root/packages alongside gameOutput", () => {
+		expect.assertions(1);
+
+		expect(() => {
+			return validateConfig({
+				workspace: { gameOutput: true, packages: ["packages/*"], root: "." },
+			});
+		}).not.toThrow();
+	});
+
 	it("should reject test.slowTestThreshold of 0", () => {
 		expect.assertions(1);
 

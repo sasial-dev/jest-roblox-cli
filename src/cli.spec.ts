@@ -477,6 +477,13 @@ describe(parseArgs, () => {
 		expect(parseArgs(["--affected-since", "main"]).affectedSince).toBe("main");
 	});
 
+	it("should parse --workspace-root option", () => {
+		expect.assertions(1);
+		expect(parseArgs(["--workspace-root", "./pkgs/testing"]).workspaceRoot).toBe(
+			"./pkgs/testing",
+		);
+	});
+
 	it("should parse --setupFiles list", () => {
 		expect.assertions(1);
 
@@ -852,7 +859,18 @@ describe("runInner orchestration", () => {
 
 		await run(["--config", "./custom.ts"]);
 
-		expect(mocks.loadConfig).toHaveBeenCalledWith("./custom.ts");
+		expect(mocks.loadConfig).toHaveBeenCalledWith("./custom.ts", undefined);
+	});
+
+	it("should load the bootstrap config from --workspace-root", async () => {
+		expect.assertions(1);
+
+		setupOutputSpies();
+		setupDefaults();
+
+		await run(["--workspace", "--packages", "foo", "--workspace-root", "/ws"]);
+
+		expect(mocks.loadConfig).toHaveBeenCalledWith(undefined, "/ws");
 	});
 
 	it("should pass cli flags into runJestRoblox", async () => {

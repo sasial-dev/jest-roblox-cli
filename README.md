@@ -342,14 +342,16 @@ Run tests across multiple packages in a pnpm workspace in a single
 invocation. Open Cloud only — Studio backend is not supported.
 
 > [!NOTE]
-> Package discovery reads `pnpm-workspace.yaml` at the workspace root;
-> npm/yarn workspaces and turbo/nx-only roots are not yet supported.
-> `--affected-since` delegates change detection to `turbo` or `nx` if their
-> config is present, but `pnpm-workspace.yaml` is still required for the
-> package list. When using Nx, each project's Nx name must match the
-> `package.json` `name` field — `--affected-since` returns Nx project names
-> and looks them up against the pnpm package list, so a mismatch surfaces
-> as `Package "<name>" not found in workspace`.
+> Package discovery uses one of two sources. By default it reads
+> `pnpm-workspace.yaml` at the workspace root. Alternatively, declare a
+> `workspace` block in your jest config (see
+> [Workspaces without pnpm](#workspaces-without-pnpm)) to enumerate packages
+> by glob — this works in Luau-only, npm, and yarn repos. `--affected-since`
+> always delegates change detection to `turbo` or `nx` and is not yet wired
+> for the `workspace.packages` source. When using Nx, each project's Nx name
+> must match the `package.json` `name` field — `--affected-since` returns Nx
+> project names and looks them up against the package list, so a mismatch
+> surfaces as `Package "<name>" not found in workspace`.
 
 Pick packages explicitly or by what changed:
 
@@ -363,6 +365,54 @@ jest-roblox --workspace --affected-since main
 
 `--workspace` must be combined with `--packages` or `--affected-since` —
 the two are mutually exclusive, and either flag requires `--workspace`.
+
+### Workspaces without pnpm
+
+`pnpm-workspace.yaml` isn't required. Declare a `workspace` block in a shared
+config and have every package extend it:
+
+```ts
+// packages/testing/jest.shared.ts
+import { defineConfig } from "@isentinel/jest-roblox";
+
+export default defineConfig({
+	workspace: {
+		packages: ["packages/*"], // globs relative to root
+		root: "../..", // relative to THIS file; resolved at load
+	},
+	// shared jest options…
+});
+```
+
+```ts
+// packages/foo/jest.config.ts
+export default { extends: "../testing/jest.shared.ts" };
+```
+
+`workspace.root` and `workspace.packages` must be declared together. `root` is
+resolved to an absolute path relative to the file that declares it (the shared
+config), so it points at the same directory no matter which package you run
+from. Each glob in `packages` selects directories that contain a
+`jest.config.*`; the package name comes from `package.json#name`, falling back
+to the directory name (so Luau-only packages need no `package.json`). Every
+selected package must resolve the same `workspace.packages`/`root` — inheriting
+from one shared config guarantees this, and a package that overrides or omits
+it fails the run.
+
+Run from inside any package as usual. To run from a directory with no
+resolvable jest config (e.g. the repo root), either point at the shared config
+with `--workspace-root`:
+
+```bash
+jest-roblox --workspace --packages foo --workspace-root packages/testing
+```
+
+or add a re-export at the repo root so the config is discovered there:
+
+```ts
+// jest.config.ts (repo root)
+export { default } from "./packages/testing/jest.shared.ts";
+```
 
 Per-package coverage is aggregated into a single report under
 `<rootDir>/<coverageDirectory>`. `rootDir` defaults to the current working

@@ -74,6 +74,37 @@ describe(resolvePackage, () => {
 		expect(() => resolvePackage(ROOT, "@halcyon/foo")).toThrow(/not found/);
 	});
 
+	it("should ignore a package.json that is not a JSON object (e.g. an array)", () => {
+		expect.assertions(1);
+
+		vol.reset();
+
+		vol.fromJSON({
+			[path.join(ROOT, "packages/bar/package.json")]: '{"name":"@halcyon/bar"}',
+			[path.join(ROOT, "packages/foo/package.json")]: "[]",
+			[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+		});
+
+		expect(resolvePackage(ROOT, "@halcyon/bar").packageDirectory).toBe(
+			path.join(ROOT, "packages/bar"),
+		);
+	});
+
+	it("should surface the file path when a package.json is malformed JSON", () => {
+		expect.assertions(1);
+
+		vol.reset();
+
+		vol.fromJSON({
+			[path.join(ROOT, "packages/foo/package.json")]: "{ not valid json",
+			[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+		});
+
+		expect(() => resolvePackage(ROOT, "@halcyon/foo")).toThrow(
+			/Failed to parse.*foo[/\\]package\.json/s,
+		);
+	});
+
 	it("should ignore package.json files that lack a string name field", () => {
 		expect.assertions(1);
 
@@ -116,6 +147,148 @@ describe(resolvePackage, () => {
 			[path.join(ROOT, "turbo.json")]: "{}",
 		});
 
-		expect(() => resolvePackage(ROOT, "@halcyon/foo")).toThrow(/requires pnpm-workspace\.yaml/);
+		expect(() => resolvePackage(ROOT, "@halcyon/foo")).toThrow(
+			/workspace\.packages.*pnpm-workspace\.yaml/s,
+		);
+	});
+
+	describe("workspace.packages globs", () => {
+		it("should enumerate packages via patterns when no PM file exists", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			vol.fromJSON({
+				[path.join(ROOT, "packages/foo/jest.config.ts")]: "",
+				[path.join(ROOT, "packages/foo/package.json")]: '{"name":"@halcyon/foo"}',
+			});
+
+			const info = resolvePackage(ROOT, "@halcyon/foo", ["packages/*"]);
+
+			expect(info.packageDirectory).toBe(path.join(ROOT, "packages/foo"));
+		});
+
+		it("should infer name from directory basename when no package.json exists (Luau-only)", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			vol.fromJSON({
+				[path.join(ROOT, "packages/foo/default.project.json")]: "{}",
+				[path.join(ROOT, "packages/foo/jest.config.ts")]: "",
+			});
+
+			const info = resolvePackage(ROOT, "foo", ["packages/*"]);
+
+			expect(info.packageDirectory).toBe(path.join(ROOT, "packages/foo"));
+		});
+
+		it("should prefer package.json#name over directory basename", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			vol.fromJSON({
+				[path.join(ROOT, "packages/foo/jest.config.ts")]: "",
+				[path.join(ROOT, "packages/foo/package.json")]: '{"name":"@halcyon/foo"}',
+			});
+
+			expect(() => resolvePackage(ROOT, "foo", ["packages/*"])).toThrow(/not found/);
+		});
+
+		it("should skip directories without a jest.config", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			vol.fromJSON({
+				[path.join(ROOT, "packages/foo/jest.config.ts")]: "",
+				[path.join(ROOT, "packages/junk/README.md")]: "scratch",
+			});
+
+			const info = resolvePackage(ROOT, "foo", ["packages/*"]);
+
+			expect(info.packageDirectory).toBe(path.join(ROOT, "packages/foo"));
+		});
+
+		it("should skip jest.config.spec.ts and similar non-config jest files", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			vol.fromJSON({
+				[path.join(ROOT, "packages/foo/jest.config.spec.ts")]: "",
+				[path.join(ROOT, "packages/foo/jest.config.ts")]: "",
+			});
+
+			const info = resolvePackage(ROOT, "foo", ["packages/*"]);
+
+			expect(info.packageDirectory).toBe(path.join(ROOT, "packages/foo"));
+		});
+
+		it("should expand multiple patterns", () => {
+			expect.assertions(2);
+
+			vol.reset();
+
+			vol.fromJSON({
+				[path.join(ROOT, "apps/web/jest.config.ts")]: "",
+				[path.join(ROOT, "libs/core/jest.config.ts")]: "",
+			});
+
+			const patterns = ["apps/*", "libs/*"];
+
+			expect(resolvePackage(ROOT, "web", patterns).packageDirectory).toBe(
+				path.join(ROOT, "apps/web"),
+			);
+			expect(resolvePackage(ROOT, "core", patterns).packageDirectory).toBe(
+				path.join(ROOT, "libs/core"),
+			);
+		});
+
+		it("should throw when two packages resolve to the same name", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			vol.fromJSON({
+				[path.join(ROOT, "libs/foo/jest.config.ts")]: "",
+				[path.join(ROOT, "packages/foo/jest.config.ts")]: "",
+			});
+
+			expect(() => resolvePackage(ROOT, "foo", ["libs/*", "packages/*"])).toThrow(
+				/Duplicate package name.*foo.*libs\/foo.*packages\/foo/s,
+			);
+		});
+
+		it("should take precedence over pnpm-workspace.yaml when both exist", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			vol.fromJSON({
+				[path.join(ROOT, "libs/bar/jest.config.ts")]: "",
+				[path.join(ROOT, "libs/bar/package.json")]: '{"name":"@halcyon/bar"}',
+				[path.join(ROOT, "packages/foo/package.json")]: '{"name":"@halcyon/foo"}',
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+
+			expect(() => resolvePackage(ROOT, "@halcyon/foo", ["libs/*"])).toThrow(/not found/);
+		});
+
+		it("should dedupe a directory with multiple jest.config files", () => {
+			expect.assertions(1);
+
+			vol.reset();
+
+			vol.fromJSON({
+				[path.join(ROOT, "packages/foo/jest.config.ts")]: "",
+				[path.join(ROOT, "packages/foo/jest.config.yaml")]: "",
+			});
+
+			const info = resolvePackage(ROOT, "foo", ["packages/*"]);
+
+			expect(info.packageDirectory).toBe(path.join(ROOT, "packages/foo"));
+		});
 	});
 });

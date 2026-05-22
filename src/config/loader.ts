@@ -140,6 +140,23 @@ async function invokeC12(configFile: string | undefined, cwd: string) {
 	});
 }
 
+// `workspace.root` is relative in source; anchor it to the directory of the
+// file that declares it (typically a shared config reached via `extends:`) so
+// the workspace root stays stable regardless of which package directory the CLI
+// runs from. Applied per-layer before merge — once layers merge, the declaring
+// file's directory is no longer recoverable.
+function anchorWorkspaceRoot(config: Config, baseDirectory: string): Config {
+	const { workspace } = config;
+	if (workspace?.root === undefined || path.isAbsolute(workspace.root)) {
+		return config;
+	}
+
+	return {
+		...config,
+		workspace: { ...workspace, root: path.resolve(baseDirectory, workspace.root) },
+	};
+}
+
 // c12 mis-resolves relative `extends` paths whose `dirname()` is non-empty
 // (e.g. "../../jest.shared.ts"): it adds dirname(source) to its internal cwd
 // but leaves source unchanged, then re-applies dirname when resolving the file
@@ -163,14 +180,15 @@ async function processExtends(
 	}
 
 	const canonicalFile = path.resolve(loadedFile);
+	const anchored = anchorWorkspaceRoot(loadedConfig, path.dirname(canonicalFile));
 	if (visited.has(canonicalFile)) {
 		const cycle = [...visited, canonicalFile].join(" -> ");
 		throw new Error(`Circular extends detected: ${cycle}.`);
 	}
 
-	const { extends: extendsValue, ...configWithoutExtends } = loadedConfig;
+	const { extends: extendsValue, ...configWithoutExtends } = anchored;
 	if (extendsValue === undefined) {
-		return loadedConfig;
+		return anchored;
 	}
 
 	visited.add(canonicalFile);

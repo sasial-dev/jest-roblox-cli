@@ -737,6 +737,56 @@ describe(loadConfig, () => {
 			expect(error).toBeInstanceOf(Error);
 			expect((error as Error).message).not.toContain("Config file not found");
 		});
+
+		it("should anchor a relative workspace.root to the declaring shared config dir", async () => {
+			expect.assertions(1);
+
+			const temporaryDirectory = setupTemporaryDirectory();
+			fs.writeFileSync(
+				path.join(temporaryDirectory, "jest.shared.mjs"),
+				'export default { workspace: { packages: ["packages/*"], root: "." } };',
+			);
+
+			const childDirectory = path.join(temporaryDirectory, "packages", "core");
+			fs.mkdirSync(childDirectory, { recursive: true });
+			fs.writeFileSync(
+				path.join(childDirectory, "jest.config.mjs"),
+				'export default { extends: "../../jest.shared.mjs" };',
+			);
+
+			const result = await loadConfig(undefined, childDirectory);
+
+			expect(result.workspace?.root).toBe(path.resolve(temporaryDirectory));
+		});
+
+		it("should anchor a relative workspace.root declared without extends", async () => {
+			expect.assertions(1);
+
+			const temporaryDirectory = setupTemporaryDirectory();
+			fs.writeFileSync(
+				path.join(temporaryDirectory, "jest.config.mjs"),
+				'export default { workspace: { packages: ["packages/*"], root: "." } };',
+			);
+
+			const result = await loadConfig(undefined, temporaryDirectory);
+
+			expect(result.workspace?.root).toBe(path.resolve(temporaryDirectory));
+		});
+
+		it("should leave an absolute workspace.root untouched", async () => {
+			expect.assertions(1);
+
+			const temporaryDirectory = setupTemporaryDirectory();
+			const absoluteRoot = path.resolve(temporaryDirectory, "elsewhere");
+			fs.writeFileSync(
+				path.join(temporaryDirectory, "jest.config.mjs"),
+				`export default { workspace: { packages: ["packages/*"], root: ${JSON.stringify(absoluteRoot)} } };`,
+			);
+
+			const result = await loadConfig(undefined, temporaryDirectory);
+
+			expect(result.workspace?.root).toBe(absoluteRoot);
+		});
 	});
 
 	it("should forward non-extend warnings to console.warn", async () => {

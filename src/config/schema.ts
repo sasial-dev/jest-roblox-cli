@@ -76,6 +76,19 @@ export interface WorkspaceConfig {
 	 * packages; only `true` is accepted.
 	 */
 	outputFile?: true;
+	/**
+	 * Globs (relative to `root`) selecting package directories — each must
+	 * contain a `jest.config.*`. Lets workspace mode enumerate packages in
+	 * Luau-only / npm / yarn repos that have no `pnpm-workspace.yaml`.
+	 * Required together with `root`; independent of `gameOutput`/`outputFile`.
+	 */
+	packages?: Array<string>;
+	/**
+	 * The workspace root. Relative in source; resolved to an absolute path at
+	 * load, anchored to the file that declares it (typically a shared config
+	 * reached via `extends:`). Required together with `packages`.
+	 */
+	root?: string;
 }
 
 export type ProjectEntry = InlineProjectConfig | string;
@@ -328,6 +341,8 @@ export interface CliOptions {
 	verbose?: boolean;
 	version?: boolean;
 	workspace?: boolean;
+	/** Directory to load the workspace config from when run outside a package. */
+	workspaceRoot?: string;
 }
 
 const snapshotFormatSchema = type({
@@ -396,6 +411,8 @@ const workspaceConfigSchema = type({
 	"+": "reject",
 	"gameOutput?": "true",
 	"outputFile?": "true",
+	"packages?": "string[]",
+	"root?": "string",
 });
 
 const formatterEntrySchema = type("string").or(type(["string", type("object")]));
@@ -667,6 +684,14 @@ export function validateConfig(raw: unknown): Config {
 	const result = configSchema(raw);
 	if (result instanceof type.errors) {
 		throw new Error(`Invalid config: ${result.summary}`);
+	}
+
+	const { workspace } = result;
+	if (
+		workspace !== undefined &&
+		(workspace.root === undefined) !== (workspace.packages === undefined)
+	) {
+		throw new Error("workspace.root and workspace.packages must be declared together.");
 	}
 
 	return result;

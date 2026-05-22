@@ -45,6 +45,8 @@ Options:
   --formatters <name...>            Output formatters (default, agent, json, github-actions)
   --workspace                       Run tests across all workspace packages
   --packages <names>                Comma-separated package names (workspace mode)
+  --workspace-root <path>           Directory to load the workspace config from
+                                    (use when running outside any package)
   --affected-since <ref>            Run only packages affected since git ref via turbo/nx
   --no-coverage-cache               Force a clean coverage re-instrumentation (skip incremental cache)
   --pollInterval <ms>               Open Cloud poll interval in ms (default: 500)
@@ -129,6 +131,7 @@ export function parseArgs(args: Array<string>): CliOptions {
 			"verbose": { type: "boolean" },
 			"version": { default: false, type: "boolean" },
 			"workspace": { type: "boolean" },
+			"workspace-root": { type: "string" },
 		},
 		strict: true,
 	});
@@ -180,6 +183,7 @@ export function parseArgs(args: Array<string>): CliOptions {
 		verbose: values.verbose,
 		version: values.version,
 		workspace: values.workspace,
+		workspaceRoot: values["workspace-root"],
 	};
 }
 
@@ -376,7 +380,7 @@ async function runInner(args: Array<string>): Promise<number> {
 		);
 	}
 
-	const loadedConfig = await loadConfig(cli.config);
+	const loadedConfig = await loadConfig(cli.config, cli.workspaceRoot);
 	const config = mergeCliWithConfig(cli, loadedConfig);
 
 	const result = await runJestRoblox(cli, config);
