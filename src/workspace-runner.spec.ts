@@ -708,12 +708,12 @@ describe(runWorkspace, () => {
 		expect(results?.map((entry) => entry.pkg)).toStrictEqual(["@halcyon/foo", "@halcyon/bar"]);
 	});
 
-	// HAL-231: workspace-root `config.rojoProject` no longer falls back into
+	// Workspace-root `config.rojoProject` no longer falls back into
 	// per-package descriptor resolution. Each package must declare its own
 	// rojoProject (directly or via extends); the workspace-root config
 	// silently dropping a custom value into per-pkg lookups was the same
 	// "workspace-root vs per-pkg" leak as the other A2 sites.
-	it("should NOT fall back to workspace-root config.rojoProject when the package config omits it (HAL-231)", async () => {
+	it("should NOT fall back to workspace-root config.rojoProject when the package config omits it", async () => {
 		expect.assertions(1);
 
 		vol.reset();
@@ -731,7 +731,7 @@ describe(runWorkspace, () => {
 			[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
 		});
 
-		// Bar's per-pkg config has no rojoProject — pre-HAL-231 the middle
+		// Bar's per-pkg config has no rojoProject — previously the middle
 		// arm of `pkg ?? config ?? DEFAULT` would pick up the workspace-root
 		// value below and resolve "custom.project.json". After the collapse,
 		// resolution falls straight to `ROJO_PROJECT_DEFAULT`
@@ -1175,7 +1175,7 @@ describe(runWorkspace, () => {
 			expect(callArgs.packages.map((entry) => entry.name)).toStrictEqual(["@halcyon/foo"]);
 		});
 
-		// HAL-215: the per-package coverage knobs must reach the descriptor so
+		// The per-package coverage knobs must reach the descriptor so
 		// `prepareWorkspaceCoverage`'s discovery and ignore-matcher both see the
 		// merged pkgConfig values. Pre-fix `loadPackages` only populated
 		// `name`/`packageDirectory`/`rojoProjectPath` and silently dropped
@@ -1242,14 +1242,14 @@ describe(runWorkspace, () => {
 			]);
 		});
 
-		// HAL-215 follow-up: the descriptor must distinguish "user set
+		// Follow-up: the descriptor must distinguish "user set
 		// coveragePathIgnorePatterns" from "default value present after merge"
 		// — otherwise every package looks like an override and the workspace
 		// root's custom patterns silently never apply. `resolveConfig`
 		// (loader.ts:42) preserves the `DEFAULT_CONFIG` array reference when
 		// the package config omits the key, so reference identity gates the
 		// descriptor field.
-		// HAL-231: per-pkg `coverageCache` reaches the descriptor so the
+		// Per-pkg `coverageCache` reaches the descriptor so the
 		// cache gate in `prepareWorkspaceCoverage` can honor an opt-out
 		// declared in a package's own jest.config (or extended from
 		// jest.shared.ts). The workspace-root config no longer drives this
@@ -2265,7 +2265,7 @@ describe(runWorkspace, () => {
 			expect(JSON.parse(vol.readFileSync(file, "utf8") as string)).toStrictEqual([]);
 		});
 
-		// Mirrors HAL-209 — a failure envelope synthesizes an ExecuteResult
+		// A failure envelope synthesizes an ExecuteResult
 		// via executor.ts:482 carrying the per-entry gameOutput, so the
 		// failed package's captured logs are NOT lost.
 		it("should still write per-package gameOutput files when one entry's envelope is a failure", async () => {
@@ -2734,7 +2734,7 @@ describe(runWorkspace, () => {
 			).toBeFalse();
 		});
 
-		// HAL-209: when one entry's jestOutput is a failure envelope
+		// When one entry's jestOutput is a failure envelope
 		// (`{success:false, err:...}`) — the shape `runEntry`'s per-entry
 		// pcall emits when Jest's `exit(1)` fires from the no-tests-found path
 		// — the other entries' snapshots and per-package output files must

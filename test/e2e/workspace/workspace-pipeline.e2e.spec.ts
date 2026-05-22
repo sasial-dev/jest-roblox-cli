@@ -80,7 +80,7 @@ describe("live workspace pipeline", () => {
 		RUN_TIMEOUT_MS + 5000,
 	);
 
-	// HAL-225 regression: the multi-project path through runner.luau must
+	// Regression: the multi-project path through runner.luau must
 	// aggregate per-project gameOutput contributions into the file at
 	// config.gameOutput. The shared spec carries a marker warn — it must
 	// reach the aggregated dump.
@@ -125,7 +125,7 @@ describe("live workspace pipeline", () => {
 
 			expect(entries.length).toBeGreaterThan(0);
 			expect(
-				entries.some((entry) => entry.message.includes("HAL-225 game-output marker")),
+				entries.some((entry) => entry.message.includes("game-output marker")),
 			).toBeTrue();
 		},
 		RUN_TIMEOUT_MS + 5000,
@@ -343,14 +343,14 @@ describe("workspace pre-flight cleanup of leftover own-stubs", () => {
 	);
 });
 
-// Regression: HAL-165 per-package snapshot writeback only landed on disk in
+// Regression: per-package snapshot writeback only landed on disk in
 // single-package mode because `writeSnapshots` interpreted relative
 // `config.rojoProject` against process.cwd(). Single-pkg happens to launch
 // with CWD == rootDir so the lookup coincidentally worked; workspace mode
 // runs from the workspace root and every per-package lookup missed,
 // silently dropping every captured snapshot.
 //
-// The original HAL-165 tests asserted on the in-memory envelope (envelope
+// The original tests asserted on the in-memory envelope (envelope
 // parsing, per-package routing dispatch) but stopped before writeSnapshots,
 // so the disk-write regression slipped through. This e2e drives the full
 // pipeline through the fake OCALE backend with `snapshotWrites` populated

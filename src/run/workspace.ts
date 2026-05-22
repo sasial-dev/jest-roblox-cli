@@ -248,7 +248,7 @@ function composeWorkspaceDisplayName(package_: string, project: string): string 
 /**
  * Build a streaming progress sink when the human formatter is active. Returns
  * undefined for JSON/agent/silent runs — those formatters buffer a single
- * final envelope (per HAL-160 AC#5) so live per-package stdout writes would
+ * final envelope so live per-package stdout writes would
  * either break the structured output or be silenced anyway.
  */
 function resolveStreamingProgressSink(

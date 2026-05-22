@@ -2395,13 +2395,13 @@ describe(runProjects, () => {
 		expect(captured?.jobs[1]?.config.snapshotFormat?.printBasicPrototype).toBeFalse();
 	});
 
-	// HAL-209: parse failures on one entry must not halt sibling processing.
+	// Parse failures on one entry must not halt sibling processing.
 	// The Luau-side runEntry's per-entry pcall encodes deferred Promise
 	// rejections (Jest's exit(1)) as `{success:false, err:...}` envelopes;
 	// the CLI must convert that into a synthetic failed ExecuteResult so
 	// the surrounding workspace pipeline (snapshot writes, per-package
 	// output files) still runs for sibling entries.
-	describe("per-entry parse failure recovery (HAL-209)", () => {
+	describe("per-entry parse failure recovery", () => {
 		const failureEnvelope = JSON.stringify({
 			err: "Exited with code: 1",
 			success: false,

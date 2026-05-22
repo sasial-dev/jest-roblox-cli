@@ -299,7 +299,7 @@ describe(parseJestOutput, () => {
 	});
 
 	it("should extract trailing message from a multi-frame Promise trace in ExecutionError.error", () => {
-		// Regression for HAL-84: when Jest's process.exit(1) chains through the
+		// Regression: when Jest's process.exit(1) chains through the
 		// Promise machinery, the encoded `err.error` ends up as the upstream
 		// Promise.Error __tostring blob with the actual cause buried in the
 		// final trace line ("...nodeUtils:25: Exited with code: 1"). Pulling
@@ -1052,7 +1052,7 @@ End of output
 	});
 
 	it("should throw a LuauScriptError on ExecutionError so backend can attach gameOutput", () => {
-		// Regression: prior to HAL-157 this branch threw a plain Error, so
+		// Regression: this branch previously threw a plain Error, so
 		// open-cloud's `err instanceof LuauScriptError` check skipped attaching
 		// gameOutput and the CLI banner showed nothing about which module
 		// failed.

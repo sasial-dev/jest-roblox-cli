@@ -245,7 +245,7 @@ describe(prepareWorkspaceCoverage, () => {
 		expect(Object.keys(manifest.files)).toContain(expectedKey);
 	});
 
-	// Codex review (HAL-211 follow-up): on a cold run, prepareShadowRoot only
+	// Codex review follow-up: on a cold run, prepareShadowRoot only
 	// does mkdirSync + cpSync (both merge). If a prior run wrote files into
 	// the package shadow that have since been deleted from source — or the
 	// cache is invalid / version-stale and we fall back to a cold run — those
@@ -291,14 +291,14 @@ describe(prepareWorkspaceCoverage, () => {
 		expect(vol.existsSync(path.join(packageShadow, "out/init.luau"))).toBeTrue();
 	});
 
-	it("should bypass a full cache hit when the descriptor opts out via per-pkg coverageCache (HAL-231)", async () => {
+	it("should bypass a full cache hit when the descriptor opts out via per-pkg coverageCache", async () => {
 		expect.assertions(1);
 
 		onTestFinished(() => {
 			vol.reset();
 		});
 
-		// HAL-231: cache opt-out is per-package. Set up a full cache-hit
+		// Cache opt-out is per-package. Set up a full cache-hit
 		// scenario (matching `should skip instrumentRoot on a full cache
 		// hit` below) — the workspace-root config keeps the default
 		// `coverageCache: true`, the manifest matches the current source, and
@@ -460,7 +460,7 @@ describe(prepareWorkspaceCoverage, () => {
 		expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining(expectedWarning));
 	});
 
-	// Codex review (HAL-211 follow-up): computeSkipFiles validates the
+	// Codex review follow-up: computeSkipFiles validates the
 	// source hash but does NOT verify the manifest's referenced shadow
 	// files still exist. If a partial cleanup or interrupted run leaves
 	// the manifest pointing at missing files, the warm path would skip
@@ -599,7 +599,7 @@ describe(prepareWorkspaceCoverage, () => {
 		expect(mocked).not.toHaveBeenCalled();
 	});
 
-	// Codex review (HAL-211 follow-up): syncNonInstrumentedFiles reused a
+	// Codex review follow-up: syncNonInstrumentedFiles reused a
 	// previousRecord whenever the source hash matched, without verifying
 	// that `record.shadowPath` still existed. A partial cleanup would let
 	// the manifest claim a spec was cached while the shadow file was gone.
@@ -899,7 +899,7 @@ describe(prepareWorkspaceCoverage, () => {
 		expect(result[0]?.coverageRoots).toStrictEqual([]);
 	});
 
-	// HAL-211: when a $path tree mixes spec files with non-spec helpers
+	// When a $path tree mixes spec files with non-spec helpers
 	// (e.g. flux-react's `out-test/` holds `test/fixtures.luau` next to
 	// `src/foo.spec.luau`), `containsLuauFiles` makes the dir a coverage
 	// root because the helper passes `isInstrumentableLuauFile`. The
@@ -1066,7 +1066,7 @@ describe(prepareWorkspaceCoverage, () => {
 		expect(result[0]?.coverageRoots).toStrictEqual([]);
 	});
 
-	// HAL-215: workspace coverage walked every rojo `$path` mount and
+	// Workspace coverage walked every rojo `$path` mount and
 	// instrumented every directory containing luau files — ignoring per-pkg
 	// `luauRoots` and `coveragePathIgnorePatterns` that single mode honors. The
 	// fix threads both knobs through `WorkspacePackageDescriptor`. These cases
@@ -1215,14 +1215,14 @@ describe(prepareWorkspaceCoverage, () => {
 			expect(mocked).toHaveBeenCalledTimes(2);
 		});
 
-		it("should ignore workspace-root coveragePathIgnorePatterns and inherit DEFAULT_CONFIG when descriptor field is undefined (HAL-231)", async () => {
+		it("should ignore workspace-root coveragePathIgnorePatterns and inherit DEFAULT_CONFIG when descriptor field is undefined", async () => {
 			expect.assertions(2);
 
 			onTestFinished(() => {
 				vol.reset();
 			});
 
-			// HAL-231: workspace-mode reads ignore patterns from each
+			// Workspace-mode reads ignore patterns from each
 			// package's own config (or DEFAULT_CONFIG when omitted) — not
 			// from a workspace-root jest.config. The descriptor has no
 			// per-pkg override here, so the workspace-root custom value
@@ -1285,7 +1285,7 @@ describe(prepareWorkspaceCoverage, () => {
 			// patterns" — even DEFAULT_CONFIG's defaults don't apply, so a
 			// directory named like a spec/test mount would still be
 			// instrumented. The empty-patterns branch of `createIgnoreMatcher`
-			// has no other caller after HAL-231's workspace-root drop.
+			// has no other caller after the workspace-root drop.
 			seedMultiMount();
 			const mocked = await mockInstrumentRoot();
 

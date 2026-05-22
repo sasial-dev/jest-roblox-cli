@@ -392,7 +392,7 @@ function prepareForPackage(
 
 	const luauRoots = discoverPackageLuauRoots(descriptor, matchesIgnored);
 
-	// HAL-215: when the user shrinks `luauRoots` (or adds new ignore patterns)
+	// When the user shrinks `luauRoots` (or adds new ignore patterns)
 	// between runs, previously-instrumented mounts disappear from the new set
 	// but their shadow files remain on disk. `prepareShadowRoot` only merges
 	// (cpSync), so a stale `vendored-packages/dep/init.luau` would survive

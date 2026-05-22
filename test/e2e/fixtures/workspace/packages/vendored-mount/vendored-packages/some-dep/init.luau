@@ -1,4 +1,4 @@
--- Stand-in for a vendored Luau dependency. The HAL-215 regression test
+-- Stand-in for a vendored Luau dependency. The regression test
 -- asserts this file's shadow does NOT appear under
 -- .jest-roblox/workspace/@e2e-vendored-mount/coverage/vendored-packages/
 -- when the package config restricts coverage to src/ via luauRoots or

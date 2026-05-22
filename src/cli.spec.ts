@@ -565,7 +565,7 @@ describe(run, () => {
 	});
 
 	it("should lead the banner with captured banner output when the message is just an exit code", async () => {
-		// HAL-84: when Jest exits via process.exit(N), the message "Exited
+		// When Jest exits via process.exit(N), the message "Exited
 		// with code: N" is only a transport — the real error message Jest
 		// printed to stdout lives in `bannerOutput` (the InterceptWriteable
 		// capture, distinct from the LogService-sourced `gameOutput` dump).

@@ -172,7 +172,7 @@ export interface Config {
  * Resolved config flattens the root CLI keys with the `test:` jest options
  * so downstream code (executor, projects, test-script, formatters) can read
  * options uniformly. Refactoring those consumers to read `config.test.foo`
- * is HAL-167 follow-up work; this shape lets the structural split land first.
+ * is follow-up work; this shape lets the structural split land first.
  */
 export interface ResolvedConfig
 	extends Except<Config, "test">, Except<GlobalTestConfig, "projects"> {

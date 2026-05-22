@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { startFakeOpenCloudServer } from "../cli/fake-open-cloud.ts";
 import { createFixtureSandbox, readJsonSync, runCliAsync } from "../cli/helpers.ts";
 
-// Regression: HAL-211 — `--workspace --coverage` against a package whose rojo
+// Regression: `--workspace --coverage` against a package whose rojo
 // `$path` mounts a directory holding BOTH `*.spec.luau` and non-spec helpers
 // (e.g. `out-test/src/init.luau` next to `out-test/src/nested.spec.luau`).
 // Pre-fix, `containsLuauFiles` made the dir a coverage root via the helper,
@@ -16,7 +16,7 @@ import { createFixtureSandbox, readJsonSync, runCliAsync } from "../cli/helpers.
 //
 // All prior workspace e2e tests run without `--coverage`, and the only
 // coverage e2e (`project-pipeline.e2e.spec.ts`) is `JEST_ROBLOX_LIVE`-gated.
-// HAL-211 lived squarely in the intersection of those missing axes.
+// The bug lived squarely in the intersection of those missing axes.
 
 const WORKSPACE_FIXTURE_PATH = path.resolve(__dirname, "../fixtures/workspace");
 const RUN_TIMEOUT_MS = 60_000;
@@ -104,7 +104,7 @@ function passingJestOutput(overrides: Record<string, unknown> = {}): string {
 	});
 }
 
-// Regression: HAL-215 — `--workspace --coverage` against a package whose rojo
+// Regression: `--workspace --coverage` against a package whose rojo
 // `test.project.json` mounts multiple `$path` entries (e.g. `src/` PLUS a
 // vendored `Packages/` dir). Pre-fix, `discoverPackageLuauRoots` walked every
 // `collectPaths` entry and instrumented every mounted directory — the per-pkg

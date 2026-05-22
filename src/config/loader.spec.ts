@@ -317,7 +317,7 @@ describe(loadConfig, () => {
 		expect(path.normalize(result.rootDir)).toBe(path.normalize(parentDirectory));
 	});
 
-	// TODO(HAL-167): rewrite result.setupFiles → result.test.setupFiles
+	// TODO: rewrite result.setupFiles → result.test.setupFiles
 	// after the consumer refactor that drops the ResolvedConfig flattening.
 	describe("extends with defuFn merger", () => {
 		it("should replace parent array when child uses a function value", async () => {

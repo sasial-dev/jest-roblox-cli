@@ -280,7 +280,7 @@ export async function runProjects(options: RunProjectsOptions): Promise<RunProje
 	const results = rawResults.map((raw, index) => {
 		// eslint-disable-next-line ts/no-non-null-assertion -- length equality asserted above
 		const job = jobs[index]!;
-		// HAL-209: when one entry's envelope decodes to `{success:false,
+		// When one entry's envelope decodes to `{success:false,
 		// err:...}` (Jest's per-entry pcall in `runEntry` encodes deferred
 		// Promise rejections this way — e.g. when jest-core's runJest:345 calls
 		// exit(1) because a project's --testPathPattern matched zero files),

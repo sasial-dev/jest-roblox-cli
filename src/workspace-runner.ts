@@ -425,7 +425,7 @@ async function loadPackages(input: {
 
 		// Propagate per-pkg coverage knobs to the descriptor so
 		// `prepareWorkspaceCoverage` sees the merged values, not just the
-		// workspace-root config. Per-pkg overrides workspace-root: per HAL-215
+		// workspace-root config. Per-pkg overrides workspace-root: previously
 		// the workspace-prepare matcher was reading from the root config and
 		// silently dropping per-pkg patterns set via `jest.shared.ts` extends.
 		//

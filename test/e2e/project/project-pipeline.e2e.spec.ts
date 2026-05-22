@@ -105,7 +105,7 @@ describe("live project pipeline", () => {
 		RUN_TIMEOUT_MS + 5000,
 	);
 
-	// HAL-225 regression: native Roblox `warn(...)` emitted from a spec must
+	// Regression: native Roblox `warn(...)` emitted from a spec must
 	// be captured into the `--gameOutput` JSON dump. Pre-#150 used
 	// LogService:GetLogHistory which captured all output; #150 swapped to
 	// InterceptWriteable on Jest's process.stdout/stderr, which only sees
@@ -150,7 +150,7 @@ describe("live project pipeline", () => {
 
 			expect(entries.length).toBeGreaterThan(0);
 			expect(
-				entries.some((entry) => entry.message.includes("HAL-225 game-output marker")),
+				entries.some((entry) => entry.message.includes("game-output marker")),
 			).toBeTrue();
 		},
 		RUN_TIMEOUT_MS + 5000,

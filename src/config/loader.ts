@@ -38,7 +38,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
 
 	// Flatten test: block onto resolved config so downstream consumers
 	// (executor, projects, test-script, formatters) see jest options at the
-	// top level. HAL-167: refactor consumers to read `config.test.*` directly.
+	// top level. TODO: refactor consumers to read `config.test.*` directly.
 	const resolved: ResolvedConfig = Object.assign({}, DEFAULT_CONFIG, definedTest, definedRest);
 
 	// `gameOutput: true` / `outputFile: true` are shorthand for the

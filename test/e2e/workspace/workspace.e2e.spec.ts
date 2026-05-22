@@ -1,5 +1,5 @@
 /**
- * HAL-155 e2e — workspace mode foundation.
+ * E2e — workspace mode foundation.
  *
  * Exercises the full workspace pipeline up to OCALE dispatch:
  * discovery → package-resolver → preflight → synthesize → rojo build →
@@ -8,7 +8,7 @@
  *
  * Live OCALE roundtrip (full materialize → Jest.runCLI → result envelope)
  * requires a workspace fixture with a real Jest module installed. That
- * piece is deferred to HAL-156+; this test lays the foundation.
+ * piece is deferred to a follow-up; this test lays the foundation.
  */
 import * as cp from "node:child_process";
 import * as fs from "node:fs";

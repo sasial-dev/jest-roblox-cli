@@ -36,7 +36,7 @@ export interface FakeOpenCloudTask {
 	project?: string;
 	/**
 	 * Per-package snapshot writes returned on the auto-wrapped entry.
-	 * Mirrors the HAL-165 envelope field captured by the staged materializer:
+	 * Mirrors the envelope field captured by the staged materializer:
 	 * each key is a DataModel-style virtual path resolved by the CLI's
 	 * `writeSnapshots` against the per-package rojo project + rootDir.
 	 */
