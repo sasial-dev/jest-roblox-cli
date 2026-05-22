@@ -2049,7 +2049,7 @@ describe(runWorkspace, () => {
 	});
 
 	describe("per-package output files", () => {
-		it("should write .jest-roblox/output/<pkg>--<project>.json under the workspace root from final results", async () => {
+		it("should write .jest-roblox/output/<pkg>--<project>.jest-output.log under the workspace root from final results", async () => {
 			expect.assertions(2);
 
 			vol.reset();
@@ -2079,7 +2079,7 @@ describe(runWorkspace, () => {
 				ROOT,
 				".jest-roblox",
 				"output",
-				"@halcyon-foo--@halcyon-foo.json",
+				"@halcyon-foo--@halcyon-foo.jest-output.log",
 			);
 
 			expect(vol.existsSync(file)).toBeTrue();
@@ -2120,7 +2120,12 @@ describe(runWorkspace, () => {
 			// become hyphens so the path component stays a single segment.
 			expect(
 				vol.existsSync(
-					path.join(ROOT, ".jest-roblox", "output", "@halcyon-foo--@halcyon-foo.json"),
+					path.join(
+						ROOT,
+						".jest-roblox",
+						"output",
+						"@halcyon-foo--@halcyon-foo.jest-output.log",
+					),
 				),
 			).toBeTrue();
 		});
@@ -2153,14 +2158,19 @@ describe(runWorkspace, () => {
 
 			expect(
 				vol.existsSync(
-					path.join(ROOT, ".jest-roblox", "output", "@halcyon-foo--@halcyon-foo.json"),
+					path.join(
+						ROOT,
+						".jest-roblox",
+						"output",
+						"@halcyon-foo--@halcyon-foo.jest-output.log",
+					),
 				),
 			).toBeFalse();
 		});
 	});
 
 	describe("per-package gameOutput files", () => {
-		it("should write parsed entries to .jest-roblox/output/<pkg>--<project>.gameOutput.json when workspace.gameOutput is enabled", async () => {
+		it("should write parsed entries to .jest-roblox/output/<pkg>--<project>.game-output.log when workspace.gameOutput is enabled", async () => {
 			expect.assertions(2);
 
 			vol.reset();
@@ -2193,7 +2203,7 @@ describe(runWorkspace, () => {
 				ROOT,
 				".jest-roblox",
 				"output",
-				"@halcyon-foo--@halcyon-foo.gameOutput.json",
+				"@halcyon-foo--@halcyon-foo.game-output.log",
 			);
 
 			expect(vol.existsSync(file)).toBeTrue();
@@ -2233,11 +2243,16 @@ describe(runWorkspace, () => {
 
 			// The two per-package sinks are independent: with
 			// workspace.outputFile on, the result JSON sibling is emitted, but
-			// the .gameOutput.json companion stays absent because
+			// the .game-output.log companion stays absent because
 			// workspace.gameOutput is off.
 			expect(
 				vol.existsSync(
-					path.join(ROOT, ".jest-roblox", "output", "@halcyon-foo--@halcyon-foo.json"),
+					path.join(
+						ROOT,
+						".jest-roblox",
+						"output",
+						"@halcyon-foo--@halcyon-foo.jest-output.log",
+					),
 				),
 			).toBeTrue();
 			expect(
@@ -2246,7 +2261,7 @@ describe(runWorkspace, () => {
 						ROOT,
 						".jest-roblox",
 						"output",
-						"@halcyon-foo--@halcyon-foo.gameOutput.json",
+						"@halcyon-foo--@halcyon-foo.game-output.log",
 					),
 				),
 			).toBeFalse();
@@ -2282,7 +2297,7 @@ describe(runWorkspace, () => {
 				ROOT,
 				".jest-roblox",
 				"output",
-				"@halcyon-foo--@halcyon-foo.gameOutput.json",
+				"@halcyon-foo--@halcyon-foo.game-output.log",
 			);
 
 			expect(JSON.parse(vol.readFileSync(file, "utf8") as string)).toStrictEqual([]);
@@ -2318,7 +2333,7 @@ describe(runWorkspace, () => {
 				ROOT,
 				".jest-roblox",
 				"output",
-				"@halcyon-foo--@halcyon-foo.gameOutput.json",
+				"@halcyon-foo--@halcyon-foo.game-output.log",
 			);
 
 			expect(JSON.parse(vol.readFileSync(file, "utf8") as string)).toStrictEqual([]);
@@ -2374,13 +2389,13 @@ describe(runWorkspace, () => {
 				ROOT,
 				".jest-roblox",
 				"output",
-				"@halcyon-foo--@halcyon-foo.gameOutput.json",
+				"@halcyon-foo--@halcyon-foo.game-output.log",
 			);
 			const barFile = path.join(
 				ROOT,
 				".jest-roblox",
 				"output",
-				"@halcyon-bar--@halcyon-bar.gameOutput.json",
+				"@halcyon-bar--@halcyon-bar.game-output.log",
 			);
 
 			expect(JSON.parse(vol.readFileSync(fooFile, "utf8") as string)).toStrictEqual([
@@ -2451,13 +2466,13 @@ describe(runWorkspace, () => {
 				ROOT,
 				".jest-roblox",
 				"output",
-				"@halcyon-foo--client.gameOutput.json",
+				"@halcyon-foo--client.game-output.log",
 			);
 			const serverFile = path.join(
 				ROOT,
 				".jest-roblox",
 				"output",
-				"@halcyon-foo--server.gameOutput.json",
+				"@halcyon-foo--server.game-output.log",
 			);
 
 			expect(vol.existsSync(clientFile)).toBeTrue();
@@ -2490,7 +2505,7 @@ describe(runWorkspace, () => {
 			ROOT,
 			".jest-roblox",
 			"output",
-			"@halcyon-foo--@halcyon-foo.gameOutput.json",
+			"@halcyon-foo--@halcyon-foo.game-output.log",
 		);
 
 		it("should write a single grouped aggregate file when runOptions.gameOutput is set", async () => {
@@ -2566,8 +2581,8 @@ describe(runWorkspace, () => {
 				workspaceRoot: ROOT,
 			});
 
-			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("game-output.log"));
-			expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining(".gameOutput.json"));
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(aggregateFile));
+			expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining(perPackageFile));
 		});
 
 		it("should announce per-package files to agents when both sinks are active", async () => {
@@ -2592,8 +2607,8 @@ describe(runWorkspace, () => {
 				workspaceRoot: ROOT,
 			});
 
-			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(".gameOutput.json"));
-			expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining("game-output.log"));
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(perPackageFile));
+			expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining(aggregateFile));
 		});
 
 		it("should announce per-package paths to humans when only per-package is active", async () => {
@@ -2614,7 +2629,7 @@ describe(runWorkspace, () => {
 				workspaceRoot: ROOT,
 			});
 
-			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(".gameOutput.json"));
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(perPackageFile));
 		});
 
 		it("should announce the aggregate to agents when only the aggregate is active", async () => {
@@ -2635,7 +2650,7 @@ describe(runWorkspace, () => {
 				workspaceRoot: ROOT,
 			});
 
-			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("game-output.log"));
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(aggregateFile));
 		});
 
 		it("should not announce the aggregate when it captured zero entries", async () => {
@@ -2658,7 +2673,7 @@ describe(runWorkspace, () => {
 
 			// File still written (empty group), but no notice for zero entries.
 			expect(vol.existsSync(aggregateFile)).toBeTrue();
-			expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining("game-output.log"));
+			expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining(aggregateFile));
 		});
 	});
 
@@ -2865,13 +2880,13 @@ describe(runWorkspace, () => {
 				ROOT,
 				".jest-roblox",
 				"output",
-				"@halcyon-foo--@halcyon-foo.json",
+				"@halcyon-foo--@halcyon-foo.jest-output.log",
 			);
 			const barOutput = path.join(
 				ROOT,
 				".jest-roblox",
 				"output",
-				"@halcyon-bar--@halcyon-bar.json",
+				"@halcyon-bar--@halcyon-bar.jest-output.log",
 			);
 
 			expect(vol.existsSync(fooOutput)).toBeTrue();

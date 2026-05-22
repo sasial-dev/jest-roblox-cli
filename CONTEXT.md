@@ -24,7 +24,7 @@ per (package?, project) that ran, even if `entries` is empty.
 _Avoid_: "merged log", "combined output"
 
 **Per-package Game Output**:
-In workspace mode, one `.jest-roblox/output/<pkg>--<project>.gameOutput.json`
+In workspace mode, one `.jest-roblox/output/<pkg>--<project>.game-output.log`
 per selected (package, project), each a flat `{ message, messageType,
 timestamp }` array. Gated by `workspace.gameOutput: true`. Independent of
 Aggregated Game Output — a single run can emit both.

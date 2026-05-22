@@ -766,7 +766,7 @@ function writePerPackageOutputFiles(
 		const entry = pending[index]!;
 		const filename = `${sanitizePathSegment(entry.pkg)}--${sanitizePathSegment(
 			entry.project.displayName,
-		)}.json`;
+		)}.jest-output.log`;
 		fs.writeFileSync(
 			path.join(directory, filename),
 			JSON.stringify(result.result, null, 2),
@@ -775,7 +775,7 @@ function writePerPackageOutputFiles(
 	}
 }
 
-// Sibling of writePerPackageOutputFiles; emits a `.gameOutput.json`
+// Sibling of writePerPackageOutputFiles; emits a `.game-output.log`
 // companion alongside each (pkg, project) result file under
 // `.jest-roblox/output/`. The path is built absolute against workspaceRoot
 // before calling writeGameOutput — that helper calls path.resolve which
@@ -794,7 +794,7 @@ function writePerPackageGameOutputFiles(
 		const entry = pending[index]!;
 		const filename = `${sanitizePathSegment(entry.pkg)}--${sanitizePathSegment(
 			entry.project.displayName,
-		)}.gameOutput.json`;
+		)}.game-output.log`;
 		const filePath = path.join(directory, filename);
 		const entries = parseGameOutput(result.gameOutput);
 		writeGameOutput(filePath, entries);
