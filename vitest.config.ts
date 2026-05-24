@@ -25,6 +25,7 @@ export default defineConfig({
 		coverage: {
 			exclude: [
 				"dist/**",
+				"src/**/*.bench.ts",
 				"src/**/*.luau",
 				"src/**/*.spec-d.ts",
 				"test/e2e/**",
@@ -43,6 +44,13 @@ export default defineConfig({
 				plugins: [luauPlugin],
 				test: {
 					name: "unit",
+					// `*.bench.ts` benchmarks (run via `vitest bench`) live
+					// beside the unit specs. Scope them to this project so the
+					// e2e/live projects — the latter has a network globalSetup —
+					// never pick them up.
+					benchmark: {
+						include: ["src/**/*.bench.ts"],
+					},
 					clearMocks: true,
 					env: {
 						GITHUB_ACTIONS: "",
@@ -71,6 +79,11 @@ export default defineConfig({
 				plugins: [luauPlugin],
 				test: {
 					name: "e2e",
+					// Benchmarks belong to the unit project only; opt this one
+					// out so `vitest bench` never runs them here.
+					benchmark: {
+						include: [],
+					},
 					clearMocks: true,
 					include: ["test/e2e/cli/**/*.e2e.spec.ts"],
 					restoreMocks: true,
@@ -83,6 +96,12 @@ export default defineConfig({
 				plugins: [luauPlugin],
 				test: {
 					name: "live",
+					// Benchmarks belong to the unit project only; opt this one
+					// out so `vitest bench` never triggers the network
+					// globalSetup.
+					benchmark: {
+						include: [],
+					},
 					clearMocks: true,
 					fileParallelism: false,
 					globalSetup: ["./test/e2e/fixtures/live-place/global-setup.ts"],

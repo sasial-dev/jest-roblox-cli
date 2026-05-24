@@ -622,12 +622,26 @@ async function resolvePackageContexts(input: {
 		// the package's own rojo tree. Without this, the materializer
 		// payload carries raw filesystem paths that Jest cannot find as
 		// ModuleScript Instances.
-		const resolveSetup = createSetupResolver({
-			configDirectory: info.packageDirectory,
-			rojoConfigPath: descriptor.rojoProjectPath,
+		//
+		// `createSetupResolver` eagerly builds a `RojoResolver` (a full
+		// project-tree filesystem walk) — by far the dominant resolveContexts
+		// cost. Skip it entirely when no project declares setup files, mirroring
+		// the guard in `resolveSetupFilePaths` (run/discovery.ts). Packages with
+		// no setup files (the common case) then pay nothing here.
+		const needsSetupResolution = projects.some((project) => {
+			return (
+				project.config.setupFiles !== undefined ||
+				project.config.setupFilesAfterEnv !== undefined
+			);
 		});
-		for (const project of projects) {
-			applySetupResolver(project.config, resolveSetup);
+		if (needsSetupResolution) {
+			const resolveSetup = createSetupResolver({
+				configDirectory: info.packageDirectory,
+				rojoConfigPath: descriptor.rojoProjectPath,
+			});
+			for (const project of projects) {
+				applySetupResolver(project.config, resolveSetup);
+			}
 		}
 
 		contexts.push({

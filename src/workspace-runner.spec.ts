@@ -751,6 +751,137 @@ describe(runWorkspace, () => {
 		);
 	});
 
+	it("should not build a rojo resolver for packages without setup files", async () => {
+		expect.assertions(1);
+
+		vol.reset();
+		vol.fromJSON({
+			...seedPackage(FOO_DIR, {
+				name: "@halcyon/foo",
+				specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+			}),
+			[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+		});
+
+		setLoadedConfigPerPackage({
+			[FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR },
+		});
+
+		const { backend } = createStubBackend([
+			{ jestOutput: passingResult(), pkg: "@halcyon/foo", project: "@halcyon/foo" },
+		]);
+
+		await runWorkspace({
+			backend,
+			cli: makeCli(),
+			packageInfos: [FOO_INFO],
+			runOptions: makeRunOptions(),
+			version: "0.0.0-test",
+			workspaceRoot: ROOT,
+		});
+
+		// No project declares setupFiles/setupFilesAfterEnv, so the costly
+		// RojoResolver tree walk must be skipped entirely — it is the dominant
+		// resolveContexts cost and resolves nothing here.
+		expect(RojoResolver.fromPath).not.toHaveBeenCalled();
+	});
+
+	it("should resolve a project that declares only setupFiles", async () => {
+		expect.assertions(2);
+
+		vol.reset();
+		vol.fromJSON({
+			...seedPackage(FOO_DIR, {
+				name: "@halcyon/foo",
+				specFiles: {
+					[path.join(FOO_DIR, "src/foo.spec.luau")]: "",
+					[path.join(FOO_DIR, "src/Shared/setup.luau")]: "",
+				},
+			}),
+			[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+		});
+
+		setLoadedConfigPerPackage({
+			[FOO_DIR]: {
+				...DEFAULT_CONFIG,
+				rootDir: FOO_DIR,
+				setupFiles: ["./src/Shared/setup.luau"],
+			},
+		});
+
+		vi.mocked(RojoResolver.fromPath).mockReturnValue({
+			getRbxPathFromFilePath() {
+				return ["ReplicatedStorage", "Pkg", "Shared", "setup"];
+			},
+		} as unknown as RojoResolver);
+
+		const { backend, captured } = createStubBackend([
+			{ jestOutput: passingResult(), pkg: "@halcyon/foo", project: "@halcyon/foo" },
+		]);
+
+		await runWorkspace({
+			backend,
+			cli: makeCli(),
+			packageInfos: [FOO_INFO],
+			runOptions: makeRunOptions(),
+			version: "0.0.0-test",
+			workspaceRoot: ROOT,
+		});
+
+		expect(captured.options?.scriptOverride).toContain(
+			'"setupFiles":["ReplicatedStorage/Pkg/Shared/setup"]',
+		);
+		expect(captured.options?.scriptOverride).not.toContain('"setupFilesAfterEnv"');
+	});
+
+	it("should resolve a project that declares only setupFilesAfterEnv", async () => {
+		expect.assertions(2);
+
+		vol.reset();
+		vol.fromJSON({
+			...seedPackage(FOO_DIR, {
+				name: "@halcyon/foo",
+				specFiles: {
+					[path.join(FOO_DIR, "src/foo.spec.luau")]: "",
+					[path.join(FOO_DIR, "src/Shared/setup.luau")]: "",
+				},
+			}),
+			[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+		});
+
+		setLoadedConfigPerPackage({
+			[FOO_DIR]: {
+				...DEFAULT_CONFIG,
+				rootDir: FOO_DIR,
+				setupFilesAfterEnv: ["./src/Shared/setup.luau"],
+			},
+		});
+
+		vi.mocked(RojoResolver.fromPath).mockReturnValue({
+			getRbxPathFromFilePath() {
+				return ["ReplicatedStorage", "Pkg", "Shared", "setup"];
+			},
+		} as unknown as RojoResolver);
+
+		const { backend, captured } = createStubBackend([
+			{ jestOutput: passingResult(), pkg: "@halcyon/foo", project: "@halcyon/foo" },
+		]);
+
+		await runWorkspace({
+			backend,
+			cli: makeCli(),
+			packageInfos: [FOO_INFO],
+			runOptions: makeRunOptions(),
+			version: "0.0.0-test",
+			workspaceRoot: ROOT,
+		});
+
+		expect(captured.options?.scriptOverride).toContain(
+			'"setupFilesAfterEnv":["ReplicatedStorage/Pkg/Shared/setup"]',
+		);
+		expect(captured.options?.scriptOverride).not.toContain('"setupFiles":');
+	});
+
 	it("should honor per-package rojoProject from each package's own jest.config", async () => {
 		expect.assertions(2);
 

@@ -40,6 +40,7 @@
 		"!dist/**/*.tsbuildinfo"
 	],
 	"scripts": {
+		"bench": "vitest bench --project unit",
 		"build": "pnpm build:packages && pnpm build:bundle && tsdown && pnpm build:plugin",
 		"build:bundle": "weld",
 		"build:packages": "pnpm -r --filter !@isentinel/jest-roblox run build",
