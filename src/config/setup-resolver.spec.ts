@@ -1,21 +1,24 @@
-import { RojoResolver } from "@roblox-ts/rojo-resolver";
+import { RojoResolver } from "@isentinel/rojo-utils";
+import { fromAny } from "@total-typescript/shoehorn";
 
 import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { createSetupResolver } from "./setup-resolver.ts";
 
-vi.mock(import("@roblox-ts/rojo-resolver"));
+vi.mock(import("@isentinel/rojo-utils"));
 
 const configDirectory = "/project";
 const rojoConfigPath = "/project/default.project.json";
 
 function mockRojoResolver(mapping: Record<string, Array<string>>) {
-	vi.mocked(RojoResolver.fromPath).mockReturnValue({
-		getRbxPathFromFilePath(filePath: string) {
-			return mapping[filePath];
-		},
-	} as unknown as RojoResolver);
+	vi.mocked(RojoResolver.fromPath).mockReturnValue(
+		fromAny({
+			getRbxPathFromFilePath(filePath: string) {
+				return mapping[filePath];
+			},
+		}),
+	);
 }
 
 function makeResolver(overrides: Partial<Parameters<typeof createSetupResolver>[0]> = {}) {

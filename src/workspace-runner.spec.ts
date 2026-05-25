@@ -1,4 +1,3 @@
-import { RojoResolver } from "@roblox-ts/rojo-resolver";
 import { fromAny } from "@total-typescript/shoehorn";
 
 import { vol } from "memfs";
@@ -33,7 +32,11 @@ vi.mock(import("./config/loader.ts"), async (importOriginal) => {
 	return { ...actual, loadConfig: vi.fn<typeof actual.loadConfig>(actual.loadConfig) };
 });
 
-vi.mock(import("@roblox-ts/rojo-resolver"));
+// rojo-utils is loaded only transitively (via ./workspace-runner.ts), never as a
+// direct top-level import: this suite mocks node:fs, and loading the bundled
+// rojo-utils module before the async node:fs mock resolves trips a hoisting TDZ.
+// Tests grab RojoResolver via a (cached) dynamic import and spy on fromPath, so
+// the real tree-walking helpers stay real while the filesystem walk is stubbed.
 
 vi.mock(import("./coverage/workspace-prepare.ts"));
 
@@ -710,8 +713,8 @@ describe(runWorkspace, () => {
 			},
 		});
 
-		// Mock the RojoResolver so the resolver's filesystem walk doesn't
-		// hit the real fs (memfs only mocks node:fs, not fs-extra).
+		// Mock the RojoResolver so the resolver's filesystem walk is skipped and
+		// these tests stay focused on workspace orchestration.
 		const mapping: Record<string, Array<string>> = {
 			[path.resolve(FOO_DIR, "./src/Shared/setup.luau")]: [
 				"ReplicatedStorage",
@@ -720,11 +723,14 @@ describe(runWorkspace, () => {
 				"setup",
 			],
 		};
-		vi.mocked(RojoResolver.fromPath).mockReturnValue({
-			getRbxPathFromFilePath(filePath: string) {
-				return mapping[filePath];
-			},
-		} as unknown as RojoResolver);
+		const { RojoResolver } = await import("@isentinel/rojo-utils");
+		vi.spyOn(RojoResolver, "fromPath").mockReturnValue(
+			fromAny({
+				getRbxPathFromFilePath(filePath: string) {
+					return mapping[filePath];
+				},
+			}),
+		);
 
 		const { backend, captured } = createStubBackend([
 			{ jestOutput: passingResult(), pkg: "@halcyon/foo", project: "@halcyon/foo" },
@@ -767,6 +773,9 @@ describe(runWorkspace, () => {
 			[FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR },
 		});
 
+		const { RojoResolver } = await import("@isentinel/rojo-utils");
+		const fromPathSpy = vi.spyOn(RojoResolver, "fromPath");
+
 		const { backend } = createStubBackend([
 			{ jestOutput: passingResult(), pkg: "@halcyon/foo", project: "@halcyon/foo" },
 		]);
@@ -783,7 +792,7 @@ describe(runWorkspace, () => {
 		// No project declares setupFiles/setupFilesAfterEnv, so the costly
 		// RojoResolver tree walk must be skipped entirely — it is the dominant
 		// resolveContexts cost and resolves nothing here.
-		expect(RojoResolver.fromPath).not.toHaveBeenCalled();
+		expect(fromPathSpy).not.toHaveBeenCalled();
 	});
 
 	it("should resolve a project that declares only setupFiles", async () => {
@@ -809,11 +818,14 @@ describe(runWorkspace, () => {
 			},
 		});
 
-		vi.mocked(RojoResolver.fromPath).mockReturnValue({
-			getRbxPathFromFilePath() {
-				return ["ReplicatedStorage", "Pkg", "Shared", "setup"];
-			},
-		} as unknown as RojoResolver);
+		const { RojoResolver } = await import("@isentinel/rojo-utils");
+		vi.spyOn(RojoResolver, "fromPath").mockReturnValue(
+			fromAny({
+				getRbxPathFromFilePath() {
+					return ["ReplicatedStorage", "Pkg", "Shared", "setup"];
+				},
+			}),
+		);
 
 		const { backend, captured } = createStubBackend([
 			{ jestOutput: passingResult(), pkg: "@halcyon/foo", project: "@halcyon/foo" },
@@ -857,11 +869,14 @@ describe(runWorkspace, () => {
 			},
 		});
 
-		vi.mocked(RojoResolver.fromPath).mockReturnValue({
-			getRbxPathFromFilePath() {
-				return ["ReplicatedStorage", "Pkg", "Shared", "setup"];
-			},
-		} as unknown as RojoResolver);
+		const { RojoResolver } = await import("@isentinel/rojo-utils");
+		vi.spyOn(RojoResolver, "fromPath").mockReturnValue(
+			fromAny({
+				getRbxPathFromFilePath() {
+					return ["ReplicatedStorage", "Pkg", "Shared", "setup"];
+				},
+			}),
+		);
 
 		const { backend, captured } = createStubBackend([
 			{ jestOutput: passingResult(), pkg: "@halcyon/foo", project: "@halcyon/foo" },

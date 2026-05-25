@@ -1,4 +1,4 @@
-import { RojoResolver } from "@roblox-ts/rojo-resolver";
+import { RojoResolver } from "@isentinel/rojo-utils";
 
 import { createRequire } from "node:module";
 import * as path from "node:path";

@@ -21,6 +21,9 @@
 	"scripts": {
 		"build": "tsdown"
 	},
+	"dependencies": {
+		"arktype": "2.2.0"
+	},
 	"devDependencies": {
 		"@isentinel/eslint-config": "5.0.0-beta.11",
 		"@isentinel/tsconfig": "1.2.0",
@@ -29,8 +32,10 @@
 		"@vitest/coverage-v8": "4.1.5",
 		"@vitest/eslint-plugin": "1.6.17",
 		"eslint": "9.39.4",
+		"eslint-plugin-jest-extended": "3.0.1",
 		"eslint-plugin-n": "17.24.0",
 		"eslint-plugin-pnpm": "1.6.0",
+		"jest-extended": "7.0.0",
 		"tsdown": "0.22.0",
 		"typescript": "6.0.3",
 		"vitest": "4.1.5"

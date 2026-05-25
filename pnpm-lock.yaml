@@ -14,9 +14,6 @@ importers:
       '@jridgewell/trace-mapping':
         specifier: 0.3.31
         version: 0.3.31
-      '@roblox-ts/rojo-resolver':
-        specifier: 1.1.0
-        version: 1.1.0
       arktype:
         specifier: 2.2.0
         version: 2.2.0
@@ -70,8 +67,8 @@ importers:
         specifier: workspace:*
         version: link:packages/roblox-runner
       '@isentinel/roblox-ts':
-        specifier: 4.0.1
-        version: 4.0.1
+        specifier: 4.0.2
+        version: 4.0.2
       '@isentinel/rojo-utils':
         specifier: workspace:*
         version: link:packages/rojo-utils
@@ -261,6 +258,10 @@ importers:
         version: 4.1.5(@types/node@24.12.3)(@vitest/coverage-v8@4.1.5)(vite@8.0.14(@types/node@24.12.3)(jiti@2.7.0)(yaml@2.9.0))
 
   packages/rojo-utils:
+    dependencies:
+      arktype:
+        specifier: 2.2.0
+        version: 2.2.0
     devDependencies:
       '@isentinel/eslint-config':
         specifier: 5.0.0-beta.11
@@ -283,12 +284,18 @@ importers:
       eslint:
         specifier: 9.39.4
         version: 9.39.4(jiti@2.7.0)
+      eslint-plugin-jest-extended:
+        specifier: 3.0.1
+        version: 3.0.1(eslint@9.39.4(jiti@2.7.0))(typescript@6.0.3)
       eslint-plugin-n:
         specifier: 17.24.0
         version: 17.24.0(eslint@9.39.4(jiti@2.7.0))(typescript@6.0.3)
       eslint-plugin-pnpm:
         specifier: 1.6.0
         version: 1.6.0(eslint@9.39.4(jiti@2.7.0))
+      jest-extended:
+        specifier: 7.0.0
+        version: 7.0.0(typescript@6.0.3)
       tsdown:
         specifier: 0.22.0
         version: 0.22.0(@tsdown/exe@0.22.0)(@typescript/native-preview@7.0.0-dev.20260512.1)(oxc-resolver@11.19.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0))(publint@0.3.21)(typescript@6.0.3)
@@ -866,8 +873,8 @@ packages:
     peerDependencies:
       eslint: '>=8.0.0'
 
-  '@isentinel/roblox-ts@4.0.1':
-    resolution: {integrity: sha512-scmSmYmi4J7BL/zRAh5N/1bepyPT5lSahLjVyyY1LPHTi6C0OrqK/aK+y+/wGY2+PjSFbWUh9vcbdTGoEM3emQ==}
+  '@isentinel/roblox-ts@4.0.2':
+    resolution: {integrity: sha512-iKFV59hPYD2QfSdNJs/qH8VI3AzAeBsKgwKurBYk+Rl4S6qFAvAMMKl0oE0djj8QtwJZd+5g5cIfIUAp5+OdPQ==}
     hasBin: true
 
   '@isentinel/stylua@2.1.0-esm.3':
@@ -1746,9 +1753,6 @@ packages:
 
   '@roblox-ts/path-translator@1.1.0':
     resolution: {integrity: sha512-D0akTmnNYqBw+ZIek5JxocT3BjmbgGOuOy0x1nIIxHBPNLGCpzseToY8jyYs/0mlvnN2xnSP/k8Tv+jvGOQSwQ==}
-
-  '@roblox-ts/rojo-resolver@1.1.0':
-    resolution: {integrity: sha512-QmvVryu1EeME+3QUoG5j/gHGJoJUaffCgZ92mhlG7cJSd1uyhgpY4CNWriZAwZJYkTlzd5Htkpn+18yDFbOFXA==}
 
   '@rolldown/binding-android-arm64@1.0.2':
     resolution: {integrity: sha512-ZS4D1JPGn/MYQN/SYDWftIE/nVsM8j/AFOYEzAoOE2O3NktQOZru+/vYXGbR/qtdLdIfGCP0lcoJiYVzsEz+iQ==}
@@ -4051,8 +4055,8 @@ packages:
   tinybench@2.9.0:
     resolution: {integrity: sha512-0+DUvqWMValLmha6lr4kD8iAMK1HzV0/aKnCtWb9v9641TnP/MFb7Pc2bxoxQjTXAErryXVgUOfv2YqNllqGeg==}
 
-  tinyexec@1.1.2:
-    resolution: {integrity: sha512-dAqSqE/RabpBKI8+h26GfLq6Vb3JVXs30XYQjdMjaj/c2tS8IYYMbIzP599KtRj7c57/wYApb3QjgRgXmrCukA==}
+  tinyexec@1.2.2:
+    resolution: {integrity: sha512-M/Q0B2cp4K7kynaT/vnED1j8TlLY+Pp7C6Wl2bl/7u/F0mUVwdyOpwomQb8JpYLitHUssAJRmLZdMCGsrx7i+g==}
     engines: {node: '>=18'}
 
   tinyglobby@0.2.16:
@@ -4380,7 +4384,7 @@ snapshots:
   '@antfu/install-pkg@1.1.0':
     dependencies:
       package-manager-detector: 1.6.0
-      tinyexec: 1.1.2
+      tinyexec: 1.2.2
 
   '@ark/schema@0.56.0':
     dependencies:
@@ -4990,13 +4994,12 @@ snapshots:
       - supports-color
       - typescript
 
-  '@isentinel/roblox-ts@4.0.1':
+  '@isentinel/roblox-ts@4.0.2':
     dependencies:
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
       '@roblox-ts/luau-ast': 2.0.1
       '@roblox-ts/path-translator': 1.1.0
-      '@roblox-ts/rojo-resolver': 1.1.0
       arktype: 2.2.0
       chokidar: 4.0.3
       fs-extra: 11.3.5
@@ -5882,11 +5885,6 @@ snapshots:
       ajv: 8.20.0
       fs-extra: 11.3.5
 
-  '@roblox-ts/rojo-resolver@1.1.0':
-    dependencies:
-      ajv: 8.20.0
-      fs-extra: 11.3.5
-
   '@rolldown/binding-android-arm64@1.0.2':
     optional: true
 
@@ -6041,7 +6039,7 @@ snapshots:
     dependencies:
       obug: 2.1.1
       semver: 7.8.1
-      tinyexec: 1.1.2
+      tinyexec: 1.2.2
       tsdown: 0.22.0(@tsdown/exe@0.22.0)(@typescript/native-preview@7.0.0-dev.20260512.1)(oxc-resolver@11.19.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0))(publint@0.3.21)(typescript@6.0.3)
 
   '@tybys/wasm-util@0.10.2':
@@ -6648,7 +6646,7 @@ snapshots:
       jsonc-parser: 3.3.1
       package-manager-detector: 1.6.0
       semver: 7.8.1
-      tinyexec: 1.1.2
+      tinyexec: 1.2.2
       tinyglobby: 0.2.16
       unconfig: 7.5.0
       yaml: 2.9.0
@@ -8459,7 +8457,7 @@ snapshots:
 
   tinybench@2.9.0: {}
 
-  tinyexec@1.1.2: {}
+  tinyexec@1.2.2: {}
 
   tinyglobby@0.2.16:
     dependencies:
@@ -8517,7 +8515,7 @@ snapshots:
       rolldown: 1.0.2
       rolldown-plugin-dts: 0.25.1(@typescript/native-preview@7.0.0-dev.20260512.1)(oxc-resolver@11.19.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0))(rolldown@1.0.2)(typescript@6.0.3)
       semver: 7.8.1
-      tinyexec: 1.1.2
+      tinyexec: 1.2.2
       tinyglobby: 0.2.16
       tree-kill: 1.2.2
       unconfig-core: 7.5.0
@@ -8630,7 +8628,7 @@ snapshots:
       picomatch: 4.0.4
       std-env: 4.0.0
       tinybench: 2.9.0
-      tinyexec: 1.1.2
+      tinyexec: 1.2.2
       tinyglobby: 0.2.16
       tinyrainbow: 3.1.0
       vite: 8.0.14(@types/node@24.12.3)(jiti@2.7.0)(yaml@2.9.0)

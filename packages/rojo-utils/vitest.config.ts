@@ -4,6 +4,7 @@ export default defineConfig({
 	test: {
 		clearMocks: true,
 		coverage: {
+			exclude: ["test/**"],
 			thresholds: {
 				branches: 100,
 				functions: 100,
@@ -13,6 +14,7 @@ export default defineConfig({
 		},
 		include: ["src/**/*.spec.ts"],
 		restoreMocks: true,
+		setupFiles: ["./test/setup/jest-extended.ts"],
 		unstubEnvs: true,
 	},
 });
