@@ -27,6 +27,7 @@ import type { RawCoverageData } from "../coverage/types.ts";
 import { runProjects } from "../executor.ts";
 import { combineSourceMappers, type SourceMapper } from "../source-mapper/index.ts";
 import { type StubMount, synthesize } from "../staging/synthesizer.ts";
+import { NOOP_TIMING_COLLECTOR, type TimingCollector } from "../timing/orchestration-collector.ts";
 import { runTypecheck } from "../typecheck/runner.ts";
 import { rojoProjectSchema } from "../types/rojo.ts";
 import type { RojoTreeNode } from "../types/rojo.ts";
@@ -74,26 +75,23 @@ interface SelectedProjects {
 
 export async function runMultiProject(options: MultiRunOptions): Promise<MultiRunResult> {
 	const { cli, config: rootConfig, rawProjects } = options;
+	const timing = options.timing ?? NOOP_TIMING_COLLECTOR;
 
-	const rojoTree = loadRojoTree(rootConfig);
+	const rojoTree = timing.profile("loadRojoTree", () => loadRojoTree(rootConfig));
 
-	const allProjects = await resolveAllProjects(
-		rawProjects,
-		rootConfig,
-		rojoTree,
-		rootConfig.rootDir,
-	);
+	const allProjects = await timing.profileAsync("resolveAllProjects", async () => {
+		return resolveAllProjects(rawProjects, rootConfig, rojoTree, rootConfig.rootDir);
+	});
 
-	for (const project of allProjects) {
-		resolveSetupFilePaths(project.config);
-	}
+	timing.profile("resolveSetupFilePaths", () => {
+		for (const project of allProjects) {
+			resolveSetupFilePaths(project.config);
+		}
+	});
 
-	const { filesByProject, projects } = selectProjects(
-		allProjects,
-		cli.project,
-		cli.files,
-		rootConfig.rootDir,
-	);
+	const { filesByProject, projects } = timing.profile("selectProjects", () => {
+		return selectProjects(allProjects, cli.project, cli.files, rootConfig.rootDir);
+	});
 
 	// Stubs land in `.jest-roblox/cache/` instead of the user's source
 	// tree. Open-cloud builds the place from a synthesizer-produced
@@ -108,7 +106,9 @@ export async function runMultiProject(options: MultiRunOptions): Promise<MultiRu
 	// in their source tree. The synthesizer's `assertNoSourceCollision`
 	// and the plugin's runtime `FindFirstChild` check would both block
 	// the run otherwise.
-	const cleaned = cleanLeftoverStubs(projects, rootConfig.rootDir);
+	const cleaned = timing.profile("cleanLeftoverStubs", () => {
+		return cleanLeftoverStubs(projects, rootConfig.rootDir);
+	});
 	if (cleaned.length > 0) {
 		process.stderr.write(
 			`jest-roblox: cleaned ${String(cleaned.length)} leftover stub(s):\n${cleaned
@@ -117,37 +117,45 @@ export async function runMultiProject(options: MultiRunOptions): Promise<MultiRu
 		);
 	}
 
-	generateProjectStubs(projects, rootConfig.rootDir, cacheRoot);
+	timing.profile("generateProjectStubs", () => {
+		generateProjectStubs(projects, rootConfig.rootDir, cacheRoot);
+	});
 
-	const { effectiveConfig, preCoverageMs } = prepareMultiProjectCoverage(
-		rootConfig,
-		projects,
-		cacheRoot,
-	);
-	const backend = await resolveBackend(cli, effectiveConfig);
+	const { effectiveConfig, preCoverageMs } = timing.profile("prepareCoverage", () => {
+		return prepareMultiProjectCoverage(rootConfig, projects, cacheRoot);
+	});
+	const backend = await timing.profileAsync("resolveBackend", async () => {
+		return resolveBackend(cli, effectiveConfig);
+	});
 	const parallel = effectiveParallelForBackend(effectiveConfig.parallel, backend);
 
 	if (!rootConfig.collectCoverage && backend.kind === "open-cloud") {
-		buildOpenCloudPlace(rootConfig, projects, cacheRoot);
+		timing.profile("buildOpenCloudPlace", () => {
+			buildOpenCloudPlace(rootConfig, projects, cacheRoot);
+		});
 	}
 
-	const { allTypeTestFiles, pendingJobs } = collectPendingJobs({
-		cliFiles: cli.files,
-		effectivePlaceFile: effectiveConfig.placeFile,
-		filesByProject,
-		projects,
-		rootConfig,
+	const { allTypeTestFiles, pendingJobs } = timing.profile("collectPendingJobs", () => {
+		return collectPendingJobs({
+			cliFiles: cli.files,
+			effectivePlaceFile: effectiveConfig.placeFile,
+			filesByProject,
+			projects,
+			rootConfig,
+		});
 	});
 
-	const projectResults = await runJobs(backend, pendingJobs, parallel);
+	const projectResults = await runJobs(backend, pendingJobs, parallel, timing);
 
 	const uniqueTypeTestFiles = [...new Set(allTypeTestFiles)];
 	const typecheckResult =
 		uniqueTypeTestFiles.length > 0
-			? runTypecheck({
-					files: uniqueTypeTestFiles,
-					rootDir: rootConfig.rootDir,
-					tsconfig: rootConfig.typecheckTsconfig,
+			? timing.profile("runTypecheck", () => {
+					return runTypecheck({
+						files: uniqueTypeTestFiles,
+						rootDir: rootConfig.rootDir,
+						tsconfig: rootConfig.typecheckTsconfig,
+					});
 				})
 			: undefined;
 
@@ -299,6 +307,7 @@ async function runJobs(
 	backend: Backend,
 	pendingJobs: Array<PendingJob>,
 	parallel: ParallelOption,
+	timing: TimingCollector,
 ): Promise<Array<ProjectResult>> {
 	if (pendingJobs.length === 0) {
 		await backend.close?.();
@@ -307,21 +316,24 @@ async function runJobs(
 
 	let runResult;
 	try {
-		runResult = await runProjects({
-			backend,
-			deferFormatting: true,
-			parallel,
-			projects: pendingJobs.map((pending) => {
-				return {
-					config: pending.config,
-					displayColor: pending.displayColor,
-					displayName: pending.displayName,
-					runtimeInjectionPaths: pending.runtimeInjectionPaths,
-					testFiles: pending.runtimeFiles,
-				};
-			}),
-			startTime: Date.now(),
-			version: VERSION,
+		runResult = await timing.profileAsync("runProjects", async () => {
+			return runProjects({
+				backend,
+				deferFormatting: true,
+				parallel,
+				projects: pendingJobs.map((pending) => {
+					return {
+						config: pending.config,
+						displayColor: pending.displayColor,
+						displayName: pending.displayName,
+						runtimeInjectionPaths: pending.runtimeInjectionPaths,
+						testFiles: pending.runtimeFiles,
+					};
+				}),
+				startTime: Date.now(),
+				timing,
+				version: VERSION,
+			});
 		});
 	} finally {
 		await backend.close?.();

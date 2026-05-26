@@ -23,6 +23,7 @@ import {
 } from "./executor.ts";
 import type { SnapshotWrites } from "./reporter/parser.ts";
 import { parseJestOutput } from "./reporter/parser.ts";
+import { createTimingCollector } from "./timing/orchestration-collector.ts";
 import type { JestResult } from "./types/jest-result.ts";
 
 vi.mock(import("node:fs"), async () => {
@@ -541,6 +542,66 @@ describe("execute single-project helper", () => {
 		expect(result.timing.uploadMs).toBe(50);
 		expect(result.timing.totalMs).toBeGreaterThanOrEqual(0);
 		expect(result.timing.testsMs).toBeGreaterThanOrEqual(0);
+	});
+
+	it("should record uploadMs / executionMs spans under backend.runTests when timing is provided", async () => {
+		expect.assertions(2);
+
+		const lines: Array<string> = [];
+		const timing = createTimingCollector({
+			enabled: true,
+			sink: (line) => {
+				lines.push(line);
+			},
+		});
+
+		const backend = createMockBackend(createPassingResult());
+		await runProjects({
+			backend,
+			projects: [{ config: DEFAULT_CONFIG, testFiles: ["src/test.spec.ts"] }],
+			startTime: Date.now(),
+			timing,
+			version: "0.0.0-test",
+		});
+
+		timing.flushTimingReport();
+
+		expect(lines).toContain("[TIMING]   uploadMs: 50ms");
+		expect(lines).toContain("[TIMING]   executionMs: 100ms");
+	});
+
+	it("should skip uploadMs span when backend did not measure an upload", async () => {
+		expect.assertions(2);
+
+		const lines: Array<string> = [];
+		const timing = createTimingCollector({
+			enabled: true,
+			sink: (line) => {
+				lines.push(line);
+			},
+		});
+
+		// Studio backend never uploads — uploadMs is omitted from BackendTiming.
+		// The orchestrator must skip the span instead of recording a 0ms or
+		// emitting an "undefined ms" line.
+		const studioBackend: Backend = {
+			kind: "studio",
+			runTests: async () =>
+				singleEntryResult({ result: createPassingResult() }, { executionMs: 100 }),
+		};
+
+		await runProjects({
+			backend: studioBackend,
+			projects: [{ config: DEFAULT_CONFIG, testFiles: ["src/test.spec.ts"] }],
+			startTime: Date.now(),
+			timing,
+			version: "0.0.0-test",
+		});
+
+		timing.flushTimingReport();
+
+		expect(lines).toContain("[TIMING]   executionMs: 100ms");
+		expect(lines.some((line) => line.includes("uploadMs"))).toBeFalse();
 	});
 
 	it("should return empty output when deferFormatting is true", async () => {

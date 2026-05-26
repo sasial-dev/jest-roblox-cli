@@ -2,6 +2,7 @@ import type { CliOptions, ResolvedConfig } from "../config/schema.ts";
 import type { MappedCoverageResult } from "../coverage/mapper.ts";
 import type { ExecuteResult } from "../executor.ts";
 import type { SourceMapper } from "../source-mapper/index.ts";
+import type { TimingCollector } from "../timing/orchestration-collector.ts";
 import type { JestResult } from "../types/jest-result.ts";
 
 export type RunMode = "multi" | "single" | "workspace";
@@ -67,4 +68,10 @@ export type RunResult = MultiRunResult | SingleRunResult | WorkspaceRunResult;
 export interface RunOptions {
 	cli: CliOptions;
 	config: ResolvedConfig;
+	/**
+	 * Span-tree profiler owned by `runJestRoblox`. Optional so direct test
+	 * seams keep working with the existing two-property shape; production
+	 * callers always pass one through.
+	 */
+	timing?: TimingCollector;
 }

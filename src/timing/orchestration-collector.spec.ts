@@ -204,6 +204,73 @@ describe(createTimingCollector, () => {
 		);
 	});
 
+	it("should record a leaf span with a supplied elapsedMs", () => {
+		expect.assertions(1);
+
+		const { lines, sink } = createCapturingSink();
+		const collector = createTimingCollector({ enabled: true, sink });
+
+		collector.record("backend.uploadMs", 1234);
+		collector.flushTimingReport();
+
+		expect(lines).toStrictEqual([
+			"[TIMING] backend.uploadMs: 1234ms",
+			"[TIMING] TOTAL (host): 1234ms",
+		]);
+	});
+
+	it("should nest recorded spans under the currently-open profile frame", () => {
+		expect.assertions(1);
+
+		const { lines, sink } = createCapturingSink();
+		const collector = createTimingCollector({
+			clock: createScriptedClock([0, 10]),
+			enabled: true,
+			sink,
+		});
+
+		collector.profile("backend.runTests", () => {
+			collector.record("backend.uploadMs", 4);
+			collector.record("backend.executionMs", 6);
+		});
+		collector.flushTimingReport();
+
+		expect(lines).toStrictEqual([
+			"[TIMING] backend.runTests: 10ms",
+			"[TIMING]   backend.uploadMs: 4ms",
+			"[TIMING]   backend.executionMs: 6ms",
+			"[TIMING] TOTAL (host): 10ms",
+		]);
+	});
+
+	it("should accumulate repeated record() calls with the same name", () => {
+		expect.assertions(1);
+
+		const { lines, sink } = createCapturingSink();
+		const collector = createTimingCollector({ enabled: true, sink });
+
+		collector.record("backend.uploadMs", 3);
+		collector.record("backend.uploadMs", 4);
+		collector.flushTimingReport();
+
+		expect(lines).toStrictEqual([
+			"[TIMING] backend.uploadMs: 7ms",
+			"[TIMING] TOTAL (host): 7ms",
+		]);
+	});
+
+	it("should be a no-op when record() is called on a disabled collector", () => {
+		expect.assertions(1);
+
+		const { lines, sink } = createCapturingSink();
+		const collector = createTimingCollector({ enabled: false, sink });
+
+		collector.record("backend.uploadMs", 42);
+		collector.flushTimingReport();
+
+		expect(lines).toStrictEqual([]);
+	});
+
 	it("should use a real clock by default", () => {
 		expect.assertions(1);
 

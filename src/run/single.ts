@@ -7,17 +7,33 @@ import type { ResolvedConfig } from "../config/schema.ts";
 import { prepareCoverage } from "../coverage/prepare.ts";
 import { type ExecuteResult, runProjects } from "../executor.ts";
 import { hasFormatter, usesAgentFormatter } from "../formatters/utils.ts";
+import { NOOP_TIMING_COLLECTOR, type TimingCollector } from "../timing/orchestration-collector.ts";
 import { runTypecheck } from "../typecheck/runner.ts";
 import { classifyTestFiles, discoverTestFiles, resolveSetupFilePaths } from "./discovery.ts";
 import type { RunOptions, SingleRunResult } from "./types.ts";
 
 const VERSION: string = packageJson.version;
 
+interface ExecuteRuntimeTestsOptions {
+	cli: RunOptions["cli"];
+	config: ResolvedConfig;
+	testFiles: Array<string>;
+	timing: TimingCollector;
+	totalFiles: number;
+}
+
 export async function runSingleProject(options: RunOptions): Promise<SingleRunResult> {
 	const { cli } = options;
-	const config = narrowConfigByFiles(options.config, cli.files ?? []);
-	resolveSetupFilePaths(config);
-	const discovery = discoverTestFiles(config, cli.files);
+	const timing = options.timing ?? NOOP_TIMING_COLLECTOR;
+	const config = timing.profile("narrowConfigByFiles", () => {
+		return narrowConfigByFiles(options.config, cli.files ?? []);
+	});
+	timing.profile("resolveSetupFilePaths", () => {
+		resolveSetupFilePaths(config);
+	});
+	const discovery = timing.profile("discoverTestFiles", () =>
+		discoverTestFiles(config, cli.files),
+	);
 
 	if (discovery.files.length === 0) {
 		if (config.passWithNoTests) {
@@ -28,7 +44,9 @@ export async function runSingleProject(options: RunOptions): Promise<SingleRunRe
 		return { mode: "single", preCoverageMs: 0, validationExitCode: 2 };
 	}
 
-	const { runtimeFiles, typeTestFiles } = classifyTestFiles(discovery.files, config);
+	const { runtimeFiles, typeTestFiles } = timing.profile("classifyTestFiles", () => {
+		return classifyTestFiles(discovery.files, config);
+	});
 
 	if (typeTestFiles.length === 0 && runtimeFiles.length === 0) {
 		if (config.passWithNoTests) {
@@ -43,39 +61,38 @@ export async function runSingleProject(options: RunOptions): Promise<SingleRunRe
 	let effectiveConfig = config;
 	if (config.collectCoverage && !config.typecheckOnly && runtimeFiles.length > 0) {
 		const preCoverageStart = Date.now();
-		const { placeFile } = prepareCoverage(config);
+		const { placeFile } = timing.profile("prepareCoverage", () => prepareCoverage(config));
 		preCoverageMs = Date.now() - preCoverageStart;
 		effectiveConfig = { ...config, placeFile } satisfies ResolvedConfig;
 	}
 
 	const typecheckResult =
 		typeTestFiles.length > 0
-			? runTypecheck({
-					files: typeTestFiles,
-					rootDir: effectiveConfig.rootDir,
-					tsconfig: effectiveConfig.typecheckTsconfig,
+			? timing.profile("runTypecheck", () => {
+					return runTypecheck({
+						files: typeTestFiles,
+						rootDir: effectiveConfig.rootDir,
+						tsconfig: effectiveConfig.typecheckTsconfig,
+					});
 				})
 			: undefined;
 
 	const runtimeResult =
 		runtimeFiles.length > 0
-			? await executeRuntimeTests(
-					options,
-					effectiveConfig,
-					runtimeFiles,
-					discovery.totalFiles,
-				)
+			? await executeRuntimeTests({
+					cli,
+					config: effectiveConfig,
+					testFiles: runtimeFiles,
+					timing,
+					totalFiles: discovery.totalFiles,
+				})
 			: undefined;
 
 	return { mode: "single", preCoverageMs, runtimeResult, typecheckResult };
 }
 
-async function executeRuntimeTests(
-	options: RunOptions,
-	config: ResolvedConfig,
-	testFiles: Array<string>,
-	totalFiles: number,
-): Promise<ExecuteResult> {
+async function executeRuntimeTests(options: ExecuteRuntimeTestsOptions): Promise<ExecuteResult> {
+	const { cli, config, testFiles, timing, totalFiles } = options;
 	const useDefaultFormatter =
 		!config.silent &&
 		!usesAgentFormatter(config.formatters, config.verbose) &&
@@ -86,15 +103,20 @@ async function executeRuntimeTests(
 		);
 	}
 
-	const backend = await resolveBackend(options.cli, config);
+	const backend = await timing.profileAsync("resolveBackend", async () => {
+		return resolveBackend(cli, config);
+	});
 
 	try {
-		const { results } = await runProjects({
-			backend,
-			deferFormatting: true,
-			projects: [{ config, testFiles }],
-			startTime: Date.now(),
-			version: VERSION,
+		const { results } = await timing.profileAsync("runProjects", async () => {
+			return runProjects({
+				backend,
+				deferFormatting: true,
+				projects: [{ config, testFiles }],
+				startTime: Date.now(),
+				timing,
+				version: VERSION,
+			});
 		});
 		// eslint-disable-next-line ts/no-non-null-assertion -- length-1 invariant
 		return results[0]!;

@@ -32,6 +32,7 @@ import {
 import { LuauScriptError, type SnapshotWrites } from "./reporter/parser.ts";
 import { createSnapshotPathResolver } from "./snapshot/path-resolver.ts";
 import { createSourceMapper, type SourceMapper } from "./source-mapper/index.ts";
+import { NOOP_TIMING_COLLECTOR, type TimingCollector } from "./timing/orchestration-collector.ts";
 import type { JestResult, TestFileResult } from "./types/jest-result.ts";
 import { rojoProjectSchema } from "./types/rojo.ts";
 import type { TimingResult } from "./types/timing.ts";
@@ -89,6 +90,14 @@ export interface RunProjectsOptions {
 	scriptOverride?: string;
 	startTime: number;
 	streaming?: StreamingHooks;
+	/**
+	 * Span-tree profiler owned by the top-level run. Optional so existing
+	 * test seams (which exercise the executor directly) keep working without
+	 * threading a collector through; production callers pass one through so
+	 * the host waterfall captures `backend.runTests` + per-project
+	 * post-processing.
+	 */
+	timing?: TimingCollector;
 	version: string;
 	workStealing?: boolean;
 }
@@ -103,6 +112,12 @@ interface ProcessProjectOptions {
 	config: ResolvedConfig;
 	deferFormatting?: boolean;
 	startTime: number;
+	/**
+	 * The orchestration collector created by `runJestRoblox`. Required —
+	 * the only caller is `runProjects` which always passes its own
+	 * collector (NOOP when the top-level run didn't enable TIMING).
+	 */
+	timing: TimingCollector;
 	version: string;
 }
 
@@ -261,15 +276,29 @@ export function formatExecuteOutput(options: FormatOutputOptions): string {
  * config.
  */
 export async function runProjects(options: RunProjectsOptions): Promise<RunProjectsResult> {
-	const jobs = options.projects.map((project) => buildProjectJob(project));
-
-	const { rawResults, timing: backendTiming } = await options.backend.runTests({
-		jobs,
-		parallel: options.parallel,
-		scriptOverride: options.scriptOverride,
-		streaming: options.streaming,
-		workStealing: options.workStealing,
+	const timing = options.timing ?? NOOP_TIMING_COLLECTOR;
+	const jobs = timing.profile("buildJobs", () => {
+		return options.projects.map((project) => buildProjectJob(project, timing));
 	});
+
+	const { rawResults, timing: backendTiming } = await timing.profileAsync(
+		"backend.runTests",
+		async () => {
+			const result = await options.backend.runTests({
+				jobs,
+				parallel: options.parallel,
+				scriptOverride: options.scriptOverride,
+				streaming: options.streaming,
+				workStealing: options.workStealing,
+			});
+			// Surface backend-measured upload/execute as nested spans of the
+			// `backend.runTests` frame currently on the stack. These are
+			// absolute numbers the backend already measured itself —
+			// `record` injects them directly instead of re-timing in JS.
+			recordBackendTimingSpans(timing, result.timing);
+			return result;
+		},
+	);
 
 	if (rawResults.length !== jobs.length) {
 		throw new Error(
@@ -277,42 +306,45 @@ export async function runProjects(options: RunProjectsOptions): Promise<RunProje
 		);
 	}
 
-	const results = rawResults.map((raw, index) => {
-		// eslint-disable-next-line ts/no-non-null-assertion -- length equality asserted above
-		const job = jobs[index]!;
-		// When one entry's envelope decodes to `{success:false,
-		// err:...}` (Jest's per-entry pcall in `runEntry` encodes deferred
-		// Promise rejections this way — e.g. when jest-core's runJest:345 calls
-		// exit(1) because a project's --testPathPattern matched zero files),
-		// parseJestOutput throws LuauScriptError. Without per-entry recovery the
-		// throw escapes runProjects entirely and the workspace-runner never
-		// reaches writePerPackageOutputFiles or writes snapshots from sibling
-		// entries. Convert the parse failure into a synthetic failed
-		// ExecuteResult so the other entries' snapshot writes and per-package
-		// output files still land.
-		try {
-			const projectResult = buildProjectResult(raw.entry, job, raw.fallbackGameOutput);
-			return processProjectResult(projectResult, {
-				backendTiming,
-				config: job.config,
-				deferFormatting: options.deferFormatting,
-				startTime: options.startTime,
-				version: options.version,
-			});
-		} catch (err) {
-			if (!(err instanceof LuauScriptError)) {
-				throw err;
-			}
+	const results = timing.profile("processResults", () => {
+		return rawResults.map((raw, index) => {
+			// eslint-disable-next-line ts/no-non-null-assertion -- length equality asserted above
+			const job = jobs[index]!;
+			// When one entry's envelope decodes to `{success:false,
+			// err:...}` (Jest's per-entry pcall in `runEntry` encodes deferred
+			// Promise rejections this way — e.g. when jest-core's runJest:345
+			// calls exit(1) because a project's --testPathPattern matched zero
+			// files), parseJestOutput throws LuauScriptError. Without per-entry
+			// recovery the throw escapes runProjects entirely and the
+			// workspace-runner never reaches writePerPackageOutputFiles or writes
+			// snapshots from sibling entries. Convert the parse failure into a
+			// synthetic failed ExecuteResult so the other entries' snapshot
+			// writes and per-package output files still land.
+			try {
+				const projectResult = buildProjectResult(raw.entry, job, raw.fallbackGameOutput);
+				return processProjectResult(projectResult, {
+					backendTiming,
+					config: job.config,
+					deferFormatting: options.deferFormatting,
+					startTime: options.startTime,
+					timing,
+					version: options.version,
+				});
+			} catch (err) {
+				if (!(err instanceof LuauScriptError)) {
+					throw err;
+				}
 
-			return buildExecutionErrorResult({
-				backendTiming,
-				config: job.config,
-				deferFormatting: options.deferFormatting,
-				error: err,
-				startTime: options.startTime,
-				version: options.version,
-			});
-		}
+				return buildExecutionErrorResult({
+					backendTiming,
+					config: job.config,
+					deferFormatting: options.deferFormatting,
+					error: err,
+					startTime: options.startTime,
+					version: options.version,
+				});
+			}
+		});
 	});
 
 	return { backendTiming, results };
@@ -383,6 +415,16 @@ function parseTsconfigMappings(options: TsconfigCompilerOptions): Array<Tsconfig
 	}
 
 	return [{ outDir: outDirectory, rootDir: normalizeDirectoryPath(options.rootDir ?? "src") }];
+}
+
+function recordBackendTimingSpans(timing: TimingCollector, backendTiming: BackendTiming): void {
+	// `uploadMs` is optional in the BackendTiming shape — studio backend
+	// doesn't upload — so skip the span when the backend didn't report one.
+	if (backendTiming.uploadMs !== undefined) {
+		timing.record("uploadMs", backendTiming.uploadMs);
+	}
+
+	timing.record("executionMs", backendTiming.executionMs);
 }
 
 const EXIT_CODE_MESSAGE = /^Exited with code: \d+$/;
@@ -699,24 +741,30 @@ function processProjectResult(
 	entry: ProjectBackendResult,
 	options: ProcessProjectOptions,
 ): ExecuteResult {
-	const { backendTiming, config, deferFormatting, startTime, version } = options;
+	const { backendTiming, config, deferFormatting, startTime, timing, version } = options;
 	const { coverageData, gameOutput, luauTiming, result, setupMs, snapshotWrites } = entry;
 
-	const tsconfigMappings = resolveAllTsconfigMappings(config.rootDir);
+	const tsconfigMappings = timing.profile("resolveTsconfigMappings", () => {
+		return resolveAllTsconfigMappings(config.rootDir);
+	});
 
 	const writeCounts: SnapshotWriteCounts =
 		snapshotWrites !== undefined
-			? writeSnapshots(snapshotWrites, config, tsconfigMappings)
+			? timing.profile("writeSnapshots", () => {
+					return writeSnapshots(snapshotWrites, config, tsconfigMappings);
+				})
 			: { attempted: 0, failed: 0, written: 0 };
 
 	const testsMs = calculateTestsMs(result.testResults);
-	const sourceMapper = config.sourceMap ? buildSourceMapper(config, tsconfigMappings) : undefined;
+	const sourceMapper = config.sourceMap
+		? timing.profile("buildSourceMapper", () => buildSourceMapper(config, tsconfigMappings))
+		: undefined;
 
 	resolveTestFilePaths(result, sourceMapper);
 
 	const totalMs = Date.now() - startTime;
 
-	const timing = {
+	const resultTiming = {
 		executionMs: backendTiming.executionMs,
 		setupMs,
 		startTime,
@@ -732,7 +780,7 @@ function processProjectResult(
 					result,
 					snapshotWriteFailures: writeCounts.failed,
 					sourceMapper,
-					timing,
+					timing: resultTiming,
 					version,
 				})
 			: "";
@@ -751,7 +799,7 @@ function processProjectResult(
 		result,
 		snapshotWriteFailures: writeCounts.failed > 0 ? writeCounts.failed : undefined,
 		sourceMapper,
-		timing,
+		timing: resultTiming,
 	};
 }
 
@@ -760,8 +808,10 @@ function processProjectResult(
  * carries its own config so the Luau runner never re-resolves or shares format
  * state across projects (fixes the spike's snapshot-diff regression — C1).
  */
-function buildProjectJob(parameters: ProjectInput): ProjectJob {
-	const tsconfigMappings = resolveAllTsconfigMappings(parameters.config.rootDir);
+function buildProjectJob(parameters: ProjectInput, timing: TimingCollector): ProjectJob {
+	const tsconfigMappings = timing.profile("resolveTsconfigMappings", () => {
+		return resolveAllTsconfigMappings(parameters.config.rootDir);
+	});
 	const luauProject = isLuauProject(parameters.testFiles, tsconfigMappings);
 	const config = applySnapshotFormatDefaults(parameters.config, luauProject);
 	return {

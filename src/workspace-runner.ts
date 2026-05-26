@@ -46,7 +46,7 @@ import {
 	generateWorkStealingScript,
 	type MaterializerInput,
 } from "./staging/test-script-staged.ts";
-import { createTimingCollector, type TimingCollector } from "./timing/orchestration-collector.ts";
+import { NOOP_TIMING_COLLECTOR, type TimingCollector } from "./timing/orchestration-collector.ts";
 import type { RojoTreeNode } from "./types/rojo.ts";
 import {
 	buildGroupedGameOutput,
@@ -86,6 +86,14 @@ export interface RunWorkspaceOptions {
 	 * `loadPackages`) is the source of truth for those.
 	 */
 	runOptions: WorkspaceRunOptions;
+	/**
+	 * Span-tree profiler created at the top of `runJestRoblox`. The
+	 * workspace runner does NOT flush — the caller owns the lifecycle so a
+	 * single `[TIMING]` waterfall covers the whole invocation rather than
+	 * emitting a half-tree if a downstream phase throws. Optional so direct
+	 * test seams keep working; production callers always pass one.
+	 */
+	timing?: TimingCollector;
 	version: string;
 	workspaceRoot: string;
 	/**
@@ -141,16 +149,7 @@ type WorkspaceDispatchSpec = Pick<
 export async function runWorkspace(
 	options: RunWorkspaceOptions,
 ): Promise<Array<WorkspaceProjectResult> | undefined> {
-	// Flush from `finally` so a TIMING run still emits the host waterfall when a
-	// profiled phase throws (missing lute, rojo build failure, dispatch timeout)
-	// — exactly the slow or broken runs the profiler exists to diagnose. Disabled
-	// (TIMING unset) it is a no-op, so behavior stays byte-identical.
-	const timing = createTimingCollector();
-	try {
-		return await runWorkspaceProfiled(options, timing);
-	} finally {
-		timing.flushTimingReport();
-	}
+	return runWorkspaceProfiled(options, options.timing ?? NOOP_TIMING_COLLECTOR);
 }
 
 function buildCoverageMap(
@@ -327,6 +326,7 @@ async function runWorkspaceProfiled(
 				};
 			}),
 			startTime,
+			timing,
 			version,
 			...dispatchSpec,
 		});

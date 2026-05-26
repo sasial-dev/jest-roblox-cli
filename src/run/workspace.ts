@@ -14,6 +14,7 @@ import { aggregateWorkspaceCoverage } from "../coverage/workspace-aggregate.ts";
 import { hasFormatter, usesAgentFormatter } from "../formatters/utils.ts";
 import type { StreamingAggregatorOnEntry } from "../reporter/streaming-aggregator.ts";
 import { formatStreamingProgressLine } from "../reporter/streaming-progress.ts";
+import type { TimingCollector } from "../timing/orchestration-collector.ts";
 import { runWorkspace, type WorkspaceProjectResult } from "../workspace-runner.ts";
 import { discoverWorkspaceRoot } from "../workspace/discovery.ts";
 import type { PackageInfo } from "../workspace/package-resolver.ts";
@@ -45,6 +46,7 @@ interface ResolvedPackages {
 export async function runWorkspaceMode(
 	cli: CliOptions,
 	workspace?: WorkspaceConfig,
+	timing?: TimingCollector,
 ): Promise<WorkspaceRunResult> {
 	const basicValidation = validateBasicWorkspaceFlags(cli);
 	if (!basicValidation.ok) {
@@ -131,6 +133,7 @@ export async function runWorkspaceMode(
 			...(onStreamingResult !== undefined ? { onStreamingResult } : {}),
 			packageInfos,
 			runOptions,
+			timing,
 			version: VERSION,
 			workspaceRoot,
 			workStealingCredentials,

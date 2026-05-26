@@ -11,6 +11,7 @@ import type { CliOptions, WorkspaceRunOptions } from "./config/schema.ts";
 import { DEFAULT_CONFIG } from "./config/schema.ts";
 import { MANIFEST_VERSION } from "./coverage/manifest.ts";
 import { prepareWorkStealingQueue } from "./memory-store/work-stealing.ts";
+import { createTimingCollector } from "./timing/orchestration-collector.ts";
 import { buildWithRojo } from "./utils/rojo-builder.ts";
 import { runWorkspace } from "./workspace-runner.ts";
 
@@ -275,14 +276,23 @@ describe(runWorkspace, () => {
 			{ jestOutput: passingResult(), pkg: "@halcyon/foo", project: "@halcyon/foo" },
 		]);
 
-		await runWorkspace({
-			backend,
-			cli: makeCli(),
-			packageInfos: [FOO_INFO],
-			runOptions: makeRunOptions(),
-			version: "0.0.0-test",
-			workspaceRoot: ROOT,
-		});
+		// Lifecycle (create + flush) moved to `runJestRoblox` so a single
+		// collector covers single/multi/workspace modes. Tests that exercise
+		// `runWorkspace` directly must own that lifecycle themselves.
+		const timing = createTimingCollector();
+		try {
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions(),
+				timing,
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+		} finally {
+			timing.flushTimingReport();
+		}
 
 		const timingLines = writes
 			.join("")
@@ -332,16 +342,25 @@ describe(runWorkspace, () => {
 			{ jestOutput: passingResult(), pkg: "@halcyon/foo", project: "@halcyon/foo" },
 		]);
 
-		await expect(
-			runWorkspace({
-				backend,
-				cli: makeCli(),
-				packageInfos: [FOO_INFO],
-				runOptions: makeRunOptions(),
-				version: "0.0.0-test",
-				workspaceRoot: ROOT,
-			}),
-		).rejects.toThrow("rojo boom");
+		// Caller-owned try/finally must still flush — the test asserts the
+		// host waterfall lands even when a profiled phase throws (lute
+		// missing, rojo build failure, dispatch timeout).
+		const timing = createTimingCollector();
+		try {
+			await expect(
+				runWorkspace({
+					backend,
+					cli: makeCli(),
+					packageInfos: [FOO_INFO],
+					runOptions: makeRunOptions(),
+					timing,
+					version: "0.0.0-test",
+					workspaceRoot: ROOT,
+				}),
+			).rejects.toThrow("rojo boom");
+		} finally {
+			timing.flushTimingReport();
+		}
 
 		const timingLines = writes
 			.join("")

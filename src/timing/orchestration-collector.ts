@@ -11,6 +11,21 @@ export interface TimingCollector {
 	flushTimingReport: () => void;
 	profile: <T>(name: string, func: () => T extends Promise<unknown> ? never : T) => T;
 	profileAsync: <T>(name: string, func: () => Promise<T>) => Promise<T>;
+	/**
+	 * Register a leaf span under the current stack frame whose `elapsedMs` is
+	 * supplied directly. Used to surface durations the orchestrator did not
+	 * measure itself — the backend reports `uploadMs` / `executionMs` from
+	 * inside its own `runTests` call, and the Luau runner reports per-game
+	 * phases inside the Roblox VM. Repeated calls with the same `name`
+	 * accumulate, matching `profile`'s behavior.
+	 *
+	 * Stack-empty fallback: when called outside any `profile`/`profileAsync`
+	 * frame the span lands at root and contributes to `TOTAL (host)` like
+	 * any other root. Call inside the relevant frame to keep totals clean
+	 * — recording a value at root that is ALSO captured by a sibling root
+	 * `profile` span would double-count toward the host total.
+	 */
+	record: (name: string, elapsedMs: number) => void;
 }
 
 interface SpanNode {
@@ -72,6 +87,16 @@ export function createTimingCollector(options: CreateTimingCollectorOptions = {}
 		}
 	}
 
+	function record(name: string, elapsedMs: number): void {
+		if (!enabled) {
+			return;
+		}
+
+		const top = stack.at(-1);
+		const node = childOf(top === undefined ? roots : top.children, name);
+		node.elapsedMs += elapsedMs;
+	}
+
 	function emit(node: SpanNode, depth: number): void {
 		const indent = "  ".repeat(depth);
 		sink(`[TIMING] ${indent}${node.name}: ${String(Math.round(node.elapsedMs))}ms`);
@@ -97,7 +122,7 @@ export function createTimingCollector(options: CreateTimingCollectorOptions = {}
 		roots.clear();
 	}
 
-	return { flushTimingReport, profile, profileAsync };
+	return { flushTimingReport, profile, profileAsync, record };
 }
 
 /**
