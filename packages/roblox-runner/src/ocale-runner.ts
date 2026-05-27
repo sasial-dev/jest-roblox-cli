@@ -1,5 +1,5 @@
 import type { HttpClient, SleepFunc } from "@bedrock-rbx/ocale";
-import { PollTimeoutError } from "@bedrock-rbx/ocale";
+import { PollTimeoutError, TRANSIENT_TRANSPORT_CODES } from "@bedrock-rbx/ocale";
 import { LuauExecutionClient } from "@bedrock-rbx/ocale/luau-execution";
 import type { PublishParameters } from "@bedrock-rbx/ocale/places";
 import { PlacesClient } from "@bedrock-rbx/ocale/places";
@@ -62,6 +62,7 @@ export class OcaleRunner implements RemoteRunner {
 				universeId: this.credentials.universeId,
 			},
 			{
+				retryableTransportCodes: TRANSIENT_TRANSPORT_CODES,
 				timeoutMs: timeout,
 			},
 		);
@@ -100,7 +101,9 @@ export class OcaleRunner implements RemoteRunner {
 			placeId: this.credentials.placeId,
 			universeId: this.credentials.universeId,
 		};
-		const result = await this.places.save(parameters);
+		const result = await this.places.save(parameters, {
+			retryableTransportCodes: TRANSIENT_TRANSPORT_CODES,
+		});
 		if (!result.success) {
 			throw new Error(`Failed to upload place: ${result.err.message}`, {
 				cause: result.err,

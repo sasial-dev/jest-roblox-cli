@@ -125,6 +125,21 @@ describe(OcaleRunner, () => {
 
 			expect(caught.cause).toBeInstanceOf(OpenCloudError);
 		});
+
+		it("should retry place save on transient ECONNRESET", async () => {
+			expect.assertions(2);
+
+			const http = createFakeHttpClient();
+			const reset = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+			http.mockNetworkError({ cause: reset });
+			http.mockResponse({ body: { versionNumber: 4 }, status: 200 });
+
+			const runner = makeRunner(http);
+			const result = await runner.uploadPlace({ placeFilePath: "/work/p.rbxl" });
+
+			expect(result.versionNumber).toBe(4);
+			expect(http.requests).toHaveLength(2);
+		});
 	});
 
 	describe("executeScript", () => {
@@ -305,6 +320,25 @@ describe(OcaleRunner, () => {
 			const result = await runner.executeScript({ script: "return 1", timeout: 30_000 });
 
 			expect(result.outputs).toStrictEqual(["42", '{"nested":true}', "raw"]);
+		});
+
+		it("should retry luau task submit on transient ECONNRESET", async () => {
+			expect.assertions(2);
+
+			const http = createFakeHttpClient();
+			const reset = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+			http.mockNetworkError({ cause: reset });
+			http.mockResponse({ body: taskBody({ state: "QUEUED" }), status: 200 });
+			http.mockResponse({
+				body: taskBody({ output: { results: ["ok"] }, state: "COMPLETE" }),
+				status: 200,
+			});
+
+			const runner = makeRunner(http);
+			const result = await runner.executeScript({ script: "return 1", timeout: 30_000 });
+
+			expect(result.outputs).toStrictEqual(["ok"]);
+			expect(http.requests).toHaveLength(3);
 		});
 
 		it("should clamp task timeout to 300 seconds when caller asks for more", async () => {
