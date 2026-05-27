@@ -1,5 +1,6 @@
 import { type } from "arktype";
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import type { Dirent } from "node:fs";
+import * as fs from "node:fs";
 import path from "node:path";
 
 const LUA_EXT = ".lua";
@@ -169,6 +170,7 @@ export type RbxPathParent = typeof RbxPathParent;
 
 export class RojoResolver {
 	private readonly rbxPath = new Array<string>();
+	private readonly realpathCache = new Map<string, string>();
 	private readonly walkedConfigFilesInternal = new Set<string>();
 	private readonly walkedDirectoriesInternal = new Set<string>();
 
@@ -186,12 +188,12 @@ export class RojoResolver {
 		const warnings = new Array<string>();
 
 		const defaultPath = path.join(projectPath, ROJO_DEFAULT_NAME);
-		if (existsSync(defaultPath)) {
+		if (fs.existsSync(defaultPath)) {
 			return { path: defaultPath, warnings };
 		}
 
 		const candidates = new Array<string | undefined>();
-		for (const fileName of readdirSync(projectPath)) {
+		for (const fileName of fs.readdirSync(projectPath)) {
 			if (
 				fileName !== ROJO_DEFAULT_NAME &&
 				(fileName === ROJO_OLD_NAME || ROJO_FILE_REGEX.test(fileName))
@@ -406,6 +408,16 @@ export class RojoResolver {
 		return this.walkedDirectoriesInternal;
 	}
 
+	private cachedRealpath(targetPath: string): string {
+		let resolved = this.realpathCache.get(targetPath);
+		if (resolved === undefined) {
+			resolved = fs.realpathSync(targetPath);
+			this.realpathCache.set(targetPath, resolved);
+		}
+
+		return resolved;
+	}
+
 	private getContainer(from: Array<RbxPath>, rbxPath?: RbxPath): RbxPath | undefined {
 		if (this.isGame && rbxPath) {
 			for (const container of from) {
@@ -419,17 +431,17 @@ export class RojoResolver {
 	}
 
 	private parseConfig(rojoConfigFilePath: string, doNotPush = false): void {
-		if (!existsSync(rojoConfigFilePath)) {
+		if (!fs.existsSync(rojoConfigFilePath)) {
 			this.warn(`RojoResolver: Path does not exist "${rojoConfigFilePath}"`);
 			return;
 		}
 
-		const realPath = realpathSync(rojoConfigFilePath);
+		const realPath = this.cachedRealpath(rojoConfigFilePath);
 		this.walkedConfigFilesInternal.add(realPath);
 
 		let configJson: unknown;
 		try {
-			configJson = JSON.parse(readFileSync(realPath, "utf8"));
+			configJson = JSON.parse(fs.readFileSync(realPath, "utf8"));
 		} catch {
 			// Malformed JSON: leave configJson undefined and fall through so it
 			// is reported as an invalid configuration rather than crashing the
@@ -450,17 +462,17 @@ export class RojoResolver {
 
 	private parsePath(itemPath: string): void {
 		const luauPath = convertToLuau(itemPath);
-		const realPath = existsSync(luauPath) ? realpathSync(luauPath) : luauPath;
+		const realPath = fs.existsSync(luauPath) ? this.cachedRealpath(luauPath) : luauPath;
 		const extension = path.extname(luauPath);
 		if (ROJO_MODULE_EXTS.has(extension)) {
 			this.filePathToRbxPathMap.set(luauPath, [...this.rbxPath]);
 		} else {
-			const isDirectory = existsSync(realPath) && statSync(realPath).isDirectory();
+			const isDirectory = fs.existsSync(realPath) && fs.statSync(realPath).isDirectory();
 			if (isDirectory) {
 				this.walkedDirectoriesInternal.add(realPath);
 			}
 
-			if (isDirectory && readdirSync(realPath).includes(ROJO_DEFAULT_NAME)) {
+			if (isDirectory && fs.readdirSync(realPath).includes(ROJO_DEFAULT_NAME)) {
 				this.parseConfig(path.join(luauPath, ROJO_DEFAULT_NAME), true);
 			} else {
 				this.partitions.unshift({
@@ -503,34 +515,62 @@ export class RojoResolver {
 		}
 	}
 
-	private searchChildren(directory: string, children: Array<string>): void {
-		// *.project.json
-		for (const child of children) {
-			const childPath = path.join(directory, child);
-			if (
-				statSync(realpathSync(childPath)).isFile() &&
-				child !== ROJO_DEFAULT_NAME &&
-				ROJO_FILE_REGEX.test(child)
-			) {
-				this.parseConfig(childPath);
+	private searchChildren(directory: string, directoryEntries: Array<Dirent>): void {
+		// Two-phase: parse every sibling *.project.json before recursing into
+		// sibling directories. parsePath / parseConfig insert partitions via
+		// unshift, and getRbxPathFromFilePath returns the first match, so
+		// interleaving in raw entry order would shuffle partition precedence
+		// for overlapping mounts.
+		const projectFiles = new Array<string>();
+		const subDirectories = new Array<{ name: string; path: string }>();
+
+		for (const entry of directoryEntries) {
+			const childPath = path.join(directory, entry.name);
+			let isFile = entry.isFile();
+			let isDirectory = entry.isDirectory();
+			// Symlinks (both flags false), unknown-type entries on NFS/SMB/FUSE
+			// mounts and some Windows network drives, and NTFS junctions on
+			// Node versions that don't classify them: resolve and stat the
+			// target so we still discover nested *.project.json files and
+			// walkable directories. A broken symlink throws ENOENT here —
+			// warn and skip rather than crash the whole walk.
+			if (!isFile && !isDirectory) {
+				try {
+					const stat = fs.statSync(this.cachedRealpath(childPath));
+					isFile = stat.isFile();
+					isDirectory = stat.isDirectory();
+				} catch (err) {
+					this.warn(
+						`RojoResolver: Failed to resolve "${childPath}" (${(err as Error).message})`,
+					);
+					continue;
+				}
+			}
+
+			if (isFile && ROJO_FILE_REGEX.test(entry.name)) {
+				projectFiles.push(childPath);
+			} else if (isDirectory) {
+				subDirectories.push({ name: entry.name, path: childPath });
 			}
 		}
 
-		// folders
-		for (const child of children) {
-			const childPath = path.join(directory, child);
-			if (statSync(realpathSync(childPath)).isDirectory()) {
-				this.searchDirectory(childPath, child);
-			}
+		for (const childPath of projectFiles) {
+			this.parseConfig(childPath);
+		}
+
+		for (const { name, path: childPath } of subDirectories) {
+			this.searchDirectory(childPath, name);
 		}
 	}
 
 	private searchDirectory(directory: string, item?: string): void {
-		const realPath = realpathSync(directory);
+		const realPath = this.cachedRealpath(directory);
 		this.walkedDirectoriesInternal.add(realPath);
-		const children = readdirSync(realPath);
+		// readdirSync transparently follows a symlink on the argument; the
+		// result is equivalent to readdirSync(realpathSync(directory)).
+		const directoryEntries = fs.readdirSync(directory, { withFileTypes: true });
 
-		if (children.includes(ROJO_DEFAULT_NAME)) {
+		if (directoryEntries.some((entry) => entry.name === ROJO_DEFAULT_NAME)) {
 			this.parseConfig(path.join(directory, ROJO_DEFAULT_NAME));
 			return;
 		}
@@ -539,7 +579,7 @@ export class RojoResolver {
 			this.rbxPath.push(item);
 		}
 
-		this.searchChildren(directory, children);
+		this.searchChildren(directory, directoryEntries);
 
 		if (item !== undefined) {
 			this.rbxPath.pop();

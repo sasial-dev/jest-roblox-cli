@@ -32,7 +32,7 @@ import { runTypecheck } from "../typecheck/runner.ts";
 import { rojoProjectSchema } from "../types/rojo.ts";
 import type { RojoTreeNode } from "../types/rojo.ts";
 import { buildWithRojo } from "../utils/rojo-builder.ts";
-import { classifyTestFiles, discoverTestFiles, resolveSetupFilePaths } from "./discovery.ts";
+import { classifyTestFiles, discoverTestFiles, resolveAllSetupFilePaths } from "./discovery.ts";
 import type { MultiProjectMerged, MultiRunResult, ProjectResult, RunOptions } from "./types.ts";
 
 const DEFAULT_ROJO_PROJECT = "default.project.json";
@@ -84,9 +84,7 @@ export async function runMultiProject(options: MultiRunOptions): Promise<MultiRu
 	});
 
 	timing.profile("resolveSetupFilePaths", () => {
-		for (const project of allProjects) {
-			resolveSetupFilePaths(project.config);
-		}
+		resolveAllSetupFilePaths(allProjects.map((project) => project.config));
 	});
 
 	const { filesByProject, projects } = timing.profile("selectProjects", () => {

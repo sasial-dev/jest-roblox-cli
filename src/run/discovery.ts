@@ -64,22 +64,40 @@ export function classifyTestFiles(
 	return { runtimeFiles, typeTestFiles };
 }
 
+// `createSetupResolver` eagerly walks the rojo project tree (a full FS pass
+// across every `$path`, including each `node_modules` package directory).
+// On large repos this dominates host time, so multi-mode shares one resolver
+// across all projects with the same rojo config -- typically every project.
+// Per-project `rojoProject` overrides still get their own resolver.
+export function resolveAllSetupFilePaths(configs: Array<ResolvedConfig>): void {
+	const resolvers = new Map<string, (input: string) => string>();
+
+	for (const config of configs) {
+		if (config.setupFiles === undefined && config.setupFilesAfterEnv === undefined) {
+			continue;
+		}
+
+		const rojoConfigPath = path.resolve(
+			config.rootDir,
+			config.rojoProject ?? DEFAULT_ROJO_PROJECT,
+		);
+		const key = JSON.stringify([config.rootDir, rojoConfigPath]);
+		let resolve = resolvers.get(key);
+		if (resolve === undefined) {
+			resolve = createSetupResolver({ configDirectory: config.rootDir, rojoConfigPath });
+			resolvers.set(key, resolve);
+		}
+
+		if (config.setupFiles !== undefined) {
+			config.setupFiles = config.setupFiles.map(resolve);
+		}
+
+		if (config.setupFilesAfterEnv !== undefined) {
+			config.setupFilesAfterEnv = config.setupFilesAfterEnv.map(resolve);
+		}
+	}
+}
+
 export function resolveSetupFilePaths(config: ResolvedConfig): void {
-	if (config.setupFiles === undefined && config.setupFilesAfterEnv === undefined) {
-		return;
-	}
-
-	const rojoConfigPath = path.resolve(config.rootDir, config.rojoProject ?? DEFAULT_ROJO_PROJECT);
-	const resolve = createSetupResolver({
-		configDirectory: config.rootDir,
-		rojoConfigPath,
-	});
-
-	if (config.setupFiles !== undefined) {
-		config.setupFiles = config.setupFiles.map(resolve);
-	}
-
-	if (config.setupFilesAfterEnv !== undefined) {
-		config.setupFilesAfterEnv = config.setupFilesAfterEnv.map(resolve);
-	}
+	resolveAllSetupFilePaths([config]);
 }

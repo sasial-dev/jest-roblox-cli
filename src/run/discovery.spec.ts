@@ -9,6 +9,7 @@ import { DEFAULT_CONFIG } from "../config/schema.ts";
 import {
 	classifyTestFiles,
 	discoverTestFiles,
+	resolveAllSetupFilePaths,
 	resolveSetupFilePaths,
 	TYPE_TEST_PATTERN,
 } from "./discovery.ts";
@@ -221,5 +222,60 @@ describe(resolveSetupFilePaths, () => {
 			configDirectory: "/project",
 			rojoConfigPath: path.resolve("/project", "custom.project.json"),
 		});
+	});
+});
+
+describe(resolveAllSetupFilePaths, () => {
+	it("should be a no-op when no project declares setup files", async () => {
+		expect.assertions(1);
+
+		const { createSetupResolver } = await import("../config/setup-resolver");
+		resolveAllSetupFilePaths([makeConfig(), makeConfig()]);
+
+		expect(createSetupResolver).not.toHaveBeenCalled();
+	});
+
+	it("should share one resolver across projects with the same rojo project", async () => {
+		expect.assertions(2);
+
+		const { createSetupResolver } = await import("../config/setup-resolver");
+		vi.mocked(createSetupResolver).mockReturnValue((input: string) => `r:${input}`);
+		const a = makeConfig({ setupFiles: ["./a.ts"] });
+		const b = makeConfig({ setupFilesAfterEnv: ["./b.ts"] });
+		resolveAllSetupFilePaths([a, b]);
+
+		expect(createSetupResolver).toHaveBeenCalledOnce();
+		expect([a.setupFiles, b.setupFilesAfterEnv]).toStrictEqual([["r:./a.ts"], ["r:./b.ts"]]);
+	});
+
+	it("should create one resolver per distinct rojo project", async () => {
+		expect.assertions(2);
+
+		const { createSetupResolver } = await import("../config/setup-resolver");
+		vi.mocked(createSetupResolver).mockReturnValue((input: string) => input);
+		const a = makeConfig({ rojoProject: "one.project.json", setupFiles: ["./a.ts"] });
+		const b = makeConfig({ rojoProject: "two.project.json", setupFiles: ["./b.ts"] });
+		resolveAllSetupFilePaths([a, b]);
+
+		expect(createSetupResolver).toHaveBeenCalledTimes(2);
+		expect(
+			vi.mocked(createSetupResolver).mock.calls.map((call) => call[0].rojoConfigPath),
+		).toStrictEqual([
+			path.resolve("/project", "one.project.json"),
+			path.resolve("/project", "two.project.json"),
+		]);
+	});
+
+	it("should skip projects with no setup files when others have them", async () => {
+		expect.assertions(2);
+
+		const { createSetupResolver } = await import("../config/setup-resolver");
+		vi.mocked(createSetupResolver).mockReturnValue((input: string) => `r:${input}`);
+		const empty = makeConfig();
+		const withSetup = makeConfig({ setupFiles: ["./a.ts"] });
+		resolveAllSetupFilePaths([empty, withSetup]);
+
+		expect(createSetupResolver).toHaveBeenCalledOnce();
+		expect(withSetup.setupFiles).toStrictEqual(["r:./a.ts"]);
 	});
 });

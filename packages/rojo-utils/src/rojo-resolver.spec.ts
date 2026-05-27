@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -578,6 +578,140 @@ describe("script sub-extension resolution", () => {
 						path.join(directory, "src/server/main.server.luau"),
 					),
 				).toStrictEqual(["ServerScriptService", "main"]);
+			},
+		);
+	});
+});
+
+describe("walker syscall behavior", () => {
+	it("should parse sibling project files before recursing into sibling directories", () => {
+		expect.assertions(3);
+
+		withProject(
+			{
+				"default.project.json": project({
+					$className: "DataModel",
+					ReplicatedStorage: { $path: "src/shared" },
+				}),
+				"src/shared/child.project.json": project({ $path: "child" }, "ChildViaProject"),
+				"src/shared/child/leaf.luau": "return {}",
+			},
+			(directory) => {
+				const resolver = fromProject(directory);
+				const partitions = resolver.getPartitions();
+				const childRoot = path.join(directory, "src/shared/child");
+				const sharedRoot = path.join(directory, "src/shared");
+				const leafPath = path.join(directory, "src/shared/child/leaf.luau");
+
+				const childIndex = partitions.findIndex((partition) => {
+					return (
+						partition.fsPath === childRoot &&
+						partition.rbxPath.join(".") === "ReplicatedStorage.ChildViaProject"
+					);
+				});
+				const sharedIndex = partitions.findIndex((partition) => {
+					return (
+						partition.fsPath === sharedRoot &&
+						partition.rbxPath.join(".") === "ReplicatedStorage"
+					);
+				});
+
+				expect(childIndex).toBeGreaterThanOrEqual(0);
+				expect(childIndex).toBeLessThan(sharedIndex);
+				expect(resolver.getRbxPathFromFilePath(leafPath)).toStrictEqual([
+					"ReplicatedStorage",
+					"ChildViaProject",
+					"leaf",
+				]);
+			},
+		);
+	});
+
+	it("should follow a directory symlink and resolve files inside it", () => {
+		expect.assertions(1);
+
+		withProject(
+			{
+				"default.project.json": project({
+					$className: "DataModel",
+					ReplicatedStorage: { $path: "src/shared" },
+				}),
+				"real/leaf.luau": "return {}",
+			},
+			(directory) => {
+				mkdirSync(path.join(directory, "src/shared"), { recursive: true });
+				symlinkSync(
+					path.join(directory, "real"),
+					path.join(directory, "src/shared/linked"),
+					"dir",
+				);
+
+				const resolver = fromProject(directory);
+
+				expect(
+					resolver.getRbxPathFromFilePath(
+						path.join(directory, "src/shared/linked/leaf.luau"),
+					),
+				).toStrictEqual(["ReplicatedStorage", "linked", "leaf"]);
+			},
+		);
+	});
+
+	it("should follow a file symlink that targets a sibling project.json", () => {
+		expect.assertions(1);
+
+		withProject(
+			{
+				"default.project.json": project({
+					$className: "DataModel",
+					ReplicatedStorage: { $path: "src/shared" },
+				}),
+				"extra/leaf.luau": "return {}",
+				"real/extra.project.json": project({ $path: "../../extra" }, "Linked"),
+			},
+			(directory) => {
+				mkdirSync(path.join(directory, "src/shared"), { recursive: true });
+				symlinkSync(
+					path.join(directory, "real/extra.project.json"),
+					path.join(directory, "src/shared/extra.project.json"),
+					"file",
+				);
+
+				const resolver = fromProject(directory);
+
+				expect(
+					resolver.getRbxPathFromFilePath(path.join(directory, "extra/leaf.luau")),
+				).toStrictEqual(["ReplicatedStorage", "Linked", "leaf"]);
+			},
+		);
+	});
+
+	it("should warn and skip when a child symlink target is missing", () => {
+		expect.assertions(2);
+
+		withProject(
+			{
+				"default.project.json": project({
+					$className: "DataModel",
+					ReplicatedStorage: { $path: "src/shared" },
+				}),
+				"src/shared/leaf.luau": "return {}",
+			},
+			(directory) => {
+				symlinkSync(
+					path.join(directory, "does-not-exist"),
+					path.join(directory, "src/shared/broken"),
+					"dir",
+				);
+
+				const resolver = fromProject(directory);
+
+				expect(
+					resolver.getRbxPathFromFilePath(path.join(directory, "src/shared/leaf.luau")),
+				).toStrictEqual(["ReplicatedStorage", "leaf"]);
+				expect(
+					resolver.getWarnings().some((warning) => warning.includes("broken")),
+				).toBeTrue();
 			},
 		);
 	});
