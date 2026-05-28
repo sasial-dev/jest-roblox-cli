@@ -93,9 +93,9 @@ describe(writeTemporaryLuauScript, () => {
 			recursive: true,
 		});
 		expect(fs.writeFileSync).toHaveBeenCalledWith(
-			expect.stringContaining("test-script.luau"),
+			expect.stringMatching(/test-script\.\d+\.luau$/),
 			"print('hello')",
 		);
-		expect(result).toMatch(/test-script\.luau$/);
+		expect(result).toMatch(/test-script\.\d+\.luau$/);
 	});
 });

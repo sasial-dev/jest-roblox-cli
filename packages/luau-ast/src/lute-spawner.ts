@@ -2,6 +2,7 @@ import cp from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import process from "node:process";
 
 const DEFAULT_MAX_BUFFER = 1024 * 1024;
 const DEFAULT_TIMEOUT = 30_000;
@@ -55,7 +56,12 @@ export function writeTemporaryLuauScript(source: string, name: string): string {
 	const directory = path.join(os.tmpdir(), "luau-ast");
 	fs.mkdirSync(directory, { recursive: true });
 
-	const scriptPath = path.join(directory, `${name}.luau`);
+	// Scope the filename to the process. Test runners execute spec files in
+	// parallel worker processes, each spawning Lute against this script; a
+	// shared path lets one process truncate-and-rewrite the file while
+	// another's Lute reads it, yielding intermittent parse failures. One file
+	// per process avoids the race (calls within a process run sync, serially).
+	const scriptPath = path.join(directory, `${name}.${process.pid}.luau`);
 	fs.writeFileSync(scriptPath, source);
 
 	return scriptPath;
