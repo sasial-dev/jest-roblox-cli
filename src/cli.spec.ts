@@ -1,4 +1,4 @@
-import { NetworkError } from "@bedrock-rbx/ocale";
+import { NetworkError, PermissionError } from "@bedrock-rbx/ocale";
 
 import process from "node:process";
 import type { MockInstance } from "vitest";
@@ -716,6 +716,32 @@ describe(run, () => {
 			expect.stringContaining("NetworkError: Network request failed"),
 		);
 		expect(spies.stderr).toHaveBeenCalledWith(expect.stringContaining("ECONNRESET"));
+	});
+
+	it("should name the missing scope in the Backend Error banner for a PermissionError cause", async () => {
+		expect.assertions(3);
+
+		const spies = setupOutputSpies();
+		setupDefaults();
+		const wrapped = new Error(
+			"Failed to upload place: HTTP 401: API Key has insufficient scopes.",
+			{
+				cause: new PermissionError("HTTP 401: API Key has insufficient scopes.", {
+					operationKey: "places.publishVersion",
+					requiredScopes: ["universe-places:write"],
+					statusCode: 401,
+				}),
+			},
+		);
+		mocks.loadConfig.mockRejectedValue(wrapped);
+
+		const code = await run([]);
+
+		expect(code).toBe(2);
+		expect(spies.stderr).toHaveBeenCalledWith(expect.stringContaining("universe-places:write"));
+		expect(spies.stderr).toHaveBeenCalledWith(
+			expect.stringContaining("Add via Creator Dashboard"),
+		);
 	});
 
 	it("should fall through to plain console.error when error.cause is not an OpenCloudError", async () => {

@@ -1,6 +1,31 @@
+import { PermissionError } from "@bedrock-rbx/ocale";
+
 import { describe, expect, it } from "vitest";
 
-import { walkErrorChain } from "./error-chain.ts";
+import { formatMissingScopes, walkErrorChain } from "./error-chain.ts";
+
+describe(formatMissingScopes, () => {
+	it("should list a single scope in the singular", () => {
+		expect.assertions(1);
+		expect(formatMissingScopes(["universe-places:write"])).toBe(
+			"API key missing scope universe-places:write. Add via Creator Dashboard.",
+		);
+	});
+
+	it("should list multiple scopes in the plural", () => {
+		expect.assertions(1);
+		expect(formatMissingScopes(["a", "b"])).toBe(
+			"API key missing scopes a, b. Add via Creator Dashboard.",
+		);
+	});
+
+	it("should fall back to a scope-less hint when no scopes are carried", () => {
+		expect.assertions(1);
+		expect(formatMissingScopes([])).toBe(
+			"API key has insufficient scopes. Add via Creator Dashboard.",
+		);
+	});
+});
 
 describe(walkErrorChain, () => {
 	it("should return a single entry with name and message for a bare Error", () => {
@@ -80,6 +105,28 @@ describe(walkErrorChain, () => {
 		expect(entries).toHaveLength(5);
 		expect(entries[0]).toMatchObject({ message: "level 6" });
 		expect(entries[4]).toMatchObject({ message: "level 2" });
+	});
+
+	it("should capture requiredScopes from a PermissionError link", () => {
+		expect.assertions(1);
+
+		const cause = new PermissionError("insufficient scopes", {
+			operationKey: "places.publishVersion",
+			requiredScopes: ["universe-places:write"],
+			statusCode: 401,
+		});
+
+		const [entry] = walkErrorChain(cause);
+
+		expect(entry?.requiredScopes).toStrictEqual(["universe-places:write"]);
+	});
+
+	it("should leave requiredScopes undefined for a plain Error", () => {
+		expect.assertions(1);
+
+		const [entry] = walkErrorChain(new Error("plain"));
+
+		expect(entry?.requiredScopes).toBeUndefined();
 	});
 
 	it("should terminate at the first non-Error link mid-chain", () => {

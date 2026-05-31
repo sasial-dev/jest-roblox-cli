@@ -7,6 +7,7 @@ import process from "node:process";
 
 import type { ResolvedConfig } from "../config/schema.ts";
 import { generateTestScript, type JestArgvInput } from "../test-script.ts";
+import { formatMissingScopes } from "../utils/error-chain.ts";
 import { parseEnvelope } from "./envelope.ts";
 import type {
 	Backend,
@@ -271,8 +272,7 @@ export function createOpenCloudBackend(credentials: OpenCloudCredentials): OpenC
 function describeError(err: unknown): string {
 	const cause = err instanceof Error ? err.cause : undefined;
 	if (cause instanceof PermissionError) {
-		const scopes = cause.requiredScopes.join(", ");
-		return `API key missing scope${cause.requiredScopes.length === 1 ? "" : "s"} ${scopes}. Add via Creator Dashboard.`;
+		return formatMissingScopes(cause.requiredScopes);
 	}
 
 	return err instanceof Error ? err.message : String(err);

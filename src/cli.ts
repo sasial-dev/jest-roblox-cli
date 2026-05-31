@@ -15,7 +15,7 @@ import { LuauScriptError } from "./reporter/parser.ts";
 import { runJestRoblox } from "./run.ts";
 import type { RunResult } from "./run/types.ts";
 import { formatBanner } from "./utils/banner.ts";
-import { type ChainEntry, walkErrorChain } from "./utils/error-chain.ts";
+import { type ChainEntry, formatMissingScopes, walkErrorChain } from "./utils/error-chain.ts";
 import { parseGameOutput } from "./utils/game-output.ts";
 
 const VERSION: string = packageJson.version;
@@ -307,6 +307,9 @@ function formatBackendErrorBanner(err: Error): string {
 		const extras = formatChainExtras(entry);
 		const label = color.dim(`[${index.toString()}]`);
 		body.push(`    ${label} ${entry.name}: ${entry.message}${extras}`);
+		if (entry.requiredScopes !== undefined) {
+			body.push(`        ${color.yellow(formatMissingScopes(entry.requiredScopes))}`);
+		}
 	}
 
 	return formatBanner({ body, level: "error", title: "Backend Error" });
