@@ -26,6 +26,14 @@ export function replacePrefix(filePath: string, from: string, to: string): strin
 		return to;
 	}
 
+	// "." is the implicit root of a `rootDirs` tsconfig: every relative path is
+	// under it. The resolver strips the leading "./" from filePaths, so match a
+	// bare relative path too — not just an explicit "./" prefix.
+	if (from === ".") {
+		const rest = filePath.startsWith("./") ? filePath.slice(2) : filePath;
+		return `${to}/${rest}`;
+	}
+
 	if (filePath.startsWith(`${from}/`)) {
 		return `${to}${filePath.slice(from.length)}`;
 	}

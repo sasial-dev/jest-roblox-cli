@@ -49,6 +49,47 @@ describe(createSourceMapper, () => {
 		expect(result).toContain(`${resolvedTsPath}:2`);
 	});
 
+	it("should look up the sourcemap under outDir when rootDir is '.' (rootDirs project)", () => {
+		expect.assertions(1);
+
+		// A `rootDirs: ["src", "test"]` tsconfig collapses rootDir to ".". The
+		// spec compiles to `out-test/src/...` and mounts under `server-tests`.
+		// The frame must resolve its sourcemap from the outDir-anchored Luau
+		// path, not a bare `src/...` path that has no `.luau.map` beside it.
+		const rojoProject = {
+			name: "test",
+			tree: {
+				ServerScriptService: {
+					"server-tests": { $path: "out-test/src/server" },
+				},
+			},
+		};
+
+		vi.mocked(mapFromSourceMap).mockReturnValue({
+			column: 0,
+			line: 3,
+			source: "../../../../../src/server/modules/ecs/context.spec.ts",
+		});
+		vi.mocked(fs.existsSync).mockReturnValue(true);
+		vi.mocked(fs.readFileSync).mockReturnValue("line1\nexpect(x).toBe(1)\nline3");
+
+		const mapper = createSourceMapper({
+			mappings: [{ outDir: "out-test", rootDir: "." }],
+			rojoProject,
+		});
+
+		const input = `Error: test failed
+[string "ServerScriptService.server-tests.modules.ecs.context.spec"]:20`;
+
+		mapper.mapFailureWithLocations(input);
+
+		expect(mapFromSourceMap).toHaveBeenCalledWith(
+			"out-test/src/server/modules/ecs/context.spec.luau",
+			20,
+			undefined,
+		);
+	});
+
 	it("should keep original frame when path cannot be resolved", () => {
 		expect.assertions(1);
 

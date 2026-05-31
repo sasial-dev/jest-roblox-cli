@@ -97,4 +97,23 @@ describe(replacePrefix, () => {
 
 		expect(replacePrefix("output/foo", "out", "src")).toBe("output/foo");
 	});
+
+	it("should prepend target when replacing the '.' root prefix", () => {
+		expect.assertions(1);
+
+		// A `rootDirs` tsconfig collapses rootDir to ".". The resolver strips the
+		// leading "./" from filePaths, so the inverse "." → outDir mapping must
+		// still match a bare relative path and prepend the outDir.
+		expect(replacePrefix("src/server/foo.luau", ".", "out-test")).toBe(
+			"out-test/src/server/foo.luau",
+		);
+	});
+
+	it("should prepend target when replacing '.' for a dot-slash path", () => {
+		expect.assertions(1);
+
+		expect(replacePrefix("./src/server/foo.luau", ".", "out-test")).toBe(
+			"out-test/src/server/foo.luau",
+		);
+	});
 });
