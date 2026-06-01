@@ -80,6 +80,7 @@ export default defineConfig([
 			},
 		},
 		format: ["cjs"],
+		outDir: "dist/sea",
 		plugins: [seaStubPlugin(), luauRawPlugin()],
 		shims: true,
 		target: ["node25"],
