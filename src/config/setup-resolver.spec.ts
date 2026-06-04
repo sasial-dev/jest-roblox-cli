@@ -6,7 +6,19 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createSetupResolver } from "./setup-resolver.ts";
 
-vi.mock(import("@isentinel/rojo-utils"));
+// Explicit factory, not automock: rojo-utils' barrel re-exports RojoResolver, and
+// vitest automock can't mock through re-export barrels when resolving source
+// (vitest #4092). Keep the real exports, replace only RojoResolver.fromPath.
+// The coercion helper is imported inside the factory: vi.mock is hoisted above
+// the file's imports, so it loads lazily rather than using the top-level binding
+// (also avoids shadowing the `fromAny` the tests below use).
+vi.mock(import("@isentinel/rojo-utils"), async (importOriginal) => {
+	const { fromAny: coerce } = await import("@total-typescript/shoehorn");
+	return {
+		...(await importOriginal()),
+		RojoResolver: coerce({ fromPath: vi.fn<typeof RojoResolver.fromPath>() }),
+	};
+});
 
 const configDirectory = "/project";
 const rojoConfigPath = "/project/default.project.json";

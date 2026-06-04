@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
 const luauPlugin = {
@@ -18,6 +20,24 @@ const luauPlugin = {
 };
 
 const setupFiles = ["./test/setup/enable-colors.ts", "./test/setup/jest-extended.ts"];
+
+// Alias workspace deps to their TypeScript source entry (an absolute .ts path).
+// Vite resolves the alias before package-export resolution, so vitest sees an
+// absolute .ts id and loads it inline (defaultInline) — the dep shares the test's
+// module graph and honours mocks like `vi.mock("node:fs")`. Deriving the path
+// from the package root keeps this layout-agnostic for the synced repo.
+const requireFromConfig = createRequire(import.meta.url);
+
+function sourceAlias(packageName: string) {
+	const packageRoot = dirname(requireFromConfig.resolve(`${packageName}/package.json`));
+	return { find: packageName, replacement: resolve(packageRoot, "src/index.ts") };
+}
+
+const workspaceSourceAliases = [
+	sourceAlias("@isentinel/luau-ast"),
+	sourceAlias("@isentinel/rojo-utils"),
+	sourceAlias("@isentinel/roblox-runner"),
+];
 
 export default defineConfig({
 	plugins: [luauPlugin],
@@ -42,6 +62,7 @@ export default defineConfig({
 		projects: [
 			{
 				plugins: [luauPlugin],
+				resolve: { alias: workspaceSourceAliases },
 				test: {
 					name: "unit",
 					// `*.bench.ts` benchmarks (run via `vitest bench`) live
@@ -77,6 +98,7 @@ export default defineConfig({
 			},
 			{
 				plugins: [luauPlugin],
+				resolve: { alias: workspaceSourceAliases },
 				test: {
 					name: "e2e",
 					// Benchmarks belong to the unit project only; opt this one
@@ -94,6 +116,7 @@ export default defineConfig({
 			},
 			{
 				plugins: [luauPlugin],
+				resolve: { alias: workspaceSourceAliases },
 				test: {
 					name: "live",
 					// Benchmarks belong to the unit project only; opt this one
