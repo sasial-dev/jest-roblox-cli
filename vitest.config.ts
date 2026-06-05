@@ -45,6 +45,7 @@ export default defineConfig({
 		coverage: {
 			exclude: [
 				"dist/**",
+				"packages/**",
 				"src/**/*.bench.ts",
 				"src/**/*.luau",
 				"src/**/*.spec-d.ts",

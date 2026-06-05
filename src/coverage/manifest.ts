@@ -1,7 +1,7 @@
 import { type } from "arktype";
 import * as fs from "node:fs";
-import * as path from "node:path";
-import process from "node:process";
+
+import { atomicWrite } from "../utils/atomic-write.ts";
 
 /**
  * On-disk format version for `manifest.json`. Bump when the schema below
@@ -80,11 +80,7 @@ export const manifestSchema: type<CoverageManifest> = type({
 }).as<CoverageManifest>();
 
 export function writeManifest(filePath: string, manifest: CoverageManifest): void {
-	const directory = path.dirname(filePath);
-	fs.mkdirSync(directory, { recursive: true });
-	const temporaryPath = path.join(directory, `${path.basename(filePath)}.tmp.${process.pid}`);
-	fs.writeFileSync(temporaryPath, JSON.stringify(manifest, undefined, "\t"));
-	fs.renameSync(temporaryPath, filePath);
+	atomicWrite(filePath, JSON.stringify(manifest, undefined, "\t"));
 }
 
 export function readManifest(filePath: string): ReadManifestResult {

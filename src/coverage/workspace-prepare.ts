@@ -7,6 +7,7 @@ import picomatch from "picomatch";
 
 import { DEFAULT_CONFIG } from "../config/schema.ts";
 import { NOOP_TIMING_COLLECTOR, type TimingCollector } from "../timing/orchestration-collector.ts";
+import { atomicWrite } from "../utils/atomic-write.ts";
 import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
 import { INSTRUMENTER_VERSION } from "./instrumenter.ts";
 import type {
@@ -463,12 +464,10 @@ function prepareForPackage(
 		version: MANIFEST_VERSION,
 	};
 
-	// Ensure the manifest's parent directory exists even when the loop above
-	// ran zero times (package with no instrumentable luau roots). The
-	// in-loop mkdirSync targets the shadow subdir, which only handles
-	// packages that actually had roots.
-	fs.mkdirSync(packageShadowRoot, { recursive: true });
-	fs.writeFileSync(manifestPath, JSON.stringify(manifest, undefined, "\t"));
+	// atomicWrite creates the manifest's parent directory, so a package with no
+	// instrumentable luau roots (the loop above ran zero times, leaving
+	// packageShadowRoot uncreated) still gets a manifest written.
+	atomicWrite(manifestPath, JSON.stringify(manifest, undefined, "\t"));
 
 	return { coverageRoots, manifest, manifestPath, pkg: descriptor.name };
 }
