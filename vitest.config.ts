@@ -21,16 +21,33 @@ const luauPlugin = {
 
 const setupFiles = ["./test/setup/enable-colors.ts", "./test/setup/jest-extended.ts"];
 
-// Alias workspace deps to their TypeScript source entry (an absolute .ts path).
-// Vite resolves the alias before package-export resolution, so vitest sees an
-// absolute .ts id and loads it inline (defaultInline) — the dep shares the test's
-// module graph and honours mocks like `vi.mock("node:fs")`. Deriving the path
-// from the package root keeps this layout-agnostic for the synced repo.
+interface PackageJsonWithSourceExport {
+	exports?: {
+		"."?: null | { source?: string };
+	};
+}
+
+// This package has fixture configs that import `@isentinel/jest-roblox`.
+// Avoid the broad `source` condition here so those self-imports keep exercising
+// the built package during coverage; alias only the workspace deps that need
+// inline source for node-builtin mocks.
 const requireFromConfig = createRequire(import.meta.url);
 
 function sourceAlias(packageName: string) {
-	const packageRoot = dirname(requireFromConfig.resolve(`${packageName}/package.json`));
-	return { find: packageName, replacement: resolve(packageRoot, "src/index.ts") };
+	const packageJsonPath = requireFromConfig.resolve(`${packageName}/package.json`);
+	const packageRoot = dirname(packageJsonPath);
+	const packageJson = requireFromConfig(packageJsonPath) as PackageJsonWithSourceExport;
+	const packageExport = packageJson.exports?.["."];
+	const sourceEntry =
+		typeof packageExport === "object" && packageExport !== null
+			? packageExport.source
+			: undefined;
+
+	if (typeof sourceEntry !== "string") {
+		throw new Error(`${packageName} must expose exports["."].source for Vitest tests`);
+	}
+
+	return { find: packageName, replacement: resolve(packageRoot, sourceEntry) };
 }
 
 const workspaceSourceAliases = [
