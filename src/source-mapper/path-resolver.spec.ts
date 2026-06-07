@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
-import { createPathResolver } from "./path-resolver.ts";
+import { createPathResolver, luauInitToIndex } from "./path-resolver.ts";
 
 vi.mock(import("node:fs"), () => ({ existsSync: vi.fn<typeof existsSync>(() => false) }));
 
@@ -250,5 +250,31 @@ describe(createPathResolver, () => {
 		const resolver = createPathResolver(rojoProject);
 
 		expect(resolver.resolve("ReplicatedStorage.foo")?.filePath).toBe("out/shared/foo.lua");
+	});
+});
+
+describe(luauInitToIndex, () => {
+	it("should rewrite a leading init stem to index", () => {
+		expect.assertions(1);
+
+		expect(luauInitToIndex("init.spec")).toBe("index.spec");
+	});
+
+	it("should rewrite an init segment that follows a slash", () => {
+		expect.assertions(1);
+
+		expect(luauInitToIndex("src/shared/init.spec")).toBe("src/shared/index.spec");
+	});
+
+	it("should not rewrite a name that merely starts with init", () => {
+		expect.assertions(1);
+
+		expect(luauInitToIndex("initialize.spec")).toBe("initialize.spec");
+	});
+
+	it("should not rewrite an init substring embedded in a longer word", () => {
+		expect.assertions(1);
+
+		expect(luauInitToIndex("src/shared/definite.spec")).toBe("src/shared/definite.spec");
 	});
 });

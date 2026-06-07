@@ -2,6 +2,7 @@ import type { ResolvedConfig } from "./schema.ts";
 
 const REGEX_METACHARACTERS = /[.*+?^${}()|[\]\\]/g;
 const TEST_FILE_EXTENSION = /\.(tsx?|luau?)$/;
+const TS_SOURCE_EXTENSION = /\.tsx?$/;
 
 /**
  * Translate a list of explicit test files (typically from CLI positional args)
@@ -15,7 +16,8 @@ const TEST_FILE_EXTENSION = /\.(tsx?|luau?)$/;
  * built from Roblox Instance names (e.g. `ReplicatedStorage/shared/.../foo`),
  * which won't contain the FS path prefix (`src/...`). Instance.Name preserves
  * the original file basename, so matching on basename reliably finds the
- * intended file.
+ * intended file — the one exception being an `index` stem, which roblox-ts
+ * renames to `init` (see `indexStemToInit`).
  */
 export function narrowConfigByFiles(
 	config: ResolvedConfig,
@@ -64,10 +66,26 @@ export function narrowForLuauRun(
 	return narrowConfigByFiles({ ...config, testPathPattern: undefined }, runtimeFiles);
 }
 
+/**
+ * roblox-ts renames an `index` module to `init` (PathTranslator: a filename stem
+ * of exactly `index` becomes `init`), so the Roblox Instance — and thus the path
+ * Jest matches against — is named `init`, never `index`. Mirror that rename on
+ * the basename stem so a positional `index.spec.ts` resolves to the on-Roblox
+ * `init.spec`. Inverse of `luauInitToIndex` in the source mapper.
+ *
+ * Scoped to TS/TSX sources by the caller: the rename is roblox-ts-specific, so a
+ * hand-authored Luau/Lua `index` file keeps its name in Rojo and must not be
+ * rewritten (else a pure-Luau project's positional arg matches zero tests).
+ */
+function indexStemToInit(basename: string): string {
+	return basename.replace(/^index(\.|$)/, "init$1");
+}
+
 function toBasenamePattern(file: string): string {
 	const posix = file.replaceAll("\\", "/");
 	const lastSlash = posix.lastIndexOf("/");
 	const basename = lastSlash >= 0 ? posix.substring(lastSlash + 1) : posix;
 	const stripped = basename.replace(TEST_FILE_EXTENSION, "");
-	return stripped.replace(REGEX_METACHARACTERS, "\\$&");
+	const renamed = TS_SOURCE_EXTENSION.test(basename) ? indexStemToInit(stripped) : stripped;
+	return renamed.replace(REGEX_METACHARACTERS, "\\$&");
 }

@@ -102,6 +102,65 @@ describe(narrowConfigByFiles, () => {
 		expect(result.testPathPattern).toBe("(foo\\.test)");
 	});
 
+	it("should rename an index basename to init (roblox-ts compiles index to init)", () => {
+		expect.assertions(1);
+
+		const result = narrowConfigByFiles(make(), ["src/foo/index.spec.ts"]);
+
+		expect(result.testPathPattern).toBe("(init\\.spec)");
+	});
+
+	it("should rename a bare index file with no test suffix to init", () => {
+		expect.assertions(1);
+
+		const result = narrowConfigByFiles(make(), ["src/foo/index.ts"]);
+
+		expect(result.testPathPattern).toBe("(init)");
+	});
+
+	it("should rename only the index basename and leave the others unchanged", () => {
+		expect.assertions(1);
+
+		const result = narrowConfigByFiles(make(), [
+			"src/foo/index.spec.ts",
+			"src/bar/baz.spec.ts",
+		]);
+
+		expect(result.testPathPattern).toBe("(init\\.spec|baz\\.spec)");
+	});
+
+	it("should not rename a basename that merely starts with index", () => {
+		expect.assertions(1);
+
+		const result = narrowConfigByFiles(make(), ["src/foo/index-helpers.spec.ts"]);
+
+		expect(result.testPathPattern).toBe("(index-helpers\\.spec)");
+	});
+
+	it("should not rename a basename that merely ends with index", () => {
+		expect.assertions(1);
+
+		const result = narrowConfigByFiles(make(), ["src/foo/reindex.spec.ts"]);
+
+		expect(result.testPathPattern).toBe("(reindex\\.spec)");
+	});
+
+	it("should not rename an index basename for a pure-Luau .luau source", () => {
+		expect.assertions(1);
+
+		const result = narrowConfigByFiles(make(), ["src/foo/index.spec.luau"]);
+
+		expect(result.testPathPattern).toBe("(index\\.spec)");
+	});
+
+	it("should not rename an index basename for a pure-Luau .lua source", () => {
+		expect.assertions(1);
+
+		const result = narrowConfigByFiles(make(), ["src/foo/index.spec.lua"]);
+
+		expect(result.testPathPattern).toBe("(index\\.spec)");
+	});
+
 	it("should return a new object rather than mutating the input config", () => {
 		expect.assertions(2);
 
@@ -129,6 +188,15 @@ describe(narrowForLuauRun, () => {
 		const result = narrowForLuauRun(config, ["src/foo/bar.spec.ts"], true);
 
 		expect(result.testPathPattern).toBe("(bar\\.spec)");
+	});
+
+	it("should rename an index file to init when filter is active", () => {
+		expect.assertions(1);
+
+		const config = make({ testPathPattern: "src/foo/index.spec" });
+		const result = narrowForLuauRun(config, ["src/foo/index.spec.ts"], true);
+
+		expect(result.testPathPattern).toBe("(init\\.spec)");
 	});
 
 	it("should clear the FS pattern when filter is active but no files match", () => {
