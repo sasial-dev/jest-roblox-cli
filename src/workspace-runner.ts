@@ -42,7 +42,8 @@ import {
 	type StreamingAggregatorOnEntry,
 } from "./reporter/streaming-aggregator.ts";
 import { classifyTestFiles, discoverTestFiles } from "./run/discovery.ts";
-import { type PackageDescriptor, type StubMount, synthesize } from "./staging/synthesizer.ts";
+import { buildPlace } from "./staging/place-builder.ts";
+import type { PackageDescriptor, StubMount } from "./staging/synthesizer.ts";
 import {
 	generateMaterializerScript,
 	generateWorkStealingScript,
@@ -59,7 +60,6 @@ import {
 	writeGroupedGameOutput,
 } from "./utils/game-output.ts";
 import { globSync } from "./utils/glob.ts";
-import { buildWithRojo } from "./utils/rojo-builder.ts";
 import { ensurePackageDirectories } from "./workspace/ensure-paths.ts";
 import type { PackageInfo } from "./workspace/package-resolver.ts";
 import { type PreflightError, validatePackages } from "./workspace/preflight.ts";
@@ -287,12 +287,12 @@ async function runWorkspaceProfiled(
 	const synthProjectPath = path.join(cacheDirectory, SYNTHESIZED_PROJECT_FILE);
 	const synthRbxlPath = path.join(cacheDirectory, SYNTHESIZED_PLACE_FILE);
 
-	timing.profile("synthesize", () => {
-		const projectJson = synthesize({ packages: descriptorsWithStubs });
-		fs.writeFileSync(synthProjectPath, projectJson);
-	});
 	timing.profile("rojoBuild", () => {
-		buildWithRojo(synthProjectPath, synthRbxlPath);
+		buildPlace({
+			packages: descriptorsWithStubs,
+			placeFile: synthRbxlPath,
+			projectFile: synthProjectPath,
+		});
 	});
 
 	const inputs: Array<MaterializerInput> = pending.map((entry) => {

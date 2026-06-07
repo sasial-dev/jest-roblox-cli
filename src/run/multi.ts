@@ -20,18 +20,19 @@ import {
 	STUB_FILENAME,
 	syncStubsToShadowDirectory,
 } from "../config/stubs.ts";
+import type { CoverageArtifacts } from "../coverage/build-manifest.ts";
 import { deriveCoverageFromIncludes } from "../coverage/derive-coverage-from.ts";
 import { mergeRawCoverage } from "../coverage/merge-raw-coverage.ts";
-import { prepareCoverage } from "../coverage/prepare.ts";
+import { prepareCoverage, toCoverageArtifacts } from "../coverage/prepare.ts";
 import type { RawCoverageData } from "../coverage/types.ts";
 import { runProjects } from "../executor.ts";
 import { combineSourceMappers, type SourceMapper } from "../source-mapper/index.ts";
-import { type StubMount, synthesize } from "../staging/synthesizer.ts";
+import { buildPlace } from "../staging/place-builder.ts";
+import type { StubMount } from "../staging/synthesizer.ts";
 import { NOOP_TIMING_COLLECTOR, type TimingCollector } from "../timing/orchestration-collector.ts";
 import { runTypecheck } from "../typecheck/runner.ts";
 import { rojoProjectSchema } from "../types/rojo.ts";
 import type { RojoTreeNode } from "../types/rojo.ts";
-import { buildWithRojo } from "../utils/rojo-builder.ts";
 import { classifyTestFiles, discoverTestFiles, resolveAllSetupFilePaths } from "./discovery.ts";
 import { emitRunHeader } from "./run-header.ts";
 import type { MultiProjectMerged, MultiRunResult, ProjectResult, RunOptions } from "./types.ts";
@@ -72,6 +73,49 @@ interface CollectPendingJobsArguments {
 interface SelectedProjects {
 	filesByProject?: ReadonlyMap<string, Array<string>>;
 	projects: Array<ResolvedProjectConfig>;
+}
+
+/**
+ * `jest.config` stub mounts for a place build: one `$path` named-child per rojo
+ * mount that lacks a user-authored config on disk, pointing at the cache stub.
+ * Shared by the open-cloud place build and `prepareArtifacts`'s Clean Place.
+ */
+export function collectStubMounts(
+	projects: Array<ResolvedProjectConfig>,
+	rootDirectory: string,
+	cacheRoot: string,
+): Array<StubMount> {
+	// Per-mount FS check decides whether to inject. A TS string-entry may or may
+	// not have a compiled `.luau` at the mount yet — trust the filesystem rather
+	// than the entry shape.
+	const stubMounts: Array<StubMount> = [];
+	for (const project of projects) {
+		for (const mount of project.rojoMounts) {
+			const sourceMount = path.resolve(rootDirectory, mount.fsPath);
+			if (hasUserAuthoredConfig(sourceMount)) {
+				continue;
+			}
+
+			stubMounts.push({
+				absStubPath: path.resolve(cacheRoot, mount.fsPath, STUB_FILENAME),
+				dataModelPath: mount.dataModelPath,
+			});
+		}
+	}
+
+	return stubMounts;
+}
+
+export function loadRojoTree(config: ResolvedConfig): RojoTreeNode {
+	const rojoPath = path.resolve(config.rootDir, config.rojoProject ?? DEFAULT_ROJO_PROJECT);
+	const content = fs.readFileSync(rojoPath, "utf8");
+	const parsed = JSON.parse(content);
+	const validated = rojoProjectSchema(parsed);
+	if (validated instanceof type.errors) {
+		throw new Error(`Invalid Rojo project: ${validated.summary}`);
+	}
+
+	return resolveNestedProjects(validated.tree, path.dirname(rojoPath));
 }
 
 export async function runMultiProject(options: MultiRunOptions): Promise<MultiRunResult> {
@@ -120,9 +164,10 @@ export async function runMultiProject(options: MultiRunOptions): Promise<MultiRu
 		generateProjectStubs(projects, rootConfig.rootDir, cacheRoot);
 	});
 
-	const { effectiveConfig, preCoverageMs } = timing.profile("prepareCoverage", () => {
-		return prepareMultiProjectCoverage(rootConfig, projects, cacheRoot);
-	});
+	const { coverageArtifacts, effectiveConfig, preCoverageMs } = timing.profile(
+		"prepareCoverage",
+		() => prepareMultiProjectCoverage(rootConfig, projects, cacheRoot),
+	);
 	const backend = await timing.profileAsync("resolveBackend", async () => {
 		return resolveBackend(cli, effectiveConfig);
 	});
@@ -173,6 +218,7 @@ export async function runMultiProject(options: MultiRunOptions): Promise<MultiRu
 	if (projectResults.length === 0 && typecheckResult === undefined) {
 		if (rootConfig.passWithNoTests) {
 			return {
+				coverageArtifacts,
 				merged: {},
 				mode: "multi",
 				preCoverageMs,
@@ -181,6 +227,7 @@ export async function runMultiProject(options: MultiRunOptions): Promise<MultiRu
 		}
 
 		return {
+			coverageArtifacts,
 			merged: {},
 			mode: "multi",
 			preCoverageMs,
@@ -196,6 +243,7 @@ export async function runMultiProject(options: MultiRunOptions): Promise<MultiRu
 
 	return {
 		collectCoverageFrom,
+		coverageArtifacts,
 		merged: mergeForMultiResult(projectResults),
 		mode: "multi",
 		preCoverageMs,
@@ -214,42 +262,20 @@ function buildOpenCloudPlace(
 		rootConfig.rojoProject ?? DEFAULT_ROJO_PROJECT,
 	);
 	const placeFilePath = path.resolve(rootConfig.rootDir, rootConfig.placeFile);
-	// Per-mount FS check decides whether to inject. A TS string-entry
-	// may or may not have a compiled `.luau` at the mount yet —
-	// trust the filesystem rather than the entry shape.
-	const stubMounts: Array<StubMount> = [];
-	for (const project of projects) {
-		for (const mount of project.rojoMounts) {
-			const sourceMount = path.resolve(rootConfig.rootDir, mount.fsPath);
-			if (hasUserAuthoredConfig(sourceMount)) {
-				continue;
-			}
 
-			stubMounts.push({
-				absStubPath: path.resolve(cacheRoot, mount.fsPath, STUB_FILENAME),
-				dataModelPath: mount.dataModelPath,
-			});
-		}
-	}
-
-	const synthProjectPath = path.resolve(cacheRoot, "synth.project.json");
-	fs.mkdirSync(path.dirname(synthProjectPath), { recursive: true });
-	fs.writeFileSync(
-		synthProjectPath,
-		synthesize({
-			packages: [
-				{
-					name: "multi-project",
-					packageDirectory: rootConfig.rootDir,
-					rojoProjectPath: userRojoProjectPath,
-					stubMounts,
-				},
-			],
-			wrap: false,
-		}),
-		"utf8",
-	);
-	buildWithRojo(synthProjectPath, placeFilePath);
+	buildPlace({
+		packages: [
+			{
+				name: "multi-project",
+				packageDirectory: rootConfig.rootDir,
+				rojoProjectPath: userRojoProjectPath,
+				stubMounts: collectStubMounts(projects, rootConfig.rootDir, cacheRoot),
+			},
+		],
+		placeFile: placeFilePath,
+		projectFile: path.resolve(cacheRoot, "synth.project.json"),
+		wrap: false,
+	});
 }
 
 function collectPendingJobs(arguments_: CollectPendingJobsArguments): {
@@ -368,29 +394,21 @@ async function runJobs(
 	});
 }
 
-function loadRojoTree(config: ResolvedConfig): RojoTreeNode {
-	const rojoPath = path.resolve(config.rootDir, config.rojoProject ?? DEFAULT_ROJO_PROJECT);
-	const content = fs.readFileSync(rojoPath, "utf8");
-	const parsed = JSON.parse(content);
-	const validated = rojoProjectSchema(parsed);
-	if (validated instanceof type.errors) {
-		throw new Error(`Invalid Rojo project: ${validated.summary}`);
-	}
-
-	return resolveNestedProjects(validated.tree, path.dirname(rojoPath));
-}
-
 function prepareMultiProjectCoverage(
 	rootConfig: ResolvedConfig,
 	projects: Array<ResolvedProjectConfig>,
 	cacheRoot: string,
-): { effectiveConfig: ResolvedConfig; preCoverageMs: number } {
+): {
+	coverageArtifacts?: CoverageArtifacts;
+	effectiveConfig: ResolvedConfig;
+	preCoverageMs: number;
+} {
 	if (!rootConfig.collectCoverage) {
 		return { effectiveConfig: rootConfig, preCoverageMs: 0 };
 	}
 
 	const start = Date.now();
-	const { placeFile } = prepareCoverage(rootConfig, (shadowDirectory) => {
+	const coverage = prepareCoverage(rootConfig, (shadowDirectory) => {
 		// Mirror cache stubs into the shadow tree. The source tree is
 		// clean post-refactor (stubs land in `cacheRoot`, not `rootDir`),
 		// so without this the coverage place would build without any
@@ -398,7 +416,8 @@ function prepareMultiProjectCoverage(
 		return syncStubsToShadowDirectory(projects, cacheRoot, shadowDirectory);
 	});
 	return {
-		effectiveConfig: { ...rootConfig, placeFile },
+		coverageArtifacts: toCoverageArtifacts(coverage),
+		effectiveConfig: { ...rootConfig, placeFile: coverage.placeFile },
 		preCoverageMs: Date.now() - start,
 	};
 }

@@ -11,8 +11,6 @@ import type { ResolvedConfig } from "../config/schema.ts";
 import { DEFAULT_CONFIG } from "../config/schema.ts";
 import type { RojoProject } from "../types/rojo.ts";
 import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
-import type { BuildManifest } from "./build-manifest.ts";
-import { buildManifestSchema } from "./build-manifest.ts";
 import { INSTRUMENTER_VERSION } from "./instrumenter.ts";
 import type {
 	CoverageManifest,
@@ -102,15 +100,6 @@ function seedFilesystem(options: { luauRoot?: string; rojoProject?: string } = {
 
 function readCoverageManifestFile(filePath: string): CoverageManifest {
 	const parsed = manifestSchema(JSON.parse(vol.readFileSync(filePath, "utf-8") as string));
-	if (parsed instanceof type.errors) {
-		throw new Error(parsed.summary);
-	}
-
-	return parsed;
-}
-
-function readBuildManifestFile(filePath: string): BuildManifest {
-	const parsed = buildManifestSchema(JSON.parse(vol.readFileSync(filePath, "utf-8") as string));
 	if (parsed instanceof type.errors) {
 		throw new Error(parsed.summary);
 	}
@@ -452,39 +441,39 @@ describe(prepareCoverage, () => {
 		});
 	});
 
-	describe("when publishing the build manifest", () => {
-		it("should emit build-manifest.json next to coverage-manifest.json", async () => {
-			expect.assertions(2);
+	describe("when resolving the build artifacts", () => {
+		it("should return the coverage place, buildId, and rebuilt flag", async () => {
+			expect.assertions(3);
 
 			seedFilesystem();
 			await setupMocks();
 			const config = makeConfig({ luauRoots: ["out-tsc/test"] });
 
-			prepareCoverage(config);
+			const result = prepareCoverage(config);
 
-			expect(vol.existsSync(".jest-roblox/coverage/coverage-manifest.json")).toBeTrue();
-			expect(vol.existsSync(".jest-roblox/coverage/build-manifest.json")).toBeTrue();
+			expect(result.buildId).toMatch(/^[0-9a-f-]{36}$/);
+			expect(result.coveragePlace.hash).toMatch(/^[a-f0-9]{64}$/);
+			expect(result.rebuilt).toBeTrue();
 		});
 
-		it("should share a single buildId across both sibling manifests", async () => {
+		it("should share the buildId with the coverage manifest it wrote", async () => {
 			expect.assertions(1);
 
 			seedFilesystem();
 			await setupMocks();
 			const config = makeConfig({ luauRoots: ["out-tsc/test"] });
 
-			prepareCoverage(config);
+			const result = prepareCoverage(config);
 
 			const coverage = readCoverageManifestFile(
 				".jest-roblox/coverage/coverage-manifest.json",
 			);
-			const build = readBuildManifestFile(".jest-roblox/coverage/build-manifest.json");
 
-			expect(build.buildId).toBe(coverage.buildId);
+			expect(result.buildId).toBe(coverage.buildId);
 		});
 
-		it("should record the clean place hash and source hashes in the build manifest", async () => {
-			expect.assertions(2);
+		it("should record source hashes for the build manifest in the result", async () => {
+			expect.assertions(1);
 
 			seedFilesystem();
 			const { instrumentRoot } = await setupMocks();
@@ -505,16 +494,25 @@ describe(prepareCoverage, () => {
 			});
 			const config = makeConfig({ luauRoots: ["out-tsc/test"] });
 
-			prepareCoverage(config);
+			const result = prepareCoverage(config);
 
-			const build = readBuildManifestFile(".jest-roblox/coverage/build-manifest.json");
-
-			expect(build.cleanPlace.hash).toMatch(/^[a-f0-9]{64}$/);
-			expect(build.files["out-tsc/test/init.luau"]?.sourceHash).toBe("deadbeef");
+			expect(result.files["out-tsc/test/init.luau"]?.sourceHash).toBe("deadbeef");
 		});
 
-		it("should leave no manifest at the final path when rojo build fails", async () => {
-			expect.assertions(3);
+		it("should not write a build manifest (the entry point owns emission)", async () => {
+			expect.assertions(1);
+
+			seedFilesystem();
+			await setupMocks();
+			const config = makeConfig({ luauRoots: ["out-tsc/test"] });
+
+			prepareCoverage(config);
+
+			expect(vol.existsSync(".jest-roblox/coverage/build-manifest.json")).toBeFalse();
+		});
+
+		it("should leave no coverage manifest when rojo build fails", async () => {
+			expect.assertions(2);
 
 			seedFilesystem();
 			const { buildWithRojo } = await setupMocks();
@@ -525,7 +523,6 @@ describe(prepareCoverage, () => {
 
 			expect(() => prepareCoverage(config)).toThrow(/rojo build failed/);
 			expect(vol.existsSync(".jest-roblox/coverage/coverage-manifest.json")).toBeFalse();
-			expect(vol.existsSync(".jest-roblox/coverage/build-manifest.json")).toBeFalse();
 		});
 	});
 
@@ -852,13 +849,16 @@ describe(prepareCoverage, () => {
 			const { buildWithRojo } = await setupMocks();
 
 			seedIncrementalScenario();
-			// A prior build manifest records a clean-place hash that no longer
+			// A prior build manifest records a coverage-place hash that no longer
 			// matches the bytes on disk (corruption / partial write).
 			vol.writeFileSync(
 				".jest-roblox/coverage/build-manifest.json",
 				JSON.stringify({
 					buildId: "prev-build-id",
-					cleanPlace: { hash: "0".repeat(64), path: ".jest-roblox/coverage/game.rbxl" },
+					coveragePlace: {
+						hash: "0".repeat(64),
+						path: ".jest-roblox/coverage/game.rbxl",
+					},
 					files: {},
 					generatedAt: new Date().toISOString(),
 					projects: [],
@@ -879,13 +879,17 @@ describe(prepareCoverage, () => {
 			const { buildWithRojo } = await setupMocks();
 
 			seedIncrementalScenario();
-			// A valid prior build manifest: the recorded clean-place hash matches
-			// the bytes still on disk, so the place is reused without a rebuild.
+			// A valid prior build manifest: the recorded coverage-place hash
+			// matches the bytes still on disk, so the place is reused without a
+			// rebuild.
 			vol.writeFileSync(
 				".jest-roblox/coverage/build-manifest.json",
 				JSON.stringify({
 					buildId: "prev-build-id",
-					cleanPlace: { hash: sha256("RBXL"), path: ".jest-roblox/coverage/game.rbxl" },
+					coveragePlace: {
+						hash: sha256("RBXL"),
+						path: ".jest-roblox/coverage/game.rbxl",
+					},
 					files: {},
 					generatedAt: new Date().toISOString(),
 					projects: [],

@@ -9,14 +9,18 @@ import process from "node:process";
 import picomatch from "picomatch";
 
 import type { ResolvedConfig } from "../config/schema.ts";
+import { buildPlace } from "../staging/place-builder.ts";
 import type { CoverageRoot } from "../staging/synthesizer.ts";
-import { synthesize } from "../staging/synthesizer.ts";
 import type { RojoProject } from "../types/rojo.ts";
 import { rojoProjectSchema } from "../types/rojo.ts";
 import { hashFile } from "../utils/hash.ts";
 import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
-import { buildWithRojo } from "../utils/rojo-builder.ts";
-import { BUILD_MANIFEST_VERSION, readBuildManifest, writeBuildManifest } from "./build-manifest.ts";
+import type {
+	BuildManifestArtifact,
+	BuildManifestFileRecord,
+	CoverageArtifacts,
+} from "./build-manifest.ts";
+import { readBuildManifest } from "./build-manifest.ts";
 import { INSTRUMENTER_VERSION } from "./instrumenter.ts";
 import type {
 	CoverageManifest,
@@ -30,9 +34,25 @@ const COVERAGE_DIR = ".jest-roblox/coverage";
 const COVERAGE_MANIFEST = "coverage-manifest.json";
 const BUILD_MANIFEST = "build-manifest.json";
 
+/** Where the coverage path publishes its sibling manifests (cwd-relative). */
+export const COVERAGE_MANIFEST_PATH: string = path.join(COVERAGE_DIR, COVERAGE_MANIFEST);
+export const COVERAGE_BUILD_MANIFEST_PATH: string = path.join(COVERAGE_DIR, BUILD_MANIFEST);
+
 export interface PrepareCoverageResult {
+	/** Shared UUID for the sibling Build + Coverage manifests. */
+	buildId: string;
+	/** The instrumented place this run resolved (built fresh or reused). */
+	coveragePlace: BuildManifestArtifact;
+	/** SHA-256 of each compiled `.luau`, for the caller's Build Manifest. */
+	files: Record<string, BuildManifestFileRecord>;
 	manifest: CoverageManifest;
 	placeFile: string;
+	/**
+	 * `true` when the place was rebuilt this run. `false` on the incremental
+	 * no-change short-circuit, so an entry point can skip rewriting an identical
+	 * Build Manifest.
+	 */
+	rebuilt: boolean;
 }
 
 interface WriteManifestOptions {
@@ -42,6 +62,35 @@ interface WriteManifestOptions {
 	manifestPath: string;
 	nonInstrumentedFiles: Record<string, NonInstrumentedFileRecord>;
 	placeFile: string;
+}
+
+interface PriorPlaceReuse {
+	/**
+	 * The prior manifest's validated coverage place, when a build manifest exists.
+	 * `readBuildManifest` already re-hashed it, so the caller reuses this rather
+	 * than hashing the same `.rbxl` a second time. Absent for pre-BuildManifest
+	 * caches (coverage manifest only).
+	 */
+	coveragePlace?: BuildManifestArtifact;
+	reusable: boolean;
+}
+
+interface ReuseCoverageOptions {
+	buildManifestPath: string;
+	files: Record<string, BuildManifestFileRecord>;
+	hasChanges: boolean;
+	previousManifest: CoverageManifest | undefined;
+}
+
+/** Project the coverage result down to the record an entry point emits. */
+export function toCoverageArtifacts(result: PrepareCoverageResult): CoverageArtifacts {
+	return {
+		buildId: result.buildId,
+		coveragePlace: result.coveragePlace,
+		files: result.files,
+		generatedAt: result.manifest.generatedAt,
+		rebuilt: result.rebuilt,
+	};
 }
 
 export function collectLuauRootsFromRojo(
@@ -72,6 +121,27 @@ export function collectLuauRootsFromRojo(
 
 		return containsLuauFiles(directoryPath);
 	});
+}
+
+export function findRojoProject(config: ResolvedConfig): string {
+	if (config.rojoProject !== undefined) {
+		return config.rojoProject;
+	}
+
+	const defaultPath = path.join(config.rootDir, "default.project.json");
+	if (fs.existsSync(defaultPath)) {
+		return defaultPath;
+	}
+
+	const files = fs.readdirSync(config.rootDir, "utf-8");
+	const projectFile = files.find((file) => file.endsWith(".project.json"));
+	if (projectFile !== undefined) {
+		return path.join(config.rootDir, projectFile);
+	}
+
+	throw new Error(
+		"No Rojo project found. Set rojoProject in config or add a .project.json file.",
+	);
 }
 
 export function resolveLuauRoots(config: ResolvedConfig): Array<string> {
@@ -139,25 +209,24 @@ export function prepareCoverage(
 	}
 
 	const placeFile = path.join(COVERAGE_DIR, "game.rbxl");
+	const files = toBuildManifestFiles(allFiles);
 
-	// Incremental no-change short-circuit: reuse the prior place only if it is
-	// still on disk and its bytes match the prior build manifest's record. A
-	// missing or drifted artifact (e.g. an interrupted prior build) falls
-	// through to a full rebuild rather than publishing a manifest that points
-	// at a stale or absent `.rbxl`.
-	if (
-		!hasChanges &&
-		previousManifest?.placeFilePath !== undefined &&
-		priorPlaceIsReusable(previousManifest.placeFilePath, buildManifestPath)
-	) {
-		return { manifest: previousManifest, placeFile: previousManifest.placeFilePath };
+	const reused = reuseCoverageResult({ buildManifestPath, files, hasChanges, previousManifest });
+	if (reused !== undefined) {
+		return reused;
 	}
 
-	// Build the `.rbxl` first, then hash it, then publish both manifests. The
-	// order matters: a failed `buildRojoProject` throws before any manifest is
-	// written, so an interrupted run never leaves a manifest claiming an
-	// artifact that isn't on disk.
-	buildRojoProject(rojoProjectPath, config.rootDir, coverageRoots, placeFile);
+	// Build the `.rbxl` first, then hash it. The order matters: a failed
+	// `buildRojoProject` throws before the coverage manifest is written, so an
+	// interrupted run never leaves a manifest claiming an artifact that isn't on
+	// disk. The caller owns Build Manifest emission (it alone knows the full
+	// place set), keeping that write a single atomic operation.
+	const coveragePlace = buildRojoProject(
+		rojoProjectPath,
+		config.rootDir,
+		coverageRoots,
+		placeFile,
+	);
 
 	const buildId = crypto.randomUUID();
 	const manifest = buildAndWriteManifest({
@@ -168,16 +237,8 @@ export function prepareCoverage(
 		nonInstrumentedFiles: allNonInstrumented,
 		placeFile,
 	});
-	writeBuildManifest(buildManifestPath, {
-		buildId,
-		cleanPlace: { hash: hashFile(placeFile), path: placeFile },
-		files: toBuildManifestFiles(allFiles),
-		generatedAt: manifest.generatedAt,
-		projects: [],
-		version: BUILD_MANIFEST_VERSION,
-	});
 
-	return { manifest, placeFile };
+	return { buildId, coveragePlace, files, manifest, placeFile, rebuilt: true };
 }
 
 function containsLuauFiles(directoryPath: string): boolean {
@@ -193,27 +254,6 @@ function containsLuauFiles(directoryPath: string): boolean {
 
 		return false;
 	});
-}
-
-function findRojoProject(config: ResolvedConfig): string {
-	if (config.rojoProject !== undefined) {
-		return config.rojoProject;
-	}
-
-	const defaultPath = path.join(config.rootDir, "default.project.json");
-	if (fs.existsSync(defaultPath)) {
-		return defaultPath;
-	}
-
-	const files = fs.readdirSync(config.rootDir, "utf-8");
-	const projectFile = files.find((file) => file.endsWith(".project.json"));
-	if (projectFile !== undefined) {
-		return path.join(config.rootDir, projectFile);
-	}
-
-	throw new Error(
-		"No Rojo project found. Set rojoProject in config or add a .project.json file.",
-	);
 }
 
 function resolveLuauRootsWithRojo(config: ResolvedConfig, rojoProjectPath?: string): Array<string> {
@@ -257,31 +297,6 @@ function resolveLuauRootsWithRojo(config: ResolvedConfig, rojoProjectPath?: stri
 	);
 }
 
-function priorPlaceIsReusable(placeFilePath: string, buildManifestPath: string): boolean {
-	if (!fs.existsSync(placeFilePath)) {
-		return false;
-	}
-
-	// A prior build manifest validates the cached artifacts: `readBuildManifest`
-	// re-hashes the clean place (and sources), so any drift or corruption yields
-	// a non-ok result and forces a rebuild. Pre-BuildManifest caches (coverage
-	// manifest only) have no build manifest yet, so the existence check above is
-	// the only gate — keeping the no-change path working across the v3 upgrade.
-	const previous = readBuildManifest(buildManifestPath);
-	if (previous.kind === "missing") {
-		return true;
-	}
-
-	if (previous.kind !== "ok") {
-		process.stderr.write(
-			`Warning: Previous build manifest is unusable (${previous.kind}); rebuilding place.\n`,
-		);
-		return false;
-	}
-
-	return true;
-}
-
 function toBuildManifestFiles(
 	allFiles: Record<string, InstrumentedFileRecord>,
 ): Record<string, { sourceHash: string }> {
@@ -306,8 +321,8 @@ function buildRojoProject(
 	packageDirectory: string,
 	coverageRoots: Array<CoverageRoot>,
 	placeFile: string,
-): void {
-	const synthesized = synthesize({
+): BuildManifestArtifact {
+	return buildPlace({
 		packages: [
 			{
 				name: "jest-roblox-coverage",
@@ -316,12 +331,10 @@ function buildRojoProject(
 				rojoProjectPath: path.resolve(rojoProjectPath),
 			},
 		],
+		placeFile,
+		projectFile: path.join(COVERAGE_DIR, path.basename(rojoProjectPath)),
 		wrap: false,
 	});
-
-	const rewrittenProjectPath = path.join(COVERAGE_DIR, path.basename(rojoProjectPath));
-	fs.writeFileSync(rewrittenProjectPath, synthesized);
-	buildWithRojo(rewrittenProjectPath, placeFile);
 }
 
 function loadCoverageManifest(manifestPath: string): CoverageManifest | undefined {
@@ -386,4 +399,64 @@ function buildAndWriteManifest(options: WriteManifestOptions): CoverageManifest 
 	writeManifest(manifestPath, manifest);
 
 	return manifest;
+}
+
+function priorPlaceIsReusable(placeFilePath: string, buildManifestPath: string): PriorPlaceReuse {
+	if (!fs.existsSync(placeFilePath)) {
+		return { reusable: false };
+	}
+
+	// A prior build manifest validates the cached artifacts: `readBuildManifest`
+	// re-hashes the coverage place (and sources), so any drift or corruption
+	// yields a non-ok result and forces a rebuild. Pre-BuildManifest caches
+	// (coverage manifest only) have no build manifest yet, so the existence check
+	// above is the only gate — keeping the no-change path working across
+	// upgrades.
+	const previous = readBuildManifest(buildManifestPath);
+	if (previous.kind === "missing") {
+		return { reusable: true };
+	}
+
+	if (previous.kind !== "ok") {
+		process.stderr.write(
+			`Warning: Previous build manifest is unusable (${previous.kind}); rebuilding place.\n`,
+		);
+		return { reusable: false };
+	}
+
+	return { coveragePlace: previous.manifest.coveragePlace, reusable: true };
+}
+
+/**
+ * Incremental no-change short-circuit: reuse the prior place only if it is still
+ * on disk and its bytes match the prior build manifest's record. A missing or
+ * drifted artifact (e.g. an interrupted prior build) returns `undefined` so the
+ * caller does a full rebuild rather than publishing a manifest that points at a
+ * stale or absent `.rbxl`.
+ */
+function reuseCoverageResult(options: ReuseCoverageOptions): PrepareCoverageResult | undefined {
+	const { buildManifestPath, files, hasChanges, previousManifest } = options;
+	if (hasChanges || previousManifest?.placeFilePath === undefined) {
+		return undefined;
+	}
+
+	const { buildId, placeFilePath } = previousManifest;
+	const reuse = priorPlaceIsReusable(placeFilePath, buildManifestPath);
+	if (!reuse.reusable) {
+		return undefined;
+	}
+
+	return {
+		buildId,
+		// Reuse the hash `readBuildManifest` already computed; only a
+		// pre-BuildManifest cache (no recorded place) falls back to hashing.
+		coveragePlace: reuse.coveragePlace ?? {
+			hash: hashFile(placeFilePath),
+			path: placeFilePath,
+		},
+		files,
+		manifest: previousManifest,
+		placeFile: placeFilePath,
+		rebuilt: false,
+	};
 }

@@ -5,37 +5,68 @@ import { Buffer } from "node:buffer";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { hashBuffer, hashFile } from "../utils/hash.ts";
-import type { BuildManifest, ReadBuildManifestResult } from "./build-manifest.ts";
-import { BUILD_MANIFEST_VERSION, readBuildManifest, writeBuildManifest } from "./build-manifest.ts";
+import type {
+	BuildManifest,
+	CoverageArtifacts,
+	ReadBuildManifestResult,
+} from "./build-manifest.ts";
+import {
+	BUILD_MANIFEST_VERSION,
+	emitBuildManifest,
+	readBuildManifest,
+	writeBuildManifest,
+} from "./build-manifest.ts";
 
 vi.mock(import("node:fs"), async () => {
 	const memfs = await vi.importActual<typeof import("memfs")>("memfs");
 	return fromAny({ ...memfs.fs, default: memfs.fs });
 });
 
-const CLEAN_PLACE = "/project/.jest-roblox/coverage/game.rbxl";
+const COVERAGE_PLACE = "/project/.jest-roblox/coverage/game.rbxl";
+const CLEAN_PLACE = "/project/.jest-roblox/coverage/clean.rbxl";
 const SOURCE_FILE = "/project/out/init.luau";
+const COVERAGE_PLACE_CONTENT = "COV-RBXL-BYTES";
 const CLEAN_PLACE_CONTENT = "RBXL-BYTES";
 const SOURCE_CONTENT = "local x = 1";
 
 function seedArtifacts(): void {
 	vol.mkdirSync("/project/.jest-roblox/coverage", { recursive: true });
 	vol.mkdirSync("/project/out", { recursive: true });
+	vol.writeFileSync(COVERAGE_PLACE, COVERAGE_PLACE_CONTENT);
 	vol.writeFileSync(CLEAN_PLACE, CLEAN_PLACE_CONTENT);
 	vol.writeFileSync(SOURCE_FILE, SOURCE_CONTENT);
 }
 
 // Hashes derive from the content constants, not from disk, so a fixture stays
-// valid even after a test unlinks or tampers with the artifacts.
+// valid even after a test unlinks or tampers with the artifacts. The example
+// carries both places (the shape `prepareArtifacts` emits); the coverage path
+// emits only `coveragePlace`, exercised via the `cleanPlace: undefined` case.
 function exampleManifest(overrides: Partial<BuildManifest> = {}): BuildManifest {
 	return {
 		buildId: "11111111-1111-1111-1111-111111111111",
 		cleanPlace: { hash: hashBuffer(Buffer.from(CLEAN_PLACE_CONTENT)), path: CLEAN_PLACE },
+		coveragePlace: {
+			hash: hashBuffer(Buffer.from(COVERAGE_PLACE_CONTENT)),
+			path: COVERAGE_PLACE,
+		},
 		files: { [SOURCE_FILE]: { sourceHash: hashBuffer(Buffer.from(SOURCE_CONTENT)) } },
 		generatedAt: "2026-06-06T00:00:00.000Z",
 		projects: [],
 		version: BUILD_MANIFEST_VERSION,
 		...overrides,
+	};
+}
+
+function exampleArtifacts(): CoverageArtifacts {
+	return {
+		buildId: "11111111-1111-1111-1111-111111111111",
+		coveragePlace: {
+			hash: hashBuffer(Buffer.from(COVERAGE_PLACE_CONTENT)),
+			path: COVERAGE_PLACE,
+		},
+		files: { [SOURCE_FILE]: { sourceHash: hashBuffer(Buffer.from(SOURCE_CONTENT)) } },
+		generatedAt: "2026-06-06T00:00:00.000Z",
+		rebuilt: true,
 	};
 }
 
@@ -83,6 +114,40 @@ describe(writeBuildManifest, () => {
 		writeBuildManifest("/nested/dir/build-manifest.json", exampleManifest());
 
 		expect(vol.existsSync("/nested/dir/build-manifest.json")).toBeTrue();
+	});
+});
+
+describe(emitBuildManifest, () => {
+	it("should emit a coverage-only manifest when no clean place is given", () => {
+		expect.assertions(2);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		seedArtifacts();
+		emitBuildManifest(MANIFEST_PATH, exampleArtifacts());
+
+		const manifest = expectOk(readBuildManifest(MANIFEST_PATH));
+
+		expect(manifest.coveragePlace.path).toBe(COVERAGE_PLACE);
+		expect(manifest.cleanPlace).toBeUndefined();
+	});
+
+	it("should emit both places when a clean place is given", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		seedArtifacts();
+		emitBuildManifest(MANIFEST_PATH, exampleArtifacts(), {
+			hash: hashBuffer(Buffer.from(CLEAN_PLACE_CONTENT)),
+			path: CLEAN_PLACE,
+		});
+
+		expect(expectOk(readBuildManifest(MANIFEST_PATH)).cleanPlace?.path).toBe(CLEAN_PLACE);
 	});
 });
 
@@ -305,6 +370,83 @@ describe(readBuildManifest, () => {
 		expect(readBuildManifest(MANIFEST_PATH).kind).toBe("clean-place-hash-mismatch");
 	});
 
+	it("should return missing-referenced-artifact when the coverage place is absent", () => {
+		expect.assertions(2);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		seedArtifacts();
+		vol.unlinkSync(COVERAGE_PLACE);
+		seedManifest(JSON.stringify(exampleManifest()));
+
+		const result = readBuildManifest(MANIFEST_PATH);
+
+		expect(result.kind).toBe("missing-referenced-artifact");
+		expect(result).toMatchObject({ path: COVERAGE_PLACE });
+	});
+
+	it("should return coverage-place-hash-mismatch when the coverage place content changed", () => {
+		expect.assertions(2);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		seedArtifacts();
+		seedManifest(JSON.stringify(exampleManifest()));
+		vol.writeFileSync(COVERAGE_PLACE, "TAMPERED");
+
+		const result = readBuildManifest(MANIFEST_PATH);
+
+		expect(result.kind).toBe("coverage-place-hash-mismatch");
+		expect(result).toMatchObject({ path: COVERAGE_PLACE });
+	});
+
+	it("should refuse on coverage place drift before clean place drift", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		seedArtifacts();
+		seedManifest(JSON.stringify(exampleManifest()));
+		// Both places drift; the coverage place is reported first.
+		vol.writeFileSync(COVERAGE_PLACE, "TAMPERED");
+		vol.writeFileSync(CLEAN_PLACE, "TAMPERED");
+
+		expect(readBuildManifest(MANIFEST_PATH).kind).toBe("coverage-place-hash-mismatch");
+	});
+
+	it("should return ok when cleanPlace is omitted (coverage-only manifest)", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		seedArtifacts();
+		seedManifest(JSON.stringify(exampleManifest({ cleanPlace: undefined })));
+
+		expect(readBuildManifest(MANIFEST_PATH).kind).toBe("ok");
+	});
+
+	it("should still verify the coverage place when cleanPlace is omitted", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		seedArtifacts();
+		seedManifest(JSON.stringify(exampleManifest({ cleanPlace: undefined })));
+		vol.writeFileSync(COVERAGE_PLACE, "TAMPERED");
+
+		expect(readBuildManifest(MANIFEST_PATH).kind).toBe("coverage-place-hash-mismatch");
+	});
+
 	it("should return missing-referenced-artifact when a source file is absent", () => {
 		expect.assertions(2);
 
@@ -348,10 +490,12 @@ describe(readBuildManifest, () => {
 
 		vol.mkdirSync("/base/out", { recursive: true });
 		vol.writeFileSync("/base/place.rbxl", "RBXL-BYTES");
+		vol.writeFileSync("/base/game.rbxl", "COV-RBXL-BYTES");
 		vol.writeFileSync("/base/out/init.luau", "local x = 1");
 		vol.mkdirSync("/base/.jest-roblox/coverage", { recursive: true });
 		const manifest = exampleManifest({
 			cleanPlace: { hash: hashFile("/base/place.rbxl"), path: "place.rbxl" },
+			coveragePlace: { hash: hashFile("/base/game.rbxl"), path: "game.rbxl" },
 			files: { "out/init.luau": { sourceHash: hashFile("/base/out/init.luau") } },
 		});
 		vol.writeFileSync(

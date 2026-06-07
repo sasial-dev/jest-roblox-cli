@@ -1,6 +1,7 @@
 import { fromAny } from "@total-typescript/shoehorn";
 
 import { vol } from "memfs";
+import * as path from "node:path";
 import process from "node:process";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
@@ -169,6 +170,12 @@ function setupDefaults(configOverrides: Partial<ResolvedConfig> = {}) {
 	mocks.synthesize.mockReturnValue(
 		JSON.stringify({ name: "synth", tree: { $className: "DataModel" } }),
 	);
+	// The Place Builder hashes the `.rbxl` after building, so the rojo mock
+	// must leave an artifact on disk for `hashFile` to read.
+	mocks.buildWithRojo.mockImplementation((_projectPath, outputPath) => {
+		vol.mkdirSync(path.dirname(outputPath), { recursive: true });
+		vol.writeFileSync(outputPath, "RBXL");
+	});
 	mocks.resolveBackend.mockResolvedValue(makeBackend("studio"));
 	mocks.runProjects.mockImplementation(async (input) => {
 		return {
@@ -368,6 +375,9 @@ describe(runMultiProject, () => {
 
 		const { config } = setupDefaults({ collectCoverage: true });
 		mocks.prepareCoverage.mockReturnValue({
+			buildId: "test-build-id",
+			coveragePlace: { hash: "cov-hash", path: "/coverage/game.rbxl" },
+			files: {},
 			manifest: {
 				buildId: "test-build-id",
 				files: {},
@@ -380,6 +390,7 @@ describe(runMultiProject, () => {
 				version: MANIFEST_VERSION,
 			},
 			placeFile: "/coverage/game.rbxl",
+			rebuilt: true,
 		});
 		seedProjectFiles();
 
@@ -402,6 +413,9 @@ describe(runMultiProject, () => {
 		mocks.prepareCoverage.mockImplementation((_config, beforeBuild) => {
 			beforeBuild?.(".jest-roblox/coverage");
 			return {
+				buildId: "test-build-id",
+				coveragePlace: { hash: "cov-hash", path: "/coverage/game.rbxl" },
+				files: {},
 				manifest: {
 					buildId: "test-build-id",
 					files: {},
@@ -414,6 +428,7 @@ describe(runMultiProject, () => {
 					version: MANIFEST_VERSION,
 				},
 				placeFile: "/coverage/game.rbxl",
+				rebuilt: true,
 			};
 		});
 		seedProjectFiles();

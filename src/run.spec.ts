@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { type CliOptions, DEFAULT_CONFIG, type ResolvedConfig } from "./config/schema.ts";
+import type { CoverageArtifacts } from "./coverage/build-manifest.ts";
+import { emitBuildManifest } from "./coverage/build-manifest.ts";
+import { COVERAGE_BUILD_MANIFEST_PATH } from "./coverage/prepare.ts";
 import { runJestRoblox } from "./run.ts";
 import { runMultiProject } from "./run/multi.ts";
 import { runSingleProject } from "./run/single.ts";
@@ -10,11 +13,21 @@ import { runWorkspaceMode } from "./run/workspace.ts";
 vi.mock(import("./run/single"));
 vi.mock(import("./run/multi"));
 vi.mock(import("./run/workspace"));
+vi.mock(import("./coverage/build-manifest"));
 
 const mocks = {
+	emitBuildManifest: vi.mocked(emitBuildManifest),
 	runMultiProject: vi.mocked(runMultiProject),
 	runSingleProject: vi.mocked(runSingleProject),
 	runWorkspaceMode: vi.mocked(runWorkspaceMode),
+};
+
+const COVERAGE_ARTIFACTS: CoverageArtifacts = {
+	buildId: "build-1",
+	coveragePlace: { hash: "cov-hash", path: ".jest-roblox/coverage/game.rbxl" },
+	files: {},
+	generatedAt: "2026-06-07T00:00:00.000Z",
+	rebuilt: true,
 };
 
 function makeConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
@@ -139,5 +152,44 @@ describe(runJestRoblox, () => {
 		const [, forwardedWorkspace] = mocks.runWorkspaceMode.mock.calls[0] ?? [];
 
 		expect(forwardedWorkspace).toStrictEqual({ packages: ["packages/*"], root: "/ws" });
+	});
+
+	it("should emit a coveragePlace-only build manifest on a rebuilt coverage run", async () => {
+		expect.assertions(1);
+
+		mocks.runSingleProject.mockResolvedValue({
+			...SINGLE,
+			coverageArtifacts: COVERAGE_ARTIFACTS,
+		});
+
+		await runJestRoblox(makeCli(), makeConfig());
+
+		expect(mocks.emitBuildManifest).toHaveBeenCalledWith(
+			COVERAGE_BUILD_MANIFEST_PATH,
+			COVERAGE_ARTIFACTS,
+		);
+	});
+
+	it("should not emit a build manifest when the coverage place was reused", async () => {
+		expect.assertions(1);
+
+		mocks.runSingleProject.mockResolvedValue({
+			...SINGLE,
+			coverageArtifacts: { ...COVERAGE_ARTIFACTS, rebuilt: false },
+		});
+
+		await runJestRoblox(makeCli(), makeConfig());
+
+		expect(mocks.emitBuildManifest).not.toHaveBeenCalled();
+	});
+
+	it("should not emit a build manifest for a non-coverage run", async () => {
+		expect.assertions(1);
+
+		mocks.runSingleProject.mockResolvedValue(SINGLE);
+
+		await runJestRoblox(makeCli(), makeConfig());
+
+		expect(mocks.emitBuildManifest).not.toHaveBeenCalled();
 	});
 });

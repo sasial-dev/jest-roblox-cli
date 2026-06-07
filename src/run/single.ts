@@ -4,7 +4,8 @@ import packageJson from "../../package.json" with { type: "json" };
 import { resolveBackend } from "../backends/auto.ts";
 import { narrowForLuauRun } from "../config/narrow-by-files.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
-import { prepareCoverage } from "../coverage/prepare.ts";
+import type { CoverageArtifacts } from "../coverage/build-manifest.ts";
+import { prepareCoverage, toCoverageArtifacts } from "../coverage/prepare.ts";
 import { type ExecuteResult, runProjects } from "../executor.ts";
 import { isDefaultHumanFormatter } from "../formatters/utils.ts";
 import { NOOP_TIMING_COLLECTOR, type TimingCollector } from "../timing/orchestration-collector.ts";
@@ -68,11 +69,13 @@ export async function runSingleProject(options: RunOptions): Promise<SingleRunRe
 
 	let preCoverageMs = 0;
 	let effectiveConfig = config;
+	let coverageArtifacts: CoverageArtifacts | undefined;
 	if (config.collectCoverage && !config.typecheckOnly && runtimeFiles.length > 0) {
 		const preCoverageStart = Date.now();
-		const { placeFile } = timing.profile("prepareCoverage", () => prepareCoverage(config));
+		const coverage = timing.profile("prepareCoverage", () => prepareCoverage(config));
 		preCoverageMs = Date.now() - preCoverageStart;
-		effectiveConfig = { ...config, placeFile } satisfies ResolvedConfig;
+		effectiveConfig = { ...config, placeFile: coverage.placeFile } satisfies ResolvedConfig;
+		coverageArtifacts = toCoverageArtifacts(coverage);
 	}
 
 	const typecheckResult =
@@ -97,7 +100,7 @@ export async function runSingleProject(options: RunOptions): Promise<SingleRunRe
 				})
 			: undefined;
 
-	return { mode: "single", preCoverageMs, runtimeResult, typecheckResult };
+	return { coverageArtifacts, mode: "single", preCoverageMs, runtimeResult, typecheckResult };
 }
 
 async function executeRuntimeTests(options: ExecuteRuntimeTestsOptions): Promise<ExecuteResult> {

@@ -1,4 +1,5 @@
 import type { CliOptions, ResolvedConfig } from "../config/schema.ts";
+import type { CoverageArtifacts } from "../coverage/build-manifest.ts";
 import type { MappedCoverageResult } from "../coverage/mapper.ts";
 import type { ExecuteResult } from "../executor.ts";
 import type { SourceMapper } from "../source-mapper/index.ts";
@@ -19,6 +20,12 @@ export interface MultiProjectMerged {
 }
 
 export interface SingleRunResult {
+	/**
+	 * Producer record for the entry point to emit a Build Manifest from. Set only
+	 * on a coverage run; an entry point reads it to write the manifest with the
+	 * place set it has.
+	 */
+	coverageArtifacts?: CoverageArtifacts;
 	mode: "single";
 	preCoverageMs: number;
 	runtimeResult?: ExecuteResult;
@@ -28,6 +35,8 @@ export interface SingleRunResult {
 
 export interface MultiRunResult {
 	collectCoverageFrom?: Array<string>;
+	/** Producer record for the entry point to emit a Build Manifest from. */
+	coverageArtifacts?: CoverageArtifacts;
 	merged: MultiProjectMerged;
 	mode: "multi";
 	preCoverageMs: number;

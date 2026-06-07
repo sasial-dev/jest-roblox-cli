@@ -11,8 +11,8 @@ import type { CliOptions, WorkspaceRunOptions } from "./config/schema.ts";
 import { DEFAULT_CONFIG } from "./config/schema.ts";
 import { MANIFEST_VERSION } from "./coverage/manifest.ts";
 import { prepareWorkStealingQueue } from "./memory-store/work-stealing.ts";
+import { buildPlace } from "./staging/place-builder.ts";
 import { createTimingCollector } from "./timing/orchestration-collector.ts";
-import { buildWithRojo } from "./utils/rojo-builder.ts";
 import { runWorkspace } from "./workspace-runner.ts";
 
 vi.mock(import("./memory-store/work-stealing.ts"), () => {
@@ -26,7 +26,7 @@ vi.mock(import("node:fs"), async () => {
 	return fromAny({ ...memfs.fs, default: memfs.fs });
 });
 
-vi.mock(import("./utils/rojo-builder.ts"));
+vi.mock(import("./staging/place-builder.ts"));
 
 vi.mock(import("./config/loader.ts"), async (importOriginal) => {
 	const actual = await importOriginal();
@@ -404,7 +404,7 @@ describe(runWorkspace, () => {
 			[FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR },
 		});
 
-		vi.mocked(buildWithRojo).mockImplementationOnce(() => {
+		vi.mocked(buildPlace).mockImplementationOnce(() => {
 			throw new Error("rojo boom");
 		});
 

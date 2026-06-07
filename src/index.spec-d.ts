@@ -1,6 +1,7 @@
 import { describe, expectTypeOf, it } from "vitest";
 
 import type {
+	ArtifactBundle,
 	Backend,
 	BuildManifest,
 	CliOptions,
@@ -45,6 +46,7 @@ import {
 	loadConfig,
 	parseGameOutput,
 	parseJestOutput,
+	prepareArtifacts,
 	readBuildManifest,
 	readCoverageManifest,
 	resolveConfig,
@@ -292,6 +294,7 @@ describe("artifact contract", () => {
 	it("should export BuildManifest with the cross-link and artifact fields", () => {
 		expectTypeOf<BuildManifest>().toHaveProperty("buildId");
 		expectTypeOf<BuildManifest>().toHaveProperty("cleanPlace");
+		expectTypeOf<BuildManifest>().toHaveProperty("coveragePlace");
 		expectTypeOf<BuildManifest>().toHaveProperty("files");
 		expectTypeOf<BuildManifest>().toHaveProperty("projects");
 	});
@@ -303,5 +306,17 @@ describe("artifact contract", () => {
 
 	it("should export InstrumentedFileRecord", () => {
 		expectTypeOf<InstrumentedFileRecord>().toHaveProperty("sourceHash");
+	});
+
+	it("should expose prepareArtifacts returning an ArtifactBundle", () => {
+		expectTypeOf(prepareArtifacts).returns.resolves.toEqualTypeOf<ArtifactBundle>();
+	});
+
+	it("should export ArtifactBundle with both places and the manifest paths", () => {
+		expectTypeOf<ArtifactBundle>().toHaveProperty("cleanPlace");
+		expectTypeOf<ArtifactBundle>().toHaveProperty("coveragePlace");
+		expectTypeOf<ArtifactBundle>().toHaveProperty("buildId");
+		expectTypeOf<ArtifactBundle>().toHaveProperty("buildManifestPath");
+		expectTypeOf<ArtifactBundle>().toHaveProperty("coverageManifestPath");
 	});
 });

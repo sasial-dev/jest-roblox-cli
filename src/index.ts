@@ -1,10 +1,15 @@
+// Build Artifacts API: the programmatic seam consumers drive to produce a Clean
+// Place + Coverage-Instrumented Place in one pass (the sole producer of a Clean
+// Place — no CLI flag).
+export { prepareArtifacts } from "./artifacts/prepare-artifacts.ts";
+export type { ArtifactBundle } from "./artifacts/prepare-artifacts.ts";
 export type { Backend, BackendOptions } from "./backends/interface.ts";
 export { OpenCloudBackend, createOpenCloudBackend } from "./backends/open-cloud.ts";
+
 export { StudioBackend, createStudioBackend } from "./backends/studio.ts";
+
 export { loadConfig, resolveConfig } from "./config/loader.ts";
-
 export type { ResolvedProjectConfig } from "./config/projects.ts";
-
 export type {
 	Config,
 	ConfigInput,
