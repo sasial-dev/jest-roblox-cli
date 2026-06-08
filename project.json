@@ -1,0 +1,63 @@
+{
+	"name": "jest-roblox-cli",
+	"$schema": "../../node_modules/nx/schemas/project-schema.json",
+	"projectType": "application",
+	"tags": ["scope:tooling", "type:cli"],
+	"sync": {
+		"excludeFromReferences": true
+	},
+	"implicitDependencies": ["jest-roblox-cli-fixture-live-place"],
+	"includedScripts": ["!build"],
+	"targets": {
+		"build": {
+			"command": "pnpm build:bundle && tsdown && pnpm build:plugin",
+			"options": {
+				"cwd": "tools/jest-roblox-cli"
+			},
+			"outputs": [
+				"{projectRoot}/out/**/*.{js,cjs,mjs,jsx,json,d.ts,d.cts,d.mts,luau}{,.map}",
+				"{projectRoot}/out/tsconfig.lib.tsbuildinfo",
+				"{projectRoot}/dist/*.{mjs,d.mts}{,.map}"
+			]
+		},
+		"lint": {
+			"command": "eslint",
+			"hasTypeAwareRules": true
+		},
+		"build:bundle": {
+			"command": "pnpm build:bundle",
+			"options": {
+				"cwd": "tools/jest-roblox-cli"
+			},
+			"dependsOn": ["weld:build"]
+		},
+		"test": {
+			"command": "tsgo --build --emitDeclarationOnly && vitest run --project unit --coverage",
+			"options": {
+				"cwd": "tools/jest-roblox-cli"
+			},
+			"dependsOn": ["build:bundle", "build"]
+		},
+		"e2e": {
+			"command": "vitest run --project e2e --project live",
+			"dependsOn": ["build", "^build"],
+			"cache": true,
+			"inputs": [
+				"default",
+				"^production",
+				{
+					"env": "JEST_ROBLOX_LIVE"
+				},
+				{
+					"env": "ROBLOX_UNIVERSE_ID"
+				},
+				{
+					"env": "ROBLOX_PLACE_ID"
+				}
+			],
+			"options": {
+				"cwd": "tools/jest-roblox-cli"
+			}
+		}
+	}
+}

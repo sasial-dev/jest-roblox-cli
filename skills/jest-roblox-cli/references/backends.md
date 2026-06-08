@@ -8,11 +8,11 @@
 3. If no plugin → use Open Cloud (requires all three env vars below)
 4. If neither → error: "No backend available"
 
-| Backend | Flag | Requirements |
-|---------|------|--------------|
-| Auto | `--backend auto` | (default) |
+| Backend    | Flag                   | Requirements                                                         |
+| ---------- | ---------------------- | -------------------------------------------------------------------- |
+| Auto       | `--backend auto`       | (default)                                                            |
 | Open Cloud | `--backend open-cloud` | `ROBLOX_OPEN_CLOUD_API_KEY`, `ROBLOX_UNIVERSE_ID`, `ROBLOX_PLACE_ID` |
-| Studio | `--backend studio` | Studio open with jest-roblox plugin installed |
+| Studio     | `--backend studio`     | Studio open with jest-roblox plugin installed                        |
 
 ## Open Cloud
 

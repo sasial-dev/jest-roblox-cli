@@ -16,9 +16,9 @@ pnpm typecheck     # Check types
 
 ## Test
 
-A few specs (anything that transitively imports `src/test-script.ts`) need
-the bundled Luau test runner present on disk. Build it once before running
-those specs:
+A few specs (anything that transitively imports `src/test-script.ts`) need the
+bundled Luau test runner present on disk. Build it once before running those
+specs:
 
 ```bash
 pnpm build:bundle             # Produces src/test-runner.bundled.luau
@@ -32,8 +32,8 @@ vitest run src/formatters     # One folder
 vitest run src/cli.spec.ts    # One file
 ```
 
-Specs that don't touch `test-script.ts` (e.g. `src/config/`, `src/staging/`)
-run without the bundle.
+Specs that don't touch `test-script.ts` (e.g. `src/config/`, `src/staging/`) run
+without the bundle.
 
 ## Lint
 
@@ -65,5 +65,7 @@ jest-roblox-cli/
 
 ## Guidelines
 
-- 100% test coverage is enforced. Write tests first. Every PR must maintain full coverage.
-- Use [conventional commits](https://www.conventionalcommits.org/) for commit messages.
+- 100% test coverage is enforced. Write tests first. Every PR must maintain full
+  coverage.
+- Use [conventional commits](https://www.conventionalcommits.org/) for commit
+  messages.

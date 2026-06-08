@@ -11,11 +11,19 @@ words:
   - compoundassign
   - covmap
   - defu
+  - difftime
   - doublestar
   - elseBlock
   - elseExpr
   - elseifs
   - endcolumn
+  - fmod
+  - foreachi
+  - frexp
+  - getmetatable
+  - getn
+  - gmatch
+  - gsub
   - highlightjs
   - indexexpr
   - instrumentable
@@ -23,15 +31,27 @@ words:
   - interp
   - interpolatedstring
   - interpstring
+  - ipairs
+  - ldexp
   - lhsOperand
   - localfunction
   - materializer
+  - maxn
   - misresolution
+  - modf
+  - newproxy
   - ocale
+  - pcall
+  - randomseed
+  - rawequal
+  - rawget
+  - rawlen
+  - rawset
   - rbxl
   - rbxlx
   - rhsOperand
   - rojo
+  - setmetatable
   - statfunction
   - statlocalfunction
   - thenBlock
@@ -46,3 +66,4 @@ words:
   - vararg
   - varargs
   - writeback
+  - xpcall

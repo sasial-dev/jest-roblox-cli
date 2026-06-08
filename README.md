@@ -6,7 +6,6 @@
   <a href="https://github.com/christopher-buss/jest-roblox-cli/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-
 Run your roblox-ts and Luau tests inside Roblox, get results in your terminal.
 
 <p align="center">
@@ -19,8 +18,7 @@ Run your roblox-ts and Luau tests inside Roblox, get results in your terminal.
 - Two backends: Open Cloud (remote) and Studio (local)
 - Multiple output formatters (human, agent, JSON, GitHub Actions)
 
-> [!NOTE]
-> roblox-ts projects currently require
+> [!NOTE] roblox-ts projects currently require
 > [@isentinel/roblox-ts](https://npmx.dev/package/@isentinel/roblox-ts) for
 > source maps and coverage support.
 
@@ -123,88 +121,86 @@ Precedence: CLI flags > config file > extended config > defaults.
 
 ### Root config fields
 
-Two distinct buckets live at the root level. Jest passthrough fields live
-under `test:` (see "Test fields" below).
+Two distinct buckets live at the root level. Jest passthrough fields live under
+`test:` (see "Test fields" below).
 
 #### Workspace Run Options
 
-Atomic to one invocation — these describe what the run targets and how the
-CLI presents output, not how any individual package runs. In `--workspace`
-mode they resolve as: CLI flag > unanimous per-package declaration >
-default. Mixed per-package declarations error loudly.
+Atomic to one invocation — these describe what the run targets and how the CLI
+presents output, not how any individual package runs. In `--workspace` mode they
+resolve as: CLI flag > unanimous per-package declaration > default. Mixed
+per-package declarations error loudly.
 
-| Field | What it does | Default |
-|---|---|---|
-| `backend` | `"auto"`, `"open-cloud"`, or `"studio"` | `"auto"` |
-| `color` | Use ANSI colors in console output | `true` |
-| `formatters` | Output formatters (`"default"`, `"agent"`, `"json"`, `"github-actions"`) | `["default"]` |
-| `gameOutput` | Write Game Output to a file — a path, or `true` for `game-output.log` under the root. In `--workspace` mode this is one grouped aggregate file across every package | — |
-| `outputFile` | Write the Jest result JSON — a path, or `true` for `jest-output.log` under the root. In `--workspace` mode this is the single merged result across every package | — |
-| `workspace.gameOutput` | `true` to also emit per-package Game Output files under `.jest-roblox/output/` (`--workspace` only) | — |
-| `workspace.outputFile` | `true` to also emit per-package result files under `.jest-roblox/output/` (`--workspace` only) | — |
-| `parallel` | Number of concurrent Open Cloud sessions, or `"auto"` (= `min(jobs, 3)`) | — |
-| `placeId` | Open Cloud place ID | — |
-| `port` | WebSocket port for Studio backend | `3001` |
-| `silent` | Suppress console output | `false` |
-| `universeId` | Open Cloud universe ID | — |
+| Field                  | What it does                                                                                                                                                        | Default       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `backend`              | `"auto"`, `"open-cloud"`, or `"studio"`                                                                                                                             | `"auto"`      |
+| `color`                | Use ANSI colors in console output                                                                                                                                   | `true`        |
+| `formatters`           | Output formatters (`"default"`, `"agent"`, `"json"`, `"github-actions"`)                                                                                            | `["default"]` |
+| `gameOutput`           | Write Game Output to a file — a path, or `true` for `game-output.log` under the root. In `--workspace` mode this is one grouped aggregate file across every package | —             |
+| `outputFile`           | Write the Jest result JSON — a path, or `true` for `jest-output.log` under the root. In `--workspace` mode this is the single merged result across every package    | —             |
+| `workspace.gameOutput` | `true` to also emit per-package Game Output files under `.jest-roblox/output/` (`--workspace` only)                                                                 | —             |
+| `workspace.outputFile` | `true` to also emit per-package result files under `.jest-roblox/output/` (`--workspace` only)                                                                      | —             |
+| `parallel`             | Number of concurrent Open Cloud sessions, or `"auto"` (= `min(jobs, 3)`)                                                                                            | —             |
+| `placeId`              | Open Cloud place ID                                                                                                                                                 | —             |
+| `port`                 | WebSocket port for Studio backend                                                                                                                                   | `3001`        |
+| `silent`               | Suppress console output                                                                                                                                             | `false`       |
+| `universeId`           | Open Cloud universe ID                                                                                                                                              | —             |
 
 #### Per-package fields
 
 Loaded per package (directly or via `extends: "../jest.shared.ts"`). The
-workspace-root config is NOT a source of truth for these — declare them in
-each package's own jest.config or in a shared config that every package
-extends.
+workspace-root config is NOT a source of truth for these — declare them in each
+package's own jest.config or in a shared config that every package extends.
 
-| Field | What it does | Default |
-|---|---|---|
-| `placeFile` | Path to your `.rbxl` file | `"./game.rbxl"` |
-| `timeout` | Max time for tests to run (ms) | `300000` (5 min) |
-| `sourceMap` | Map Luau errors back to TypeScript (roblox-ts only) | `true` |
-| `rojoProject` | Path to your Rojo project file | auto |
-| `jestPath` | Where Jest lives in the DataModel | auto |
-| `showLuau` | Show Luau code snippets in failure output | `true` |
-| `coverageCache` | Reuse incrementally-instrumented coverage shadow dir between runs | `true` |
-| `luauRoots` | Where Luau files live for coverage instrumentation | auto from tsconfig `outDir` |
+| Field           | What it does                                                      | Default                     |
+| --------------- | ----------------------------------------------------------------- | --------------------------- |
+| `placeFile`     | Path to your `.rbxl` file                                         | `"./game.rbxl"`             |
+| `timeout`       | Max time for tests to run (ms)                                    | `300000` (5 min)            |
+| `sourceMap`     | Map Luau errors back to TypeScript (roblox-ts only)               | `true`                      |
+| `rojoProject`   | Path to your Rojo project file                                    | auto                        |
+| `jestPath`      | Where Jest lives in the DataModel                                 | auto                        |
+| `showLuau`      | Show Luau code snippets in failure output                         | `true`                      |
+| `coverageCache` | Reuse incrementally-instrumented coverage shadow dir between runs | `true`                      |
+| `luauRoots`     | Where Luau files live for coverage instrumentation                | auto from tsconfig `outDir` |
 
 ### Test fields
 
 Put these under `test: { ... }`.
 
-| Field | What it does | Default |
-|---|---|---|
-| `projects` | Where to look for tests in the DataModel | **required** |
-| `testMatch` | Glob patterns that find test files | `**/*.spec.ts`, `**/*.test.ts`, etc. |
-| `testPathIgnorePatterns` | Patterns to skip | `/node_modules/`, `/dist/`, `/out/` |
-| `setupFiles` | Scripts to run before the test environment loads | — |
-| `setupFilesAfterEnv` | Scripts to run after the test environment loads | — |
-| `verbose` | Show individual test results | `false` |
-| `silent` | Suppress console output | `false` |
+| Field                    | What it does                                     | Default                              |
+| ------------------------ | ------------------------------------------------ | ------------------------------------ |
+| `projects`               | Where to look for tests in the DataModel         | **required**                         |
+| `testMatch`              | Glob patterns that find test files               | `**/*.spec.ts`, `**/*.test.ts`, etc. |
+| `testPathIgnorePatterns` | Patterns to skip                                 | `/node_modules/`, `/dist/`, `/out/`  |
+| `setupFiles`             | Scripts to run before the test environment loads | —                                    |
+| `setupFilesAfterEnv`     | Scripts to run after the test environment loads  | —                                    |
+| `verbose`                | Show individual test results                     | `false`                              |
+| `silent`                 | Suppress console output                          | `false`                              |
 
 ### Coverage fields
 
 Put these under `test: { ... }`.
 
-> [!IMPORTANT]
-> Coverage requires [Lute](https://github.com/luau-lang/lute) to be installed and
-> on your `PATH`. Lute parses Luau ASTs so the CLI can insert coverage probes.
+> [!IMPORTANT] Coverage requires [Lute](https://github.com/luau-lang/lute) to be
+> installed and on your `PATH`. Lute parses Luau ASTs so the CLI can insert
+> coverage probes.
 
-| Field | What it does | Default |
-|---|---|---|
-| `collectCoverage` | Turn on coverage | `false` |
-| `coverageDirectory` | Where to write coverage reports | `"coverage"` |
-| `coverageReporters` | Which report formats to use | `["text", "lcov"]` |
-| `coverageThreshold` | Minimum coverage to pass | — |
-| `coveragePathIgnorePatterns` | Files to leave out of coverage | test files, `node_modules`, `rbxts_include` |
-| `collectCoverageFrom` | Globs for files to include in coverage | — |
+| Field                        | What it does                           | Default                                     |
+| ---------------------------- | -------------------------------------- | ------------------------------------------- |
+| `collectCoverage`            | Turn on coverage                       | `false`                                     |
+| `coverageDirectory`          | Where to write coverage reports        | `"coverage"`                                |
+| `coverageReporters`          | Which report formats to use            | `["text", "lcov"]`                          |
+| `coverageThreshold`          | Minimum coverage to pass               | —                                           |
+| `coveragePathIgnorePatterns` | Files to leave out of coverage         | test files, `node_modules`, `rbxts_include` |
+| `collectCoverageFrom`        | Globs for files to include in coverage | —                                           |
 
-> [!NOTE]
-> Coverage uses vitest `all` / Istanbul semantics: every instrumented file
-> matching the include globs is reported, so a source file with no test shows
-> **0%** (and fails `coverageThreshold`) instead of being silently omitted. When
-> `collectCoverageFrom` is unset for a multi-project run, the include universe is
-> derived from each project's `include` globs, excluding `*.spec`/`*.test` and
-> `*.client`/`*.server` entry-point scripts (which compile to LocalScript/Script
-> and can't be `require`d, so no test can cover them).
+> [!NOTE] Coverage uses vitest `all` / Istanbul semantics: every instrumented
+> file matching the include globs is reported, so a source file with no test
+> shows **0%** (and fails `coverageThreshold`) instead of being silently
+> omitted. When `collectCoverageFrom` is unset for a multi-project run, the
+> include universe is derived from each project's `include` globs, excluding
+> `*.spec`/`*.test` and `*.client`/`*.server` entry-point scripts (which compile
+> to LocalScript/Script and can't be `require`d, so no test can cover them).
 
 ### Project-level config
 
@@ -266,9 +262,9 @@ Two ways to run tests, plus an auto-pick:
 
 ### Auto (default)
 
-`--backend auto` (the default) probes for a connected Studio plugin first.
-If detected, runs via Studio; otherwise falls back to Open Cloud — but only
-if credentials are available (see Open Cloud below). With no plugin and no
+`--backend auto` (the default) probes for a connected Studio plugin first. If
+detected, runs via Studio; otherwise falls back to Open Cloud — but only if
+credentials are available (see Open Cloud below). With no plugin and no
 credentials, the run errors instead of silently falling back.
 
 ### Open Cloud (remote)
@@ -277,13 +273,15 @@ Uploads your place file to Roblox and polls for results.
 
 You need these environment variables:
 
-| Variable | What it is |
-|---|---|
-| `ROBLOX_OPEN_CLOUD_API_KEY` | Your Open Cloud API key |
-| `ROBLOX_UNIVERSE_ID` | The universe to run tests in |
-| `ROBLOX_PLACE_ID` | The place to run tests in |
+| Variable                    | What it is                   |
+| --------------------------- | ---------------------------- |
+| `ROBLOX_OPEN_CLOUD_API_KEY` | Your Open Cloud API key      |
+| `ROBLOX_UNIVERSE_ID`        | The universe to run tests in |
+| `ROBLOX_PLACE_ID`           | The place to run tests in    |
 
-> Prefix any of the above with `JEST_` (e.g. `JEST_ROBLOX_PLACE_ID`) to override the unprefixed value. Use the `JEST_`-prefixed form when the generic names collide with other tooling.
+> Prefix any of the above with `JEST_` (e.g. `JEST_ROBLOX_PLACE_ID`) to override
+> the unprefixed value. Use the `JEST_`-prefixed form when the generic names
+> collide with other tooling.
 
 #### Required scopes
 
@@ -293,39 +291,38 @@ with the missing scope name.
 
 Always required:
 
-| Scope | What it's for |
-|---|---|
-| `universe-places:write` | Publish the built `.rbxl` as a new place version |
-| `universe.place.luau-execution-session:write` | Start the Luau session that runs the tests |
+| Scope                                         | What it's for                                    |
+| --------------------------------------------- | ------------------------------------------------ |
+| `universe-places:write`                       | Publish the built `.rbxl` as a new place version |
+| `universe.place.luau-execution-session:write` | Start the Luau session that runs the tests       |
 
 `--workspace --parallel >1` additionally requires the queue scopes for
 work-stealing across concurrent sessions:
 
-| Scope | What it's for |
-|---|---|
+| Scope                                              | What it's for                                  |
+| -------------------------------------------------- | ---------------------------------------------- |
 | `memory-store.queue:add` / `:dequeue` / `:discard` | Work-stealing queue across concurrent sessions |
 
 `--workspace --parallel >1` with a streaming formatter additionally requires:
 
-| Scope | What it's for |
-|---|---|
+| Scope                                     | What it's for                                           |
+| ----------------------------------------- | ------------------------------------------------------- |
 | `memory-store.sorted-map:read` / `:write` | Stream live per-package results back as packages finish |
 
 Streaming is enabled by default and disabled only for `--silent`,
 `--formatters json`, and `--formatters agent` (without `--verbose`).
-`--formatters agent --verbose` re-enables streaming and therefore still
-needs the sorted-map scopes; `--formatters github-actions` also streams.
+`--formatters agent --verbose` re-enables streaming and therefore still needs
+the sorted-map scopes; `--formatters github-actions` also streams.
 
 ### Studio (local)
 
 Connects to Roblox Studio over WebSocket. Faster than Open Cloud (no upload
-step), but Studio must be open with the plugin running. Studio doesn't expose which place is open, so
-multiple concurrent projects aren't supported yet.
+step), but Studio must be open with the plugin running. Studio doesn't expose
+which place is open, so multiple concurrent projects aren't supported yet.
 
-> [!NOTE]
-> For `--coverage`, prefer `--backend open-cloud` since the coverage output is
-> built to a separate output under `.jest-roblox/coverage/` that is likely not
-> the studio place being served.
+> [!NOTE] For `--coverage`, prefer `--backend open-cloud` since the coverage
+> output is built to a separate output under `.jest-roblox/coverage/` that is
+> likely not the studio place being served.
 
 Install the plugin with [Drillbit](https://github.com/jacktabscode/drillbit):
 
@@ -338,7 +335,8 @@ Create a file named drillbit.toml in your project's directory.
 github = "https://github.com/christopher-buss/jest-roblox-cli/releases/download/v0.2.7/JestRobloxRunner.rbxm"
 ```
 
-Then run `drillbit` and it will download the plugin and install it in Studio for you.
+Then run `drillbit` and it will download the plugin and install it in Studio for
+you.
 
 Or download `JestRobloxRunner.rbxm` from the
 [latest release](https://github.com/christopher-buss/jest-roblox-cli/releases)
@@ -346,20 +344,19 @@ and drop it into your Studio plugins folder.
 
 ## Workspace mode
 
-Run tests across multiple packages in a pnpm workspace in a single
-invocation. Open Cloud only — Studio backend is not supported.
+Run tests across multiple packages in a pnpm workspace in a single invocation.
+Open Cloud only — Studio backend is not supported.
 
-> [!NOTE]
-> Package discovery uses one of two sources. By default it reads
+> [!NOTE] Package discovery uses one of two sources. By default it reads
 > `pnpm-workspace.yaml` at the workspace root. Alternatively, declare a
 > `workspace` block in your jest config (see
-> [Workspaces without pnpm](#workspaces-without-pnpm)) to enumerate packages
-> by glob — this works in Luau-only, npm, and yarn repos. `--affected-since`
-> always delegates change detection to `turbo` or `nx` and is not yet wired
-> for the `workspace.packages` source. When using Nx, each project's Nx name
-> must match the `package.json` `name` field — `--affected-since` returns Nx
-> project names and looks them up against the package list, so a mismatch
-> surfaces as `Package "<name>" not found in workspace`.
+> [Workspaces without pnpm](#workspaces-without-pnpm)) to enumerate packages by
+> glob — this works in Luau-only, npm, and yarn repos. `--affected-since` always
+> delegates change detection to `turbo` or `nx` and is not yet wired for the
+> `workspace.packages` source. When using Nx, each project's Nx name must match
+> the `package.json` `name` field — `--affected-since` returns Nx project names
+> and looks them up against the package list, so a mismatch surfaces as
+> `Package "<name>" not found in workspace`.
 
 Pick packages explicitly or by what changed:
 
@@ -371,8 +368,8 @@ jest-roblox --workspace --packages @scope/pkg-a,@scope/pkg-b
 jest-roblox --workspace --affected-since main
 ```
 
-`--workspace` must be combined with `--packages` or `--affected-since` —
-the two are mutually exclusive, and either flag requires `--workspace`.
+`--workspace` must be combined with `--packages` or `--affected-since` — the two
+are mutually exclusive, and either flag requires `--workspace`.
 
 ### Workspaces without pnpm
 
@@ -404,12 +401,12 @@ from. Each glob in `packages` selects directories that contain a
 `jest.config.*`; the package name comes from `package.json#name`, falling back
 to the directory name (so Luau-only packages need no `package.json`). Every
 selected package must resolve the same `workspace.packages`/`root` — inheriting
-from one shared config guarantees this, and a package that overrides or omits
-it fails the run.
+from one shared config guarantees this, and a package that overrides or omits it
+fails the run.
 
-Run from inside any package as usual. To run from a directory with no
-resolvable jest config (e.g. the repo root), either point at the shared config
-with `--workspace-root`:
+Run from inside any package as usual. To run from a directory with no resolvable
+jest config (e.g. the repo root), either point at the shared config with
+`--workspace-root`:
 
 ```bash
 jest-roblox --workspace --packages foo --workspace-root packages/testing
@@ -424,62 +421,61 @@ export { default } from "./packages/testing/jest.shared.ts";
 
 Per-package coverage is aggregated into a single report under
 `<rootDir>/<coverageDirectory>`. `rootDir` defaults to the current working
-directory, so run from the workspace root (or set `rootDir`) if you want
-the report to land there.
+directory, so run from the workspace root (or set `rootDir`) if you want the
+report to land there.
 
-Game Output has two independent sinks. Setting `gameOutput` (a path, or
-`true`) writes one **grouped** aggregate file at the workspace root —
+Game Output has two independent sinks. Setting `gameOutput` (a path, or `true`)
+writes one **grouped** aggregate file at the workspace root —
 `[{ package, project, entries }]`, one group per (package, project) that ran.
-Setting `workspace.gameOutput: true` writes a **per-package** file per
-(package, project) under `.jest-roblox/output/`. Either, both, or neither
-may be set; with both, humans see the aggregate announced and agents see the
-per-package paths.
+Setting `workspace.gameOutput: true` writes a **per-package** file per (package,
+project) under `.jest-roblox/output/`. Either, both, or neither may be set; with
+both, humans see the aggregate announced and agents see the per-package paths.
 
 `outputFile` (the Jest result JSON) follows the same two-sink model:
-`outputFile` (a path, or `true`) writes one merged result at the workspace
-root, and `workspace.outputFile: true` writes a per-package result file per
-(package, project) under `.jest-roblox/output/`.
+`outputFile` (a path, or `true`) writes one merged result at the workspace root,
+and `workspace.outputFile: true` writes a per-package result file per (package,
+project) under `.jest-roblox/output/`.
 
 ## CLI flags
 
-| Flag | What it does |
-|---|---|
-| `--backend <type>` | Choose `auto`, `open-cloud`, or `studio` |
-| `--port <n>` | WebSocket port for Studio |
-| `--config <path>` | Path to config file |
-| `--testPathPattern <regex>` | Filter test files by path |
-| `-t, --testNamePattern <regex>` | Filter tests by name |
-| `--formatters <name...>` | Output formatters (`default`, `agent`, `json`, `github-actions`) |
-| `--outputFile <path>` | Write results to a file |
-| `--gameOutput <path>` | Write game print/warn/error to a file |
-| `--coverage` | Collect coverage |
-| `--no-coverage` | Disable coverage for this run, even when enabled in config |
-| `--coverageDirectory <path>` | Where to put coverage reports |
-| `--coverageReporters <r...>` | Which report formats to use |
-| `--collectCoverageFrom <glob>` | Globs for files to include in coverage (repeatable) |
-| `--no-show-luau` | Hide Luau code in failure output |
-| `-u, --updateSnapshot` | Update snapshot files |
-| `--sourceMap` | Map Luau errors to TypeScript (roblox-ts only) |
-| `--rojoProject <path>` | Path to Rojo project file |
-| `--timeout <ms>` | Max time for tests to run |
-| `--passWithNoTests` | Exit `0` when no test files are found |
-| `--verbose` | Show each test result |
-| `--silent` | Hide all output |
-| `--no-color` | Turn off colors |
-| `--no-coverage-cache` | Force a clean coverage re-instrumentation |
-| `--parallel [n]` | Open Cloud concurrent sessions, or `auto` (= `min(jobs, 3)`) |
-| `--project <name...>` | Filter which named projects to run |
-| `--setupFiles <path...>` | Scripts to run before env |
-| `--setupFilesAfterEnv <path...>` | Scripts to run after env |
-| `--typecheck` | Run type tests too |
-| `--typecheckOnly` | Run only type tests |
-| `--typecheckTsconfig <path>` | tsconfig for type tests |
-| `--workspace` | Enable workspace mode (pair with `--packages` or `--affected-since`; see [Workspace mode](#workspace-mode)) |
-| `--packages <names>` | Comma-separated package names (workspace mode) |
-| `--affected-since <ref>` | Run only packages affected since a git ref (workspace mode) |
-| `--apiKey <key>` | Open Cloud API key (prefer env vars in CI — visible in process listings) |
-| `--universeId <id>` | Target universe ID (Open Cloud) |
-| `--placeId <id>` | Target place ID (Open Cloud) |
+| Flag                             | What it does                                                                                                |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `--backend <type>`               | Choose `auto`, `open-cloud`, or `studio`                                                                    |
+| `--port <n>`                     | WebSocket port for Studio                                                                                   |
+| `--config <path>`                | Path to config file                                                                                         |
+| `--testPathPattern <regex>`      | Filter test files by path                                                                                   |
+| `-t, --testNamePattern <regex>`  | Filter tests by name                                                                                        |
+| `--formatters <name...>`         | Output formatters (`default`, `agent`, `json`, `github-actions`)                                            |
+| `--outputFile <path>`            | Write results to a file                                                                                     |
+| `--gameOutput <path>`            | Write game print/warn/error to a file                                                                       |
+| `--coverage`                     | Collect coverage                                                                                            |
+| `--no-coverage`                  | Disable coverage for this run, even when enabled in config                                                  |
+| `--coverageDirectory <path>`     | Where to put coverage reports                                                                               |
+| `--coverageReporters <r...>`     | Which report formats to use                                                                                 |
+| `--collectCoverageFrom <glob>`   | Globs for files to include in coverage (repeatable)                                                         |
+| `--no-show-luau`                 | Hide Luau code in failure output                                                                            |
+| `-u, --updateSnapshot`           | Update snapshot files                                                                                       |
+| `--sourceMap`                    | Map Luau errors to TypeScript (roblox-ts only)                                                              |
+| `--rojoProject <path>`           | Path to Rojo project file                                                                                   |
+| `--timeout <ms>`                 | Max time for tests to run                                                                                   |
+| `--passWithNoTests`              | Exit `0` when no test files are found                                                                       |
+| `--verbose`                      | Show each test result                                                                                       |
+| `--silent`                       | Hide all output                                                                                             |
+| `--no-color`                     | Turn off colors                                                                                             |
+| `--no-coverage-cache`            | Force a clean coverage re-instrumentation                                                                   |
+| `--parallel [n]`                 | Open Cloud concurrent sessions, or `auto` (= `min(jobs, 3)`)                                                |
+| `--project <name...>`            | Filter which named projects to run                                                                          |
+| `--setupFiles <path...>`         | Scripts to run before env                                                                                   |
+| `--setupFilesAfterEnv <path...>` | Scripts to run after env                                                                                    |
+| `--typecheck`                    | Run type tests too                                                                                          |
+| `--typecheckOnly`                | Run only type tests                                                                                         |
+| `--typecheckTsconfig <path>`     | tsconfig for type tests                                                                                     |
+| `--workspace`                    | Enable workspace mode (pair with `--packages` or `--affected-since`; see [Workspace mode](#workspace-mode)) |
+| `--packages <names>`             | Comma-separated package names (workspace mode)                                                              |
+| `--affected-since <ref>`         | Run only packages affected since a git ref (workspace mode)                                                 |
+| `--apiKey <key>`                 | Open Cloud API key (prefer env vars in CI — visible in process listings)                                    |
+| `--universeId <id>`              | Target universe ID (Open Cloud)                                                                             |
+| `--placeId <id>`                 | Target place ID (Open Cloud)                                                                                |
 
 ## How it works
 
@@ -490,10 +486,9 @@ root, and `workspace.outputFile: true` writes a per-package result file per
 5. Maps Luau line numbers to TypeScript via source maps (roblox-ts only)
 6. Prints results
 
-> [!NOTE]
-> Coverage adds extra steps: copy Luau files, insert tracking probes, build a
-> separate place file, then map hit counts back to source. For roblox-ts, this
-> goes through source maps to report TypeScript lines.
+> [!NOTE] Coverage adds extra steps: copy Luau files, insert tracking probes,
+> build a separate place file, then map hit counts back to source. For
+> roblox-ts, this goes through source maps to report TypeScript lines.
 
 ## Test file patterns
 

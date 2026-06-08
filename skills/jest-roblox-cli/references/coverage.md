@@ -13,12 +13,13 @@ verify lute is available.
 
 ## CLI Flags
 
-| Flag | Purpose | Default |
-|------|---------|---------|
-| `--coverage` | Enable coverage collection | `false` |
-| `--no-coverage` | Disable coverage for this run, overriding `collectCoverage` in config (skips instrumentation, so it runs at plain-run speed) | — |
-| `--coverageDirectory` | Output directory | `"coverage"` |
-| `--coverageReporters` | Reporter list | `text`, `lcov` |
+| Flag                  | Purpose                                                                                                                      | Default        |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `--coverage`          | Enable coverage collection                                                                                                   | `false`        |
+| `--no-coverage`       | Disable coverage for this run, overriding `collectCoverage` in config (skips instrumentation, so it runs at plain-run speed) | —              |
+| `--coverageDirectory` | Output directory                                                                                                             | `"coverage"`   |
+| `--coverageReporters` | Reporter list                                                                                                                | `text`, `lcov` |
+
 Supported reporters: `clover`, `cobertura`, `html`, `html-spa`, `json`,
 `json-summary`, `lcov`, `lcovonly`, `none`, `teamcity`, `text`, `text-lcov`,
 `text-summary`.
@@ -62,14 +63,14 @@ Available metrics: `statements`, `branches`, `functions`, `lines`.
 
 Put these under `test: { ... }`. Keep `luauRoots` at config root.
 
-| Field | Purpose | Default |
-|-------|---------|---------|
-| `collectCoverage` | Enable coverage (same as `--coverage`) | `false` |
-| `coverageDirectory` | Output directory | `"coverage"` |
-| `coverageReporters` | Reporter list | `["text", "lcov"]` |
-| `coverageThreshold` | Min percentages; fail if not met | — |
-| `coveragePathIgnorePatterns` | Globs to exclude from coverage | test files, node_modules, rbxts_include |
-| `collectCoverageFrom` | Globs for files to include in coverage | — |
+| Field                        | Purpose                                | Default                                 |
+| ---------------------------- | -------------------------------------- | --------------------------------------- |
+| `collectCoverage`            | Enable coverage (same as `--coverage`) | `false`                                 |
+| `coverageDirectory`          | Output directory                       | `"coverage"`                            |
+| `coverageReporters`          | Reporter list                          | `["text", "lcov"]`                      |
+| `coverageThreshold`          | Min percentages; fail if not met       | —                                       |
+| `coveragePathIgnorePatterns` | Globs to exclude from coverage         | test files, node_modules, rbxts_include |
+| `collectCoverageFrom`        | Globs for files to include in coverage | —                                       |
 
 ## Generated Files
 

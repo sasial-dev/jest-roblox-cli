@@ -31,23 +31,23 @@
 		"ws": "8.20.1"
 	},
 	"devDependencies": {
-		"@isentinel/eslint-config": "5.0.0-beta.11",
+		"@isentinel/eslint-config": "5.1.1",
 		"@isentinel/tsconfig": "1.2.0",
 		"@types/node": "24.12.3",
 		"@types/ws": "8.18.1",
-		"@typescript/native-preview": "7.0.0-dev.20260512.1",
-		"@vitest/coverage-v8": "4.1.5",
-		"@vitest/eslint-plugin": "1.6.17",
+		"@typescript/native-preview": "7.0.0-dev.20260607.1",
+		"@vitest/coverage-v8": "4.1.8",
+		"@vitest/eslint-plugin": "1.6.19",
 		"eslint": "9.39.4",
 		"eslint-plugin-jest-extended": "3.0.1",
-		"eslint-plugin-n": "17.24.0",
-		"eslint-plugin-pnpm": "1.6.0",
+		"eslint-plugin-n": "18.0.1",
+		"eslint-plugin-pnpm": "1.6.1",
 		"jest-extended": "7.0.0",
 		"tsdown": "0.22.0",
 		"typescript": "6.0.3",
-		"vitest": "4.1.5"
+		"vitest": "4.1.8"
 	},
-	"packageManager": "pnpm@11.5.0+sha512.dbfcc4f81cf48597afd4bc391ffdf12c11f1a9fb83a395bfa6b0a2d9cc2fd8ffebafdb1ccbd529632153f793904c2615b7f09fe1a345473fd1c35845172a8eb1",
+	"packageManager": "pnpm@11.5.2+sha512.71c631e382066efc25625d5cf029075de07b61b37f6e27350fbd84b1bda5864c8c1967adc280776b45c30a715c0359a3be08fef42d5bb09e2b99029979692916",
 	"engines": {
 		"node": ">=24.10.0"
 	}
