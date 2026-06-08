@@ -101,6 +101,11 @@ export interface CoverageArtifacts {
 	coveragePlace: BuildManifestArtifact;
 	files: Record<string, BuildManifestFileRecord>;
 	generatedAt: string;
+	/**
+	 * Per-project DataModel paths the kernel consumes, resolved by the run path
+	 * that built the place. Empty when the run resolved no projects.
+	 */
+	projects: Array<BuildManifestProject>;
 	/** `false` on the incremental no-change reuse path. */
 	rebuilt: boolean;
 }
@@ -128,7 +133,7 @@ export function emitBuildManifest(
 		coveragePlace: artifacts.coveragePlace,
 		files: artifacts.files,
 		generatedAt: artifacts.generatedAt,
-		projects: [],
+		projects: artifacts.projects,
 		version: BUILD_MANIFEST_VERSION,
 	});
 }

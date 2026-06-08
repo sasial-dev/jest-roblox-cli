@@ -27,6 +27,7 @@ const COVERAGE_ARTIFACTS: CoverageArtifacts = {
 	coveragePlace: { hash: "cov-hash", path: ".jest-roblox/coverage/game.rbxl" },
 	files: {},
 	generatedAt: "2026-06-07T00:00:00.000Z",
+	projects: [],
 	rebuilt: true,
 };
 

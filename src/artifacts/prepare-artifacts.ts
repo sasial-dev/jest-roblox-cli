@@ -35,7 +35,7 @@ export interface ArtifactBundle {
 	coverageData?: RawCoverageData;
 	coverageManifestPath: string;
 	coveragePlace: BuildManifestArtifact;
-	/** Empty for now; filled once a consumer derives DataModel paths from it. */
+	/** Per-project DataModel paths the kernel consumes, resolved from the run. */
 	projects: Array<BuildManifestProject>;
 }
 
@@ -72,7 +72,7 @@ export async function prepareArtifacts(config: ResolvedConfig): Promise<Artifact
 			coverageData: extractCoverageData(result),
 			coverageManifestPath: COVERAGE_MANIFEST_PATH,
 			coveragePlace: coverageArtifacts.coveragePlace,
-			projects: [],
+			projects: coverageArtifacts.projects,
 		};
 	} finally {
 		timing.flushTimingReport();

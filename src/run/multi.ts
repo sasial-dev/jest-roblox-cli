@@ -40,6 +40,7 @@ import { runTypecheck } from "../typecheck/runner.ts";
 import { rojoProjectSchema } from "../types/rojo.ts";
 import type { RojoTreeNode } from "../types/rojo.ts";
 import { classifyTestFiles, discoverTestFiles, resolveAllSetupFilePaths } from "./discovery.ts";
+import { toBuildManifestProjects } from "./manifest-projects.ts";
 import { emitRunHeader } from "./run-header.ts";
 import type { MultiProjectMerged, MultiRunResult, ProjectResult, RunOptions } from "./types.ts";
 
@@ -481,7 +482,7 @@ function prepareMultiProjectCoverage(
 		return syncStubsToShadowDirectory(projects, cacheRoot, shadowDirectory);
 	});
 	return {
-		coverageArtifacts: toCoverageArtifacts(coverage),
+		coverageArtifacts: toCoverageArtifacts(coverage, toBuildManifestProjects(projects)),
 		effectiveConfig: { ...rootConfig, placeFile: coverage.placeFile },
 		preCoverageMs: Date.now() - start,
 	};

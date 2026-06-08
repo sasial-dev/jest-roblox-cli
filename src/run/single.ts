@@ -7,12 +7,14 @@ import { narrowForLuauRun } from "../config/narrow-by-files.ts";
 import { resolveTypecheckConfig } from "../config/resolve-typecheck-config.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import type { CoverageArtifacts } from "../coverage/build-manifest.ts";
-import { prepareCoverage, toCoverageArtifacts } from "../coverage/prepare.ts";
+import { prepareCoverage, resolveLuauRoots, toCoverageArtifacts } from "../coverage/prepare.ts";
 import { type ExecuteResult, runProjects } from "../executor.ts";
 import { isDefaultHumanFormatter } from "../formatters/utils.ts";
 import { NOOP_TIMING_COLLECTOR, type TimingCollector } from "../timing/orchestration-collector.ts";
 import { runTypecheck } from "../typecheck/runner.ts";
 import { classifyTestFiles, discoverTestFiles, resolveSetupFilePaths } from "./discovery.ts";
+import { toSingleProjectManifest } from "./manifest-projects.ts";
+import { loadRojoTree } from "./multi.ts";
 import { emitRunHeader } from "./run-header.ts";
 import type { RunOptions, SingleRunResult } from "./types.ts";
 
@@ -94,7 +96,10 @@ export async function runSingleProject(options: RunOptions): Promise<SingleRunRe
 		const coverage = timing.profile("prepareCoverage", () => prepareCoverage(config));
 		preCoverageMs = Date.now() - preCoverageStart;
 		effectiveConfig = { ...config, placeFile: coverage.placeFile } satisfies ResolvedConfig;
-		coverageArtifacts = toCoverageArtifacts(coverage);
+		coverageArtifacts = toCoverageArtifacts(
+			coverage,
+			toSingleProjectManifest(config, resolveLuauRoots(config), loadRojoTree(config)),
+		);
 	}
 
 	const typecheckResult =

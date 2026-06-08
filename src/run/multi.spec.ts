@@ -24,7 +24,7 @@ import {
 	syncStubsToShadowDirectory,
 } from "../config/stubs.ts";
 import { MANIFEST_VERSION } from "../coverage/manifest.ts";
-import { prepareCoverage } from "../coverage/prepare.ts";
+import { prepareCoverage, toCoverageArtifacts } from "../coverage/prepare.ts";
 import { type ExecuteResult, runProjects } from "../executor.ts";
 import { synthesize } from "../staging/synthesizer.ts";
 import { runTypecheck } from "../typecheck/runner.ts";
@@ -62,6 +62,7 @@ const mocks = {
 	runTypecheck: vi.mocked(runTypecheck),
 	syncStubsToShadowDirectory: vi.mocked(syncStubsToShadowDirectory),
 	synthesize: vi.mocked(synthesize),
+	toCoverageArtifacts: vi.mocked(toCoverageArtifacts),
 };
 
 function makeConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
@@ -404,6 +405,47 @@ describe(runMultiProject, () => {
 		expect(mocks.buildWithRojo).not.toHaveBeenCalled();
 		expect(mocks.prepareCoverage).toHaveBeenCalledOnce();
 		expect(result.preCoverageMs).toBeGreaterThanOrEqual(0);
+	});
+
+	it("should record the resolved projects in the coverage artifacts", async () => {
+		expect.assertions(1);
+
+		const { config } = setupDefaults({ collectCoverage: true });
+		mocks.prepareCoverage.mockReturnValue({
+			buildId: "test-build-id",
+			coveragePlace: { hash: "cov-hash", path: "/coverage/game.rbxl" },
+			files: {},
+			manifest: {
+				buildId: "test-build-id",
+				files: {},
+				generatedAt: new Date().toISOString(),
+				instrumenterVersion: 1,
+				luauRoots: [],
+				nonInstrumentedFiles: {},
+				placeFilePath: "/coverage/game.rbxl",
+				shadowDir: ".jest-roblox/coverage",
+				version: MANIFEST_VERSION,
+			},
+			placeFile: "/coverage/game.rbxl",
+			rebuilt: true,
+		});
+		seedProjectFiles();
+
+		await runMultiProject({
+			cli: makeCli(),
+			config,
+			rawProjects: [makeProjectEntry("client")],
+		});
+
+		expect(mocks.toCoverageArtifacts).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.arrayContaining([
+				expect.objectContaining({
+					displayName: "client",
+					projectDataModelPath: "ReplicatedStorage/client",
+				}),
+			]),
+		);
 	});
 
 	it("should sync stubs to shadow directory via beforeBuild callback", async () => {

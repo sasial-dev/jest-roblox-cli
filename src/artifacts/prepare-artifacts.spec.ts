@@ -45,6 +45,7 @@ function makeArtifacts(overrides: Partial<CoverageArtifacts> = {}): CoverageArti
 		coveragePlace: COVERAGE_PLACE,
 		files: { "out/init.luau": { sourceHash: "h" } },
 		generatedAt: "2026-06-07T00:00:00.000Z",
+		projects: [],
 		rebuilt: true,
 		...overrides,
 	};
@@ -98,6 +99,26 @@ describe(prepareArtifacts, () => {
 		expect(bundle.buildManifestPath).toBe(COVERAGE_BUILD_MANIFEST_PATH);
 		expect(bundle.coverageManifestPath).toBe(COVERAGE_MANIFEST_PATH);
 		expect(bundle.projects).toStrictEqual([]);
+	});
+
+	it("should surface the resolved projects from the coverage artifacts", async () => {
+		expect.assertions(1);
+
+		const project = {
+			displayName: "client",
+			projectDataModelPath: "ReplicatedStorage/client",
+			setupFiles: [],
+			setupFilesAfterEnv: [],
+			testMatch: ["**/*.spec"],
+		};
+		mocks.runSingleOrMulti.mockResolvedValue(
+			singleResult({ coverageArtifacts: makeArtifacts({ projects: [project] }) }),
+		);
+		mocks.buildPlace.mockReturnValue(CLEAN_PLACE);
+
+		const bundle = await prepareArtifacts(makeConfig());
+
+		expect(bundle.projects).toStrictEqual([project]);
 	});
 
 	it("should emit the build manifest once with both places", async () => {

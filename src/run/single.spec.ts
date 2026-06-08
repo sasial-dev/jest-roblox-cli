@@ -503,7 +503,7 @@ describe(runSingleProject, () => {
 
 	describe("when collectCoverage is enabled", () => {
 		it("should run prepareCoverage, time it, and override placeFile", async () => {
-			expect.assertions(2);
+			expect.assertions(3);
 
 			resetVol();
 			seedFile("src/a.spec.ts");
@@ -536,6 +536,9 @@ describe(runSingleProject, () => {
 
 			expect(result.preCoverageMs).toBeGreaterThanOrEqual(0);
 			expect(capture.runOptions?.jobs[0]?.config.placeFile).toContain("game.rbxl");
+			expect(
+				result.coverageArtifacts?.projects.map((project) => project.projectDataModelPath),
+			).toContain("ReplicatedStorage");
 		});
 
 		it("should skip prepareCoverage when typecheckOnly is set", async () => {

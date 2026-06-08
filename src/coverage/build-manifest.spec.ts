@@ -7,6 +7,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { hashBuffer, hashFile } from "../utils/hash.ts";
 import type {
 	BuildManifest,
+	BuildManifestProject,
 	CoverageArtifacts,
 	ReadBuildManifestResult,
 } from "./build-manifest.ts";
@@ -66,6 +67,7 @@ function exampleArtifacts(): CoverageArtifacts {
 		},
 		files: { [SOURCE_FILE]: { sourceHash: hashBuffer(Buffer.from(SOURCE_CONTENT)) } },
 		generatedAt: "2026-06-06T00:00:00.000Z",
+		projects: [],
 		rebuilt: true,
 	};
 }
@@ -148,6 +150,26 @@ describe(emitBuildManifest, () => {
 		});
 
 		expect(expectOk(readBuildManifest(MANIFEST_PATH)).cleanPlace?.path).toBe(CLEAN_PLACE);
+	});
+
+	it("should record the projects carried by the coverage artifacts", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		seedArtifacts();
+		const project: BuildManifestProject = {
+			displayName: "client",
+			projectDataModelPath: "ReplicatedStorage/client",
+			setupFiles: ["ReplicatedStorage/setup"],
+			setupFilesAfterEnv: [],
+			testMatch: ["**/*.spec"],
+		};
+		emitBuildManifest(MANIFEST_PATH, { ...exampleArtifacts(), projects: [project] });
+
+		expect(expectOk(readBuildManifest(MANIFEST_PATH)).projects).toStrictEqual([project]);
 	});
 });
 

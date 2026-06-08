@@ -18,6 +18,7 @@ import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
 import type {
 	BuildManifestArtifact,
 	BuildManifestFileRecord,
+	BuildManifestProject,
 	CoverageArtifacts,
 } from "./build-manifest.ts";
 import { readBuildManifest } from "./build-manifest.ts";
@@ -83,12 +84,16 @@ interface ReuseCoverageOptions {
 }
 
 /** Project the coverage result down to the record an entry point emits. */
-export function toCoverageArtifacts(result: PrepareCoverageResult): CoverageArtifacts {
+export function toCoverageArtifacts(
+	result: PrepareCoverageResult,
+	projects: Array<BuildManifestProject>,
+): CoverageArtifacts {
 	return {
 		buildId: result.buildId,
 		coveragePlace: result.coveragePlace,
 		files: result.files,
 		generatedAt: result.manifest.generatedAt,
+		projects,
 		rebuilt: result.rebuilt,
 	};
 }
