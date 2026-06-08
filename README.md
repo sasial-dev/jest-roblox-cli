@@ -197,6 +197,15 @@ Put these under `test: { ... }`.
 | `coveragePathIgnorePatterns` | Files to leave out of coverage | test files, `node_modules`, `rbxts_include` |
 | `collectCoverageFrom` | Globs for files to include in coverage | — |
 
+> [!NOTE]
+> Coverage uses vitest `all` / Istanbul semantics: every instrumented file
+> matching the include globs is reported, so a source file with no test shows
+> **0%** (and fails `coverageThreshold`) instead of being silently omitted. When
+> `collectCoverageFrom` is unset for a multi-project run, the include universe is
+> derived from each project's `include` globs, excluding `*.spec`/`*.test` and
+> `*.client`/`*.server` entry-point scripts (which compile to LocalScript/Script
+> and can't be `require`d, so no test can cover them).
+
 ### Project-level config
 
 `projects` can be strings (DataModel paths) or objects with per-project

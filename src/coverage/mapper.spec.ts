@@ -444,6 +444,38 @@ describe(mapCoverageToTypeScript, () => {
 		});
 	});
 
+	describe("with an instrumented file that has no coverage data", () => {
+		it("should report the untested file with zero hits", () => {
+			expect.assertions(2);
+
+			const coverageMap = createCoverageMap({
+				"0": {
+					end: { column: 20, line: 5 },
+					start: { column: 1, line: 5 },
+				},
+			});
+
+			setupFs({
+				"out/shared/player.luau.cov-map.json": JSON.stringify(coverageMap),
+				"out/shared/player.luau.map": '{"version":3}',
+			});
+
+			setupSourceMapMappings({
+				"5:0": { column: 0, line: 3, source: "src/shared/player.ts" },
+				"5:19": { column: 25, line: 3, source: "src/shared/player.ts" },
+			});
+
+			// Instrumented (in the manifest) but never required by a test, so it
+			// is absent from the runtime hit map.
+			const result = mapCoverageToTypeScript({}, createManifest(createManifestFiles()));
+
+			const file = result.files["src/shared/player.ts"];
+
+			expect(file).toBeDefined();
+			expect(file?.s["0"]).toBe(0);
+		});
+	});
+
 	describe("with unreadable coverage map", () => {
 		it("should skip files when coverage map is missing on disk", () => {
 			expect.assertions(1);
@@ -1934,6 +1966,30 @@ describe(mapCoverageToTypeScript, () => {
 			const file = result.files["shared/player.luau"]!;
 
 			expect(file.s["0"]).toBe(0);
+		});
+
+		it("should report an untested native Luau file with zero hits", () => {
+			expect.assertions(2);
+
+			const coverageMap = createCoverageMap({
+				"0": {
+					end: { column: 20, line: 3 },
+					start: { column: 1, line: 1 },
+				},
+			});
+
+			// Only cov-map exists — no .luau.map source map (native Luau).
+			setupFs({
+				"out/shared/player.luau.cov-map.json": JSON.stringify(coverageMap),
+			});
+
+			// Instrumented but never required by a test → absent from hit map.
+			const result = mapCoverageToTypeScript({}, createManifest(createManifestFiles()));
+
+			const file = result.files["shared/player.luau"];
+
+			expect(file).toBeDefined();
+			expect(file?.s["0"]).toBe(0);
 		});
 
 		it("should merge coverage from duplicate keys into existing pending entries", () => {

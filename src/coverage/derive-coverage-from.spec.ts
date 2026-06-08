@@ -10,7 +10,32 @@ describe(deriveCoverageFromIncludes, () => {
 
 		const result = deriveCoverageFromIncludes(projects);
 
-		expect(result).toStrictEqual(["packages/src/**/*.ts", "!**/*.spec.ts", "!**/*.test.ts"]);
+		expect(result).toStrictEqual([
+			"packages/src/**/*.ts",
+			"!**/*.spec.ts",
+			"!**/*.test.ts",
+			"!**/*.client.ts",
+			"!**/*.server.ts",
+		]);
+	});
+
+	it("should exclude client and server entry-point scripts from coverage", () => {
+		expect.assertions(1);
+
+		// `.client`/`.server` compile to LocalScript/Script — non-ModuleScript
+		// boot entry points that no test can `require`, so they can never be
+		// covered. Excluding them keeps untestable entry points out of the gate.
+		const projects = [{ include: ["src/**/*.spec.ts"] }];
+
+		const result = deriveCoverageFromIncludes(projects);
+
+		expect(result).toStrictEqual([
+			"src/**/*.ts",
+			"!**/*.spec.ts",
+			"!**/*.test.ts",
+			"!**/*.client.ts",
+			"!**/*.server.ts",
+		]);
 	});
 
 	it("should deduplicate roots from multiple projects", () => {
@@ -20,7 +45,13 @@ describe(deriveCoverageFromIncludes, () => {
 
 		const result = deriveCoverageFromIncludes(projects);
 
-		expect(result).toStrictEqual(["src/**/*.ts", "!**/*.spec.ts", "!**/*.test.ts"]);
+		expect(result).toStrictEqual([
+			"src/**/*.ts",
+			"!**/*.spec.ts",
+			"!**/*.test.ts",
+			"!**/*.client.ts",
+			"!**/*.server.ts",
+		]);
 	});
 
 	it("should handle multiple distinct roots", () => {
@@ -35,6 +66,8 @@ describe(deriveCoverageFromIncludes, () => {
 			"packages/ui/**/*.ts",
 			"!**/*.spec.ts",
 			"!**/*.test.ts",
+			"!**/*.client.ts",
+			"!**/*.server.ts",
 		]);
 	});
 
@@ -71,6 +104,8 @@ describe(deriveCoverageFromIncludes, () => {
 			"packages/friends/src/**/*.luau",
 			"!**/*.spec.luau",
 			"!**/*.test.luau",
+			"!**/*.client.luau",
+			"!**/*.server.luau",
 		]);
 	});
 
@@ -81,7 +116,13 @@ describe(deriveCoverageFromIncludes, () => {
 
 		const result = deriveCoverageFromIncludes(projects);
 
-		expect(result).toStrictEqual(["src/**/*.lua", "!**/*.spec.lua", "!**/*.test.lua"]);
+		expect(result).toStrictEqual([
+			"src/**/*.lua",
+			"!**/*.spec.lua",
+			"!**/*.test.lua",
+			"!**/*.client.lua",
+			"!**/*.server.lua",
+		]);
 	});
 
 	it("should derive patterns for mixed ts and luau projects", () => {
@@ -99,8 +140,12 @@ describe(deriveCoverageFromIncludes, () => {
 			"packages/luau-lib/src/**/*.luau",
 			"!**/*.spec.ts",
 			"!**/*.test.ts",
+			"!**/*.client.ts",
+			"!**/*.server.ts",
 			"!**/*.spec.luau",
 			"!**/*.test.luau",
+			"!**/*.client.luau",
+			"!**/*.server.luau",
 		]);
 	});
 
@@ -111,7 +156,13 @@ describe(deriveCoverageFromIncludes, () => {
 
 		const result = deriveCoverageFromIncludes(projects);
 
-		expect(result).toStrictEqual(["src/**/*.tsx", "!**/*.spec.tsx", "!**/*.test.tsx"]);
+		expect(result).toStrictEqual([
+			"src/**/*.tsx",
+			"!**/*.spec.tsx",
+			"!**/*.test.tsx",
+			"!**/*.client.tsx",
+			"!**/*.server.tsx",
+		]);
 	});
 
 	it("should throw when include pattern has no recognizable test extension", () => {

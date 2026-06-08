@@ -41,8 +41,17 @@ export function deriveCoverageFromIncludes(
 		}
 	}
 
+	// `.client`/`.server` compile to LocalScript/Script (not ModuleScript), so
+	// nothing can `require` them — they are unreachable from any test and can
+	// never be covered. Excluding them keeps untestable boot entry points out of
+	// the coverage universe, mirroring the `.spec`/`.test` exclusion.
 	for (const extension of rootsByExtension.keys()) {
-		patterns.push(`!**/*.spec${extension}`, `!**/*.test${extension}`);
+		patterns.push(
+			`!**/*.spec${extension}`,
+			`!**/*.test${extension}`,
+			`!**/*.client${extension}`,
+			`!**/*.server${extension}`,
+		);
 	}
 
 	return patterns;

@@ -124,11 +124,12 @@ export function mapCoverageToTypeScript(
 	const pendingFunctions = new Map<string, Array<PendingFunction>>();
 	const pendingBranches = new Map<string, Array<PendingBranch>>();
 
-	for (const [fileKey, fileCoverage] of Object.entries(coverageData)) {
-		const record = manifest.files[fileKey];
-		if (record === undefined) {
-			continue;
-		}
+	// The manifest is the report universe: every instrumented file is reported,
+	// using runtime hits where a test exercised the file and zero-filling where
+	// none did. Keying off the runtime hit map instead would silently omit
+	// untested files, letting them slip past `coverageThreshold`.
+	for (const [fileKey, record] of Object.entries(manifest.files)) {
+		const fileCoverage = coverageData[fileKey] ?? { s: {} };
 
 		const resources = loadFileResources(record);
 		if (resources === undefined) {

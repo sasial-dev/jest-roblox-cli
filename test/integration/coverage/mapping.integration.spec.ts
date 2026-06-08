@@ -64,7 +64,7 @@ function buildSyntheticCoverage(files: Record<string, InstrumentedFileRecord>): 
 	return data;
 }
 
-function buildCoverageResult() {
+function buildCoverageResult(coverage?: RawCoverageData) {
 	const shadowDirectory = createTemporaryDirectory();
 	const fixtureRoot = createRbxtsFixtureSandbox(RBXTS_FIXTURE);
 	const fixtureOut = path.join(fixtureRoot, "out");
@@ -73,7 +73,7 @@ function buildCoverageResult() {
 		shadowDir: shadowDirectory,
 	});
 	const manifest = buildManifest(files, fixtureOut, shadowDirectory);
-	const coverageData = buildSyntheticCoverage(files);
+	const coverageData = coverage ?? buildSyntheticCoverage(files);
 	return mapCoverageToTypeScript(coverageData, manifest);
 }
 
@@ -148,5 +148,23 @@ describe("coverage mapping pipeline (roblox-ts)", () => {
 		const allPathsExist = Object.keys(result.files).every((filePath) => existsSync(filePath));
 
 		expect(allPathsExist).toBeTrue();
+	});
+
+	it("should report an instrumented file with zero hits when no test exercised it", () => {
+		expect.assertions(2);
+
+		// No runtime hits at all — every instrumented file is untested.
+		const result = buildCoverageResult({});
+
+		const exampleCoverage = Object.entries(result.files).find(([filePath]) => {
+			return filePath.endsWith("example.ts");
+		});
+
+		expect(exampleCoverage).toBeDefined();
+
+		const [, coverage] = exampleCoverage!;
+		const everyStatementZero = Object.values(coverage.s).every((hits) => hits === 0);
+
+		expect(everyStatementZero).toBeTrue();
 	});
 });

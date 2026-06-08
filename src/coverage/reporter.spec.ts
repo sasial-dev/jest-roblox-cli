@@ -929,6 +929,60 @@ describe(checkThresholds, () => {
 		});
 	});
 
+	describe("with a touched + untested + excluded mix", () => {
+		/** Every statement at zero hits — the shape a never-required file maps to. */
+		function untestedFile(filePath: string): MappedFileCoverage {
+			return createMappedFile({
+				f: { "0": 0 },
+				path: filePath,
+				s: { "0": 0, "1": 0, "2": 0 },
+			});
+		}
+
+		/** Every statement hit — a fully covered file. */
+		function coveredFile(filePath: string): MappedFileCoverage {
+			return createMappedFile({
+				f: { "0": 2 },
+				path: filePath,
+				s: { "0": 3, "1": 1, "2": 5 },
+			});
+		}
+
+		it("should fail the threshold for an untested file matching the include globs", () => {
+			expect.assertions(1);
+
+			const result = createResult({
+				"src/shared/inventory.ts": coveredFile("src/shared/inventory.ts"),
+				"src/shared/player.ts": untestedFile("src/shared/player.ts"),
+			});
+
+			const thresholdResult = checkThresholds(result, { statements: 100 }, [
+				"src/**/*.ts",
+				"!**/*.spec.ts",
+			]);
+
+			expect(thresholdResult.passed).toBeFalse();
+		});
+
+		it("should keep excluded test files out of the threshold computation", () => {
+			expect.assertions(1);
+
+			// The only included source file is fully covered; the 0%
+			// `.spec.ts` is excluded, so the gate must still pass.
+			const result = createResult({
+				"src/shared/player.spec.ts": untestedFile("src/shared/player.spec.ts"),
+				"src/shared/player.ts": coveredFile("src/shared/player.ts"),
+			});
+
+			const thresholdResult = checkThresholds(result, { statements: 100 }, [
+				"src/**/*.ts",
+				"!**/*.spec.ts",
+			]);
+
+			expect(thresholdResult.passed).toBeTrue();
+		});
+	});
+
 	describe("when summary pct is not a number", () => {
 		it("should skip threshold check for metrics with non-numeric pct", () => {
 			expect.assertions(1);
