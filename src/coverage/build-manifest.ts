@@ -13,6 +13,9 @@ import { parseVersionedManifest } from "./manifest-parse.ts";
  */
 export const BUILD_MANIFEST_VERSION = 1 as const;
 
+/** Filename the Build Manifest is published under, next to its Coverage Manifest. */
+export const BUILD_MANIFEST_FILE = "build-manifest.json";
+
 export interface BuildManifestProject {
 	displayName: string;
 	jestDataModelPath?: string;
@@ -114,6 +117,20 @@ type VerifyResult = { actual: string; kind: "mismatch" } | { kind: "missing" } |
 
 export function writeBuildManifest(filePath: string, manifest: BuildManifest): void {
 	atomicWrite(filePath, JSON.stringify(manifest, undefined, "\t"));
+}
+
+/**
+ * Project a coverage file map down to the Build Manifest's `{ sourceHash }`
+ * records, dropping the instrumentation metadata only the coverage pipeline
+ * needs. The input is structural so both the single/multi and workspace coverage
+ * paths can feed their richer per-file records.
+ */
+export function toBuildManifestFiles(
+	files: Record<string, { sourceHash: string }>,
+): Record<string, BuildManifestFileRecord> {
+	return Object.fromEntries(
+		Object.entries(files).map(([key, record]) => [key, { sourceHash: record.sourceHash }]),
+	);
 }
 
 /**

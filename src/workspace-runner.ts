@@ -30,6 +30,7 @@ import {
 } from "./config/stubs.ts";
 import type { CoverageManifest } from "./coverage/manifest.ts";
 import {
+	emitWorkspaceBuildManifests,
 	prepareWorkspaceCoverage,
 	type WorkspacePackageCoverage,
 } from "./coverage/workspace-prepare.ts";
@@ -289,13 +290,21 @@ async function runWorkspaceProfiled(
 	const synthProjectPath = path.join(cacheDirectory, SYNTHESIZED_PROJECT_FILE);
 	const synthRbxlPath = path.join(cacheDirectory, SYNTHESIZED_PLACE_FILE);
 
-	timing.profile("rojoBuild", () => {
-		buildPlace({
+	const coveragePlace = timing.profile("rojoBuild", () => {
+		return buildPlace({
 			packages: descriptorsWithStubs,
 			placeFile: synthRbxlPath,
 			projectFile: synthProjectPath,
 		});
 	});
+
+	// Emit only after the shared build succeeds: `buildPlace` throws on a failed
+	// rojo build, so a per-package Build Manifest never points at a place that
+	// isn't on disk. Every coverage package records the one shared instrumented
+	// place as its coverage place.
+	if (coverageByPackage.size > 0) {
+		emitWorkspaceBuildManifests([...coverageByPackage.values()], coveragePlace);
+	}
 
 	const inputs: Array<MaterializerInput> = pending.map((entry) => {
 		return {

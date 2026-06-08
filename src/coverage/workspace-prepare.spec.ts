@@ -6,10 +6,12 @@ import * as path from "node:path";
 import process from "node:process";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
+import type { BuildManifest, BuildManifestArtifact } from "./build-manifest.ts";
+import { buildManifestSchema } from "./build-manifest.ts";
 import { INSTRUMENTER_VERSION } from "./instrumenter.ts";
 import type { CoverageManifest, InstrumentedFileRecord } from "./manifest.ts";
 import { MANIFEST_VERSION, manifestSchema } from "./manifest.ts";
-import { prepareWorkspaceCoverage } from "./workspace-prepare.ts";
+import { emitWorkspaceBuildManifests, prepareWorkspaceCoverage } from "./workspace-prepare.ts";
 
 function sha256(content: string): string {
 	return crypto.createHash("sha256").update(content).digest("hex");
@@ -26,6 +28,7 @@ const FOO_DIR = path.join(WORKSPACE_ROOT, "packages/foo");
 const BAR_DIR = path.join(WORKSPACE_ROOT, "packages/bar");
 const FOO_PROJECT = path.join(FOO_DIR, "test.project.json");
 const BAR_PROJECT = path.join(BAR_DIR, "test.project.json");
+const SHARED_PLACE: BuildManifestArtifact = { hash: "place-hash", path: "synthesized.rbxl" };
 
 interface SeedOptions {
 	luauRoots?: Array<string>;
@@ -1688,3 +1691,109 @@ describe(prepareWorkspaceCoverage, () => {
 		});
 	});
 });
+
+describe(emitWorkspaceBuildManifests, () => {
+	it("should write a build-manifest.json next to each package's coverage-manifest.json", async () => {
+		expect.assertions(4);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		seedPackage(FOO_DIR);
+		await mockInstrumentRoot();
+
+		const entries = prepareWorkspaceCoverage({
+			packages: [
+				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
+			],
+			workspaceRoot: WORKSPACE_ROOT,
+		});
+
+		emitWorkspaceBuildManifests(entries, SHARED_PLACE);
+
+		const buildManifestPath = path.join(
+			WORKSPACE_ROOT,
+			".jest-roblox/workspace/@halcyon-foo/coverage/build-manifest.json",
+		);
+
+		expect(vol.existsSync(buildManifestPath)).toBeTrue();
+
+		const manifest = buildManifestSchema.assert(
+			JSON.parse(vol.readFileSync(buildManifestPath, "utf-8") as string),
+		);
+
+		expect(manifest.buildId).toBe(entries[0]!.manifest.buildId);
+		expect(manifest.coveragePlace).toStrictEqual(SHARED_PLACE);
+		expect(manifest.cleanPlace).toBeUndefined();
+	});
+
+	it("should emit an independent build manifest per package over the one shared place", async () => {
+		expect.assertions(5);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		seedPackage(FOO_DIR);
+		seedPackage(BAR_DIR);
+		await mockInstrumentRoot();
+
+		const entries = prepareWorkspaceCoverage({
+			packages: [
+				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
+				{ name: "@halcyon/bar", packageDirectory: BAR_DIR, rojoProjectPath: BAR_PROJECT },
+			],
+			workspaceRoot: WORKSPACE_ROOT,
+		});
+
+		emitWorkspaceBuildManifests(entries, SHARED_PLACE);
+
+		const foo = readPackageBuildManifest("@halcyon-foo");
+		const bar = readPackageBuildManifest("@halcyon-bar");
+		const fooEntry = entries.find((entry) => entry.pkg === "@halcyon/foo");
+		const barEntry = entries.find((entry) => entry.pkg === "@halcyon/bar");
+
+		expect(foo.buildId).toBe(fooEntry!.manifest.buildId);
+		expect(bar.buildId).toBe(barEntry!.manifest.buildId);
+		expect(foo.buildId).not.toBe(bar.buildId);
+		expect(foo.coveragePlace).toStrictEqual(SHARED_PLACE);
+		expect(bar.coveragePlace).toStrictEqual(SHARED_PLACE);
+	});
+
+	it("should project files to sourceHash records and leave projects empty", async () => {
+		expect.assertions(2);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		seedPackage(FOO_DIR);
+		await mockInstrumentRoot();
+
+		const entries = prepareWorkspaceCoverage({
+			packages: [
+				{ name: "@halcyon/foo", packageDirectory: FOO_DIR, rojoProjectPath: FOO_PROJECT },
+			],
+			workspaceRoot: WORKSPACE_ROOT,
+		});
+
+		emitWorkspaceBuildManifests(entries, SHARED_PLACE);
+
+		const manifest = readPackageBuildManifest("@halcyon-foo");
+		const expectedKey = `${path.join(FOO_DIR, "out").replaceAll("\\", "/")}/init.luau`;
+
+		expect(manifest.files).toStrictEqual({ [expectedKey]: { sourceHash: "deadbeef" } });
+		expect(manifest.projects).toStrictEqual([]);
+	});
+});
+
+function readPackageBuildManifest(safeName: string): BuildManifest {
+	const buildManifestPath = path.join(
+		WORKSPACE_ROOT,
+		`.jest-roblox/workspace/${safeName}/coverage/build-manifest.json`,
+	);
+	return buildManifestSchema.assert(
+		JSON.parse(vol.readFileSync(buildManifestPath, "utf-8") as string),
+	);
+}

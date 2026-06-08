@@ -10,6 +10,8 @@ import { DEFAULT_CONFIG } from "../config/schema.ts";
 import { NOOP_TIMING_COLLECTOR, type TimingCollector } from "../timing/orchestration-collector.ts";
 import { atomicWrite } from "../utils/atomic-write.ts";
 import { normalizeWindowsPath } from "../utils/normalize-windows-path.ts";
+import type { BuildManifestArtifact } from "./build-manifest.ts";
+import { BUILD_MANIFEST_FILE, emitBuildManifest, toBuildManifestFiles } from "./build-manifest.ts";
 import { INSTRUMENTER_VERSION } from "./instrumenter.ts";
 import type {
 	CoverageManifest,
@@ -100,6 +102,34 @@ export function prepareWorkspaceCoverage(
 				: defaultMatcher;
 		return prepareForPackage(descriptor, workspaceRoot, matchesIgnored, timing);
 	});
+}
+
+/**
+ * Emit a per-package Build Manifest next to each Coverage Manifest, after the
+ * shared place build has succeeded. Every package records the one shared
+ * instrumented place as its `coveragePlace` and reuses its Coverage Manifest's
+ * `buildId`, so the sibling manifests cross-link. `projects` is left empty for
+ * a later slice to populate, and no Clean Place is emitted from the workspace
+ * path (it records `coveragePlace` only).
+ */
+export function emitWorkspaceBuildManifests(
+	entries: Array<WorkspacePackageCoverage>,
+	coveragePlace: BuildManifestArtifact,
+): void {
+	for (const entry of entries) {
+		// The Build Manifest is the Coverage Manifest's sibling — same directory.
+		const buildManifestPath = normalizeWindowsPath(
+			path.join(path.dirname(entry.manifestPath), BUILD_MANIFEST_FILE),
+		);
+		emitBuildManifest(buildManifestPath, {
+			buildId: entry.manifest.buildId,
+			coveragePlace,
+			files: toBuildManifestFiles(entry.manifest.files),
+			generatedAt: entry.manifest.generatedAt,
+			projects: [],
+			rebuilt: true,
+		});
+	}
 }
 
 function isInstrumentableLuauFile(filename: string): boolean {

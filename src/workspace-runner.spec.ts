@@ -10,6 +10,7 @@ import { loadConfig } from "./config/loader.ts";
 import type { CliOptions, WorkspaceRunOptions } from "./config/schema.ts";
 import { DEFAULT_CONFIG } from "./config/schema.ts";
 import { MANIFEST_VERSION } from "./coverage/manifest.ts";
+import type { WorkspacePackageCoverage } from "./coverage/workspace-prepare.ts";
 import { prepareWorkStealingQueue } from "./memory-store/work-stealing.ts";
 import { buildPlace } from "./staging/place-builder.ts";
 import { createTimingCollector } from "./timing/orchestration-collector.ts";
@@ -132,6 +133,24 @@ function makeRunOptions(overrides: Partial<WorkspaceRunOptions> = {}): Workspace
 
 function makeCli(overrides: Partial<CliOptions> = {}): CliOptions {
 	return { ...overrides };
+}
+
+function coverageEntry(package_: string): WorkspacePackageCoverage {
+	return {
+		coverageRoots: [{ luauRoot: "src", shadowDir: "/shadow/src" }],
+		manifest: {
+			buildId: "test-build-id",
+			files: {},
+			generatedAt: "x",
+			instrumenterVersion: 2,
+			luauRoots: [],
+			nonInstrumentedFiles: {},
+			shadowDir: "/shadow",
+			version: MANIFEST_VERSION,
+		},
+		manifestPath: "/shadow/coverage-manifest.json",
+		pkg: package_,
+	};
 }
 
 function emptyJestConfig(directory: string): Record<string, string> {
@@ -2119,6 +2138,120 @@ describe(runWorkspace, () => {
 			const callArgs = vi.mocked(prepareWorkspaceCoverage).mock.calls[0]?.[0];
 
 			expect(callArgs?.packages.map((entry) => entry.name)).toStrictEqual(["@halcyon/foo"]);
+		});
+
+		it("should emit per-package build manifests over the built place after a coverage run", async () => {
+			expect.assertions(1);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+
+			setLoadedConfigPerPackage({
+				[FOO_DIR]: { ...DEFAULT_CONFIG, collectCoverage: true, rootDir: FOO_DIR },
+			});
+
+			const entry = coverageEntry("@halcyon/foo");
+			const { emitWorkspaceBuildManifests, prepareWorkspaceCoverage } =
+				await import("./coverage/workspace-prepare.ts");
+			vi.mocked(prepareWorkspaceCoverage).mockReturnValue([entry]);
+			const place = { hash: "place-hash", path: "synthesized.rbxl" };
+			vi.mocked(buildPlace).mockReturnValue(place);
+
+			const { backend } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli({ collectCoverage: true }),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions(),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(vi.mocked(emitWorkspaceBuildManifests)).toHaveBeenCalledWith([entry], place);
+		});
+
+		it("should not emit a build manifest when the shared place build fails", async () => {
+			expect.assertions(2);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+
+			setLoadedConfigPerPackage({
+				[FOO_DIR]: { ...DEFAULT_CONFIG, collectCoverage: true, rootDir: FOO_DIR },
+			});
+
+			const { emitWorkspaceBuildManifests, prepareWorkspaceCoverage } =
+				await import("./coverage/workspace-prepare.ts");
+			vi.mocked(prepareWorkspaceCoverage).mockReturnValue([coverageEntry("@halcyon/foo")]);
+			vi.mocked(buildPlace).mockImplementationOnce(() => {
+				throw new Error("rojo boom");
+			});
+
+			const { backend } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await expect(
+				runWorkspace({
+					backend,
+					cli: makeCli({ collectCoverage: true }),
+					packageInfos: [FOO_INFO],
+					runOptions: makeRunOptions(),
+					version: "0.0.0-test",
+					workspaceRoot: ROOT,
+				}),
+			).rejects.toThrow("rojo boom");
+
+			expect(vi.mocked(emitWorkspaceBuildManifests)).not.toHaveBeenCalled();
+		});
+
+		it("should not emit a build manifest when coverage is disabled", async () => {
+			expect.assertions(1);
+
+			vol.reset();
+			vol.fromJSON({
+				...seedPackage(FOO_DIR, {
+					name: "@halcyon/foo",
+					specFiles: { [path.join(FOO_DIR, "src/foo.spec.luau")]: "" },
+				}),
+				[path.join(ROOT, "pnpm-workspace.yaml")]: "packages:\n  - packages/*\n",
+			});
+
+			setLoadedConfigPerPackage({
+				[FOO_DIR]: { ...DEFAULT_CONFIG, rootDir: FOO_DIR },
+			});
+
+			const { emitWorkspaceBuildManifests } = await import("./coverage/workspace-prepare.ts");
+
+			const { backend } = createStubBackend([
+				{ jestOutput: passingResult(), pkg: "@halcyon/foo" },
+			]);
+
+			await runWorkspace({
+				backend,
+				cli: makeCli(),
+				packageInfos: [FOO_INFO],
+				runOptions: makeRunOptions(),
+				version: "0.0.0-test",
+				workspaceRoot: ROOT,
+			});
+
+			expect(vi.mocked(emitWorkspaceBuildManifests)).not.toHaveBeenCalled();
 		});
 	});
 

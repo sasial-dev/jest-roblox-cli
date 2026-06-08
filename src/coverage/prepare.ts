@@ -21,7 +21,7 @@ import type {
 	BuildManifestProject,
 	CoverageArtifacts,
 } from "./build-manifest.ts";
-import { readBuildManifest } from "./build-manifest.ts";
+import { BUILD_MANIFEST_FILE, readBuildManifest, toBuildManifestFiles } from "./build-manifest.ts";
 import { INSTRUMENTER_VERSION } from "./instrumenter.ts";
 import type {
 	CoverageManifest,
@@ -33,11 +33,10 @@ import { cleanupDeletedFiles, detectDeletedFiles, prepareShadowRoot } from "./sh
 
 const COVERAGE_DIR = ".jest-roblox/coverage";
 const COVERAGE_MANIFEST = "coverage-manifest.json";
-const BUILD_MANIFEST = "build-manifest.json";
 
 /** Where the coverage path publishes its sibling manifests (cwd-relative). */
 export const COVERAGE_MANIFEST_PATH: string = path.join(COVERAGE_DIR, COVERAGE_MANIFEST);
-export const COVERAGE_BUILD_MANIFEST_PATH: string = path.join(COVERAGE_DIR, BUILD_MANIFEST);
+export const COVERAGE_BUILD_MANIFEST_PATH: string = path.join(COVERAGE_DIR, BUILD_MANIFEST_FILE);
 
 export interface PrepareCoverageResult {
 	/** Shared UUID for the sibling Build + Coverage manifests. */
@@ -163,7 +162,7 @@ export function prepareCoverage(
 	validateRelativeRoots(luauRoots);
 
 	const manifestPath = path.join(COVERAGE_DIR, COVERAGE_MANIFEST);
-	const buildManifestPath = path.join(COVERAGE_DIR, BUILD_MANIFEST);
+	const buildManifestPath = path.join(COVERAGE_DIR, BUILD_MANIFEST_FILE);
 	const previousManifest = loadCoverageManifest(manifestPath);
 	const useIncremental = canUseIncremental(previousManifest, config);
 
@@ -299,14 +298,6 @@ function resolveLuauRootsWithRojo(config: ResolvedConfig, rojoProjectPath?: stri
 
 	throw new Error(
 		"Could not determine luauRoots. Set luauRoots in config or ensure tsconfig has outDir.",
-	);
-}
-
-function toBuildManifestFiles(
-	allFiles: Record<string, InstrumentedFileRecord>,
-): Record<string, { sourceHash: string }> {
-	return Object.fromEntries(
-		Object.entries(allFiles).map(([key, record]) => [key, { sourceHash: record.sourceHash }]),
 	);
 }
 
