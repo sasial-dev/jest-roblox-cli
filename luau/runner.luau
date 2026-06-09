@@ -4,6 +4,7 @@ local LogService = game:GetService("LogService")
 
 local InstanceResolver = require("./instance-resolver")
 local InterceptWriteable = require("./intercept-writeable")
+local PerTestCoverage = require("./per-test-coverage")
 local PromiseError = require("./promise-error")
 local SetupTiming = require("./setup-timing")
 local SnapshotPatch = require("./snapshot-patch")
@@ -16,6 +17,7 @@ type Config = {
 	setupFiles: { string }?,
 	setupFilesAfterEnv: { string }?,
 	_coverage: boolean?,
+	_perTestCoverage: boolean?,
 	_timing: boolean?,
 }
 
@@ -26,12 +28,40 @@ local function fail(err: string)
 	}
 end
 
+-- Install the per-test coverage hook against the same jest-circus and Expect
+-- instances Jest itself uses. All resolution is pcall-guarded so a missing or
+-- renamed package degrades to no attribution rather than failing the run; the
+-- returned accumulator fills as tests run. The matcher state carries the current
+-- file (`testPath`) and full test name (`currentTestName`).
+local function installPerTestCoverage(jestModule: ModuleScript): { any }?
+	local ok, recordsOrErr = pcall(function()
+		local circusModule = InstanceResolver.findSiblingPackage(jestModule, "JestCircus", "jest-circus")
+		local expectModule = InstanceResolver.findSiblingPackage(jestModule, "Expect", "expect")
+		assert(circusModule and expectModule, "could not resolve jest-circus / Expect packages")
+
+		local Circus = (require :: any)(circusModule)
+		local Expect = (require :: any)(expectModule)
+
+		return PerTestCoverage.install(Circus.addEventHandler, Expect.getState, function()
+			return _G.__jest_roblox_cov or {}
+		end)
+	end)
+
+	if ok then
+		return recordsOrErr
+	end
+
+	warn("Per-test coverage attribution unavailable: " .. tostring(recordsOrErr))
+	return nil
+end
+
 local module = {}
 
 function module.run(callingScript: LuaSourceContainer, config: Config): (string, string, string)
 	local t0 = os.clock()
 	local timingEnabled = config._timing
 	local coverageEnabled = config._coverage
+	local perTestEnabled = config._perTestCoverage
 
 	-- Game Output capture: subscribe to LogService.MessageOut at the top of
 	-- the run so engine warnings during findJest/require(Jest) (broken
@@ -147,9 +177,14 @@ function module.run(callingScript: LuaSourceContainer, config: Config): (string,
 		-- Strip private keys before Jest.runCLI (safe: single-task execution per VM)
 		config._timing = nil :: any
 		config._coverage = nil :: any
+		config._perTestCoverage = nil :: any
 
+		local perTestRecords: { any }? = nil
 		if coverageEnabled then
 			_G.__jest_roblox_cov = {}
+			if perTestEnabled then
+				perTestRecords = installPerTestCoverage(findValue)
+			end
 		end
 
 		local t_jestRunCLI0 = os.clock()
@@ -194,6 +229,9 @@ function module.run(callingScript: LuaSourceContainer, config: Config): (string,
 
 		if coverageEnabled then
 			result._coverage = _G.__jest_roblox_cov
+			if perTestRecords and #perTestRecords > 0 then
+				result._perTestCoverage = perTestRecords
+			end
 		end
 
 		return result

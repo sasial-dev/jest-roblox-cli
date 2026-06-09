@@ -154,6 +154,30 @@ describe(buildJestArgv, () => {
 		expect(argv).not.toHaveProperty("_coverage");
 	});
 
+	it("should inject _perTestCoverage when collectPerTestCoverage is true", () => {
+		expect.assertions(1);
+
+		const argv = buildJestArgv(createOptions({ config: { collectPerTestCoverage: true } }));
+
+		expect(argv).toHaveProperty("_perTestCoverage", true);
+	});
+
+	it("should not inject _perTestCoverage when collectPerTestCoverage is false", () => {
+		expect.assertions(1);
+
+		const argv = buildJestArgv(createOptions({ config: { collectPerTestCoverage: false } }));
+
+		expect(argv).not.toHaveProperty("_perTestCoverage");
+	});
+
+	it("should not pass collectPerTestCoverage to Jest argv", () => {
+		expect.assertions(1);
+
+		const argv = buildJestArgv(createOptions({ config: { collectPerTestCoverage: true } }));
+
+		expect(argv).not.toHaveProperty("collectPerTestCoverage");
+	});
+
 	it("should not pass coverageDirectory to Jest argv", () => {
 		expect.assertions(1);
 

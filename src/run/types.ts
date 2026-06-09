@@ -15,6 +15,7 @@ export interface ProjectResult {
 }
 
 export interface MultiProjectMerged {
+	attribution?: ExecuteResult["attribution"];
 	coverageData?: ExecuteResult["coverageData"];
 	sourceMapper?: SourceMapper;
 }

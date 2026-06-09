@@ -194,6 +194,7 @@ export interface ResolvedConfig
 	extends Except<Config, "test">, Except<GlobalTestConfig, "projects"> {
 	backend: Backend;
 	collectCoverage: boolean;
+	collectPerTestCoverage?: boolean;
 	color: boolean;
 	coverageCache: boolean;
 	coverageDirectory: string;
@@ -640,6 +641,7 @@ export const JEST_ARGV_EXCLUDED_KEYS: ReadonlySet<string> = new Set<string>([
 	...ROOT_CLI_KEYS_LIST,
 	"collectCoverage",
 	"collectCoverageFrom",
+	"collectPerTestCoverage",
 	"coverageDirectory",
 	"coveragePathIgnorePatterns",
 	"coverageReporters",

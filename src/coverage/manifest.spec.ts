@@ -76,6 +76,46 @@ describe(writeManifest, () => {
 		expect(expectOk(readManifest("/coverage/manifest.json"))).toStrictEqual(manifest);
 	});
 
+	it("should round-trip per-test attribution records", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		const manifest = exampleManifest({
+			files: {
+				"out/init.luau": {
+					key: "out/init.luau",
+					coverageMapPath: ".jest-roblox/coverage/out/init.luau.cov-map.json",
+					coveringTestIds: { "1": ["t1"], "2": ["t1", "t2"] },
+					instrumentedLuauPath: ".jest-roblox/coverage/out/init.luau",
+					originalLuauPath: "out/init.luau",
+					sourceHash: "abc123",
+					sourceMapPath: "out/init.luau.map",
+					statementCount: 3,
+				},
+			},
+			tests: [
+				{
+					testCaseId: "math > adds",
+					testFilePath: "out/math.spec.luau",
+					testFileSourceHash: "hash-a",
+					testId: "t1",
+				},
+				{
+					testCaseId: "math > subtracts",
+					testFilePath: "out/math.spec.luau",
+					testFileSourceHash: "hash-a",
+					testId: "t2",
+				},
+			],
+		});
+		writeManifest("/coverage/manifest.json", manifest);
+
+		expect(expectOk(readManifest("/coverage/manifest.json"))).toStrictEqual(manifest);
+	});
+
 	it("should create parent directories before writing", () => {
 		expect.assertions(1);
 
@@ -229,6 +269,46 @@ describe(readManifest, () => {
 		const result = readManifest("/coverage/manifest.json");
 
 		expect(result.kind).toBe("invalid");
+	});
+
+	it("should return invalid when coveringTestIds is not an array of test ids", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		const manifest = exampleManifest();
+		const malformed = {
+			...manifest,
+			files: {
+				"out/init.luau": {
+					...manifest.files["out/init.luau"],
+					coveringTestIds: { "1": "not-an-array" },
+				},
+			},
+		};
+		vol.mkdirSync("/coverage", { recursive: true });
+		vol.writeFileSync("/coverage/manifest.json", JSON.stringify(malformed));
+
+		expect(readManifest("/coverage/manifest.json").kind).toBe("invalid");
+	});
+
+	it("should return invalid when a test record is missing its source hash", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		const malformed = {
+			...exampleManifest(),
+			tests: [{ testCaseId: "math > adds", testFilePath: "out/math.spec.luau", testId: "t1" }],
+		};
+		vol.mkdirSync("/coverage", { recursive: true });
+		vol.writeFileSync("/coverage/manifest.json", JSON.stringify(malformed));
+
+		expect(readManifest("/coverage/manifest.json").kind).toBe("invalid");
 	});
 
 	it("should return invalid when version matches but body fails schema", () => {

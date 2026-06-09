@@ -944,6 +944,46 @@ describe(runMultiProject, () => {
 		expect(result.merged.sourceMapper?.mapFailureMessage("hi")).toContain("hi");
 	});
 
+	it("should merge per-test attribution across project results", async () => {
+		expect.assertions(2);
+
+		const { config } = setupDefaults();
+		seedProjectFiles();
+
+		mocks.runProjects.mockImplementation(async (input) => {
+			return {
+				backendTiming: { executionMs: 100, uploadMs: 50 },
+				results: input.projects.map((project) => {
+					const tag = project.displayName ?? "";
+					return makeExecuteResult({
+						attribution: {
+							coveringTestIds: { "shared.luau": { "1": [tag] } },
+							tests: [
+								{
+									testCaseId: tag,
+									testFilePath: `${tag}.spec.luau`,
+									testFileSourceHash: "h",
+									testId: tag,
+								},
+							],
+						},
+					});
+				}),
+			};
+		});
+
+		const result = await runMultiProject({
+			cli: makeCli(),
+			config,
+			rawProjects: [makeProjectEntry("client"), makeProjectEntry("server")],
+		});
+
+		expect(result.merged.attribution?.tests).toHaveLength(2);
+		expect(result.merged.attribution?.coveringTestIds["shared.luau"]).toStrictEqual({
+			"1": ["client", "server"],
+		});
+	});
+
 	it("should pass parallel for open-cloud backend and drop it for studio", async () => {
 		expect.assertions(2);
 

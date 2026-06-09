@@ -4,8 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { resolveAllProjects } from "../config/projects.ts";
 import { DEFAULT_CONFIG, type ResolvedConfig } from "../config/schema.ts";
+import type { AttributionResult } from "../coverage/attribution.ts";
 import type { CoverageArtifacts } from "../coverage/build-manifest.ts";
 import { emitBuildManifest } from "../coverage/build-manifest.ts";
+import type { CoverageManifest } from "../coverage/manifest.ts";
+import { MANIFEST_VERSION, readManifest, writeManifest } from "../coverage/manifest.ts";
 import { COVERAGE_BUILD_MANIFEST_PATH, COVERAGE_MANIFEST_PATH } from "../coverage/prepare.ts";
 import { getRawProjects, runSingleOrMulti } from "../run.ts";
 import { collectStubMounts, loadRojoTree } from "../run/multi.ts";
@@ -18,6 +21,14 @@ vi.mock(import("../run/multi.ts"));
 vi.mock(import("../staging/place-builder.ts"));
 vi.mock(import("../config/projects.ts"));
 vi.mock(import("../coverage/build-manifest.ts"));
+vi.mock(import("../coverage/manifest.ts"), async (importOriginal) => {
+	const actual = await importOriginal();
+	return {
+		...actual,
+		readManifest: vi.fn<typeof actual.readManifest>(),
+		writeManifest: vi.fn<typeof actual.writeManifest>(),
+	};
+});
 vi.mock(import("../coverage/prepare.ts"), () => {
 	return {
 		COVERAGE_BUILD_MANIFEST_PATH: ".jest-roblox/coverage/build-manifest.json",
@@ -32,9 +43,50 @@ const mocks = {
 	emitBuildManifest: vi.mocked(emitBuildManifest),
 	getRawProjects: vi.mocked(getRawProjects),
 	loadRojoTree: vi.mocked(loadRojoTree),
+	readManifest: vi.mocked(readManifest),
 	resolveAllProjects: vi.mocked(resolveAllProjects),
 	runSingleOrMulti: vi.mocked(runSingleOrMulti),
+	writeManifest: vi.mocked(writeManifest),
 };
+
+const EXAMPLE_ATTRIBUTION: AttributionResult = {
+	coveringTestIds: { "out/init.luau": { "1": ["t1"] } },
+	tests: [
+		{
+			testCaseId: "adds",
+			testFilePath: "out/m.spec.luau",
+			testFileSourceHash: "h",
+			testId: "t1",
+		},
+	],
+};
+
+function manifestWithFile(): CoverageManifest {
+	return {
+		buildId: "build-42",
+		files: {
+			"out/init.luau": {
+				key: "out/init.luau",
+				coverageMapPath: "out/init.luau.cov-map.json",
+				instrumentedLuauPath: "out/init.luau",
+				originalLuauPath: "out/init.luau",
+				sourceHash: "h",
+				sourceMapPath: "out/init.luau.map",
+				statementCount: 1,
+			},
+		},
+		generatedAt: "2026-06-07T00:00:00.000Z",
+		instrumenterVersion: 2,
+		luauRoots: ["out"],
+		nonInstrumentedFiles: {},
+		shadowDir: ".jest-roblox/coverage",
+		version: MANIFEST_VERSION,
+	};
+}
+
+function attributedRuntime(attribution: AttributionResult): SingleRunResult["runtimeResult"] {
+	return { attribution } as unknown as SingleRunResult["runtimeResult"];
+}
 
 const COVERAGE_PLACE = { hash: "cov-hash", path: ".jest-roblox/coverage/game.rbxl" };
 const CLEAN_PLACE = { hash: "clean-hash", path: ".jest-roblox/coverage/clean.rbxl" };
@@ -196,6 +248,58 @@ describe(prepareArtifacts, () => {
 
 		expect(mocks.buildPlace.mock.calls[0]![0].packages[0]!.stubMounts).toHaveLength(1);
 		expect(bundle.coverageData).toStrictEqual({ "b.luau": { s: { "0": 1 } } });
+	});
+
+	it("should fold per-test attribution into the published coverage manifest", async () => {
+		expect.assertions(2);
+
+		mocks.runSingleOrMulti.mockResolvedValue(
+			singleResult({
+				coverageArtifacts: makeArtifacts(),
+				runtimeResult: attributedRuntime(EXAMPLE_ATTRIBUTION),
+			}),
+		);
+		mocks.buildPlace.mockReturnValue(CLEAN_PLACE);
+		mocks.readManifest.mockReturnValue({ kind: "ok", manifest: manifestWithFile() });
+
+		await prepareArtifacts(makeConfig());
+
+		const written = mocks.writeManifest.mock.calls[0]![1];
+
+		expect(written.tests).toStrictEqual(EXAMPLE_ATTRIBUTION.tests);
+		expect(written.files["out/init.luau"]!.coveringTestIds).toStrictEqual({ "1": ["t1"] });
+	});
+
+	it("should not rewrite the manifest when it cannot be read", async () => {
+		expect.assertions(1);
+
+		mocks.runSingleOrMulti.mockResolvedValue(
+			singleResult({
+				coverageArtifacts: makeArtifacts(),
+				runtimeResult: attributedRuntime(EXAMPLE_ATTRIBUTION),
+			}),
+		);
+		mocks.buildPlace.mockReturnValue(CLEAN_PLACE);
+		mocks.readManifest.mockReturnValue({ kind: "missing" });
+
+		await prepareArtifacts(makeConfig());
+
+		expect(mocks.writeManifest).not.toHaveBeenCalled();
+	});
+
+	it("should opt the coverage run into per-test attribution collection", async () => {
+		expect.assertions(1);
+
+		mocks.runSingleOrMulti.mockResolvedValue(
+			singleResult({ coverageArtifacts: makeArtifacts() }),
+		);
+		mocks.buildPlace.mockReturnValue(CLEAN_PLACE);
+
+		await prepareArtifacts(makeConfig());
+
+		const merged = mocks.runSingleOrMulti.mock.calls[0]![1];
+
+		expect(merged.collectPerTestCoverage).toBeTrue();
 	});
 
 	it("should throw when the coverage run produced no artifacts", async () => {

@@ -68,6 +68,7 @@ export function buildProjectResult(
 		elapsedMs: elapsedMs ?? 0,
 		gameOutput,
 		luauTiming: parsed.luauTiming,
+		perTestCoverage: parsed.perTestCoverage,
 		result: parsed.result,
 		setupMs:
 			parsed.setupSeconds !== undefined ? Math.round(parsed.setupSeconds * 1000) : undefined,

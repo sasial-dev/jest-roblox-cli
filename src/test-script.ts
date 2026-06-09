@@ -39,6 +39,10 @@ export function buildJestArgv(options: JestArgvInput): JestArgv {
 		argv["_coverage"] = true;
 	}
 
+	if (options.config.collectPerTestCoverage === true) {
+		argv["_perTestCoverage"] = true;
+	}
+
 	return {
 		...argv,
 		reporters: argv["reporters"] ?? [],

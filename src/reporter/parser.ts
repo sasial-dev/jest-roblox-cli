@@ -1,7 +1,7 @@
 import { type } from "arktype";
 import assert from "node:assert";
 
-import type { RawCoverageData } from "../coverage/types.ts";
+import type { PerTestCoverageEntry, RawCoverageData } from "../coverage/types.ts";
 import type { JestResult, SnapshotSummary } from "../types/jest-result.ts";
 
 export type SnapshotWrites = Record<string, string>;
@@ -9,6 +9,7 @@ export type SnapshotWrites = Record<string, string>;
 interface ParseResult {
 	coverageData?: RawCoverageData;
 	luauTiming?: Record<string, number>;
+	perTestCoverage?: Array<PerTestCoverageEntry>;
 	result: JestResult;
 	setupSeconds?: number;
 	snapshotWrites?: SnapshotWrites;
@@ -47,6 +48,12 @@ const jestResultSchema = type({
 });
 
 const jestEnvelopeSchema = type("Record<string, unknown>");
+
+const perTestCoverageSchema = type({
+	delta: type({ "[string]": { s: "number[]" } }),
+	testCaseId: "string",
+	testFilePath: "string",
+}).array();
 
 export function extractJsonFromOutput(output: string): string | undefined {
 	const lines = output.split("\n");
@@ -270,6 +277,24 @@ function extractCoverageData(parsed: Record<string, unknown>): RawCoverageData |
 	return Object.keys(record).length > 0 ? record : undefined;
 }
 
+function extractPerTestCoverage(
+	parsed: Record<string, unknown>,
+): Array<PerTestCoverageEntry> | undefined {
+	const raw = parsed["_perTestCoverage"];
+	if (raw === undefined) {
+		return undefined;
+	}
+
+	// A malformed envelope (our own producer drifting) drops attribution rather
+	// than throwing — the coverage report and manifest still publish without it.
+	const validated = perTestCoverageSchema(raw);
+	if (validated instanceof type.errors) {
+		return undefined;
+	}
+
+	return validated.length > 0 ? validated : undefined;
+}
+
 function extractSnapshotWrites(parsed: Record<string, unknown>): SnapshotWrites | undefined {
 	const writes = parsed["_snapshotWrites"];
 	if (writes === undefined || writes === null || typeof writes !== "object") {
@@ -410,6 +435,7 @@ function extractSnapshotSummary(
 function parseParsedOutput(parsed: Record<string, unknown>): ParseResult {
 	const coverageData = extractCoverageData(parsed);
 	const luauTiming = extractLuauTiming(parsed);
+	const perTestCoverage = extractPerTestCoverage(parsed);
 	const setupSeconds = extractSetupSeconds(parsed);
 	const snapshotWrites = extractSnapshotWrites(parsed);
 	const unwrapped = unwrapResult(parsed);
@@ -426,6 +452,7 @@ function parseParsedOutput(parsed: Record<string, unknown>): ParseResult {
 		return {
 			coverageData,
 			luauTiming,
+			perTestCoverage,
 			result: snapshot !== undefined ? { ...validated, snapshot } : validated,
 			setupSeconds,
 			snapshotWrites,
@@ -437,6 +464,7 @@ function parseParsedOutput(parsed: Record<string, unknown>): ParseResult {
 	return {
 		coverageData,
 		luauTiming,
+		perTestCoverage,
 		result: snapshot !== undefined ? { ...validated, snapshot } : validated,
 		setupSeconds,
 		snapshotWrites,

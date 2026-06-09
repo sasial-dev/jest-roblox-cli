@@ -24,6 +24,8 @@ import {
 	STUB_FILENAME,
 	syncStubsToShadowDirectory,
 } from "../config/stubs.ts";
+import type { AttributionResult } from "../coverage/attribution.ts";
+import { mergeAttribution } from "../coverage/attribution.ts";
 import type { CoverageArtifacts } from "../coverage/build-manifest.ts";
 import { deriveCoverageFromIncludes } from "../coverage/derive-coverage-from.ts";
 import { mergeRawCoverage } from "../coverage/merge-raw-coverage.ts";
@@ -514,11 +516,19 @@ function mergeForMultiResult(projectResults: Array<ProjectResult>): MultiProject
 	}
 
 	let mergedCoverage: RawCoverageData | undefined;
+	let mergedAttribution: AttributionResult | undefined;
 	const mappers: Array<SourceMapper> = [];
 
 	for (const { result } of projectResults) {
 		if (result.coverageData !== undefined) {
 			mergedCoverage = mergeRawCoverage(mergedCoverage, result.coverageData);
+		}
+
+		if (result.attribution !== undefined) {
+			mergedAttribution =
+				mergedAttribution === undefined
+					? result.attribution
+					: mergeAttribution(mergedAttribution, result.attribution);
 		}
 
 		if (result.sourceMapper !== undefined) {
@@ -529,6 +539,10 @@ function mergeForMultiResult(projectResults: Array<ProjectResult>): MultiProject
 	const merged: MultiProjectMerged = {};
 	if (mergedCoverage !== undefined) {
 		merged.coverageData = mergedCoverage;
+	}
+
+	if (mergedAttribution !== undefined) {
+		merged.attribution = mergedAttribution;
 	}
 
 	if (mappers.length > 0) {

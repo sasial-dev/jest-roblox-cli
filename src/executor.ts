@@ -18,8 +18,11 @@ import type {
 import { applySnapshotFormatDefaults } from "./config/loader.ts";
 import type { ResolvedConfig } from "./config/schema.ts";
 import { type TsconfigCompilerOptions, tsconfigShapeSchema } from "./config/tsconfig-schema.ts";
+import type { AttributionResult } from "./coverage/attribution.ts";
+import { harvestAttribution } from "./coverage/attribution.ts";
 import type { CoverageManifest } from "./coverage/manifest.ts";
 import { readManifest } from "./coverage/manifest.ts";
+import { resolveTestFileHash } from "./coverage/test-file-hash.ts";
 import type { RawCoverageData } from "./coverage/types.ts";
 import { formatAgent } from "./formatters/agent.ts";
 import { formatResult } from "./formatters/formatter.ts";
@@ -43,6 +46,7 @@ import { normalizeWindowsPath } from "./utils/normalize-windows-path.ts";
 import { replacePrefix } from "./utils/tsconfig-mapping.ts";
 
 export interface ExecuteResult {
+	attribution?: AttributionResult;
 	coverageData?: RawCoverageData;
 	exitCode: number;
 	gameOutput?: string;
@@ -748,7 +752,15 @@ function processProjectResult(
 	options: ProcessProjectOptions,
 ): ExecuteResult {
 	const { backendTiming, config, deferFormatting, startTime, timing, version } = options;
-	const { coverageData, gameOutput, luauTiming, result, setupMs, snapshotWrites } = entry;
+	const {
+		coverageData,
+		gameOutput,
+		luauTiming,
+		perTestCoverage,
+		result,
+		setupMs,
+		snapshotWrites,
+	} = entry;
 
 	const tsconfigMappings = timing.profile("resolveTsconfigMappings", () => {
 		return resolveAllTsconfigMappings(config.rootDir);
@@ -767,6 +779,13 @@ function processProjectResult(
 		: undefined;
 
 	resolveTestFilePaths(result, sourceMapper);
+
+	const attribution =
+		perTestCoverage !== undefined
+			? harvestAttribution(perTestCoverage, (testFilePath) => {
+					return resolveTestFileHash(sourceMapper, testFilePath);
+				})
+			: undefined;
 
 	const totalMs = Date.now() - startTime;
 
@@ -798,6 +817,7 @@ function processProjectResult(
 	const exitCode = result.success && writeCounts.failed === 0 ? 0 : 1;
 
 	return {
+		attribution,
 		coverageData,
 		exitCode,
 		gameOutput,

@@ -11,7 +11,7 @@ import type { Backend, BackendOptions, BackendResult } from "./backends/interfac
 import type { ResolvedConfig } from "./config/schema.ts";
 import { DEFAULT_CONFIG } from "./config/schema.ts";
 import { MANIFEST_VERSION } from "./coverage/manifest.ts";
-import type { RawCoverageData } from "./coverage/types.ts";
+import type { PerTestCoverageEntry, RawCoverageData } from "./coverage/types.ts";
 import {
 	type ExecuteResult,
 	isLuauProject,
@@ -125,6 +125,7 @@ interface EntryInput {
 	elapsedMs?: number;
 	gameOutput?: string;
 	luauTiming?: Record<string, number>;
+	perTestCoverage?: Array<PerTestCoverageEntry>;
 	result: JestResult;
 	setupSeconds?: number;
 	snapshotWrites?: SnapshotWrites;
@@ -134,6 +135,10 @@ function buildJestOutputPayload(entry: EntryInput): string {
 	const payload: Record<string, unknown> = { ...entry.result };
 	if (entry.coverageData !== undefined) {
 		payload["_coverage"] = entry.coverageData;
+	}
+
+	if (entry.perTestCoverage !== undefined) {
+		payload["_perTestCoverage"] = entry.perTestCoverage;
 	}
 
 	if (entry.luauTiming !== undefined) {
@@ -671,6 +676,47 @@ describe("execute single-project helper", () => {
 		// coverage processing is now handled by cli.ts
 		expect(result.coverageData).toStrictEqual({
 			"shared/player.luau": { b: undefined, f: undefined, s: { "0": 3, "1": 0, "2": 1 } },
+		});
+	});
+
+	it("should harvest per-test attribution when the backend provides it", async () => {
+		expect.assertions(2);
+
+		const perTestCoverage: Array<PerTestCoverageEntry> = [
+			{
+				delta: { "out/m.luau": { s: [1, 2] } },
+				testCaseId: "math > adds",
+				testFilePath: "out/m.spec.luau",
+			},
+		];
+		const backend: Backend = {
+			kind: "studio",
+			runTests: async (): Promise<BackendResult> => {
+				return singleEntryResult({ perTestCoverage, result: createPassingResult() });
+			},
+		};
+		const options: ExecuteOptions = {
+			backend,
+			config: { ...DEFAULT_CONFIG, collectCoverage: true },
+			testFiles: ["src/test.spec.ts"],
+			version: "0.0.0-test",
+		};
+
+		const result = await executeSingle(options);
+
+		expect(result.attribution?.tests).toStrictEqual([
+			{
+				testCaseId: "math > adds",
+				testFilePath: "out/m.spec.luau",
+				testFileSourceHash: "",
+				testId: "out/m.spec.luau::math > adds",
+			},
+		]);
+		expect(result.attribution?.coveringTestIds).toStrictEqual({
+			"out/m.luau": {
+				"1": ["out/m.spec.luau::math > adds"],
+				"2": ["out/m.spec.luau::math > adds"],
+			},
 		});
 	});
 

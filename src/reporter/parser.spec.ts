@@ -542,6 +542,96 @@ End of output
 		expect(coverageData?.["shared/player.luau"]?.s["0"]).toBe(1);
 	});
 
+	it("should extract _perTestCoverage entries from the envelope", () => {
+		expect.assertions(1);
+
+		const payload = JSON.stringify({
+			_perTestCoverage: [
+				{
+					delta: { "out/m.luau": { s: [1, 3] } },
+					testCaseId: "math > adds",
+					testFilePath: "out/m.spec.luau",
+				},
+			],
+			success: true,
+			value: {
+				numFailedTests: 0,
+				numPassedTests: 1,
+				numPendingTests: 0,
+				numTotalTests: 1,
+				startTime: 0,
+				success: true,
+				testResults: [],
+			},
+		});
+
+		const { perTestCoverage } = parseJestOutput(payload);
+
+		expect(perTestCoverage).toStrictEqual([
+			{
+				delta: { "out/m.luau": { s: [1, 3] } },
+				testCaseId: "math > adds",
+				testFilePath: "out/m.spec.luau",
+			},
+		]);
+	});
+
+	it("should leave perTestCoverage undefined when the envelope omits it", () => {
+		expect.assertions(1);
+
+		const payload = JSON.stringify({
+			numFailedTests: 0,
+			numPassedTests: 1,
+			numPendingTests: 0,
+			numTotalTests: 1,
+			startTime: 0,
+			success: true,
+			testResults: [],
+		});
+
+		const { perTestCoverage } = parseJestOutput(payload);
+
+		expect(perTestCoverage).toBeUndefined();
+	});
+
+	it("should leave perTestCoverage undefined when no test covered anything", () => {
+		expect.assertions(1);
+
+		const payload = JSON.stringify({
+			_perTestCoverage: [],
+			numFailedTests: 0,
+			numPassedTests: 1,
+			numPendingTests: 0,
+			numTotalTests: 1,
+			startTime: 0,
+			success: true,
+			testResults: [],
+		});
+
+		const { perTestCoverage } = parseJestOutput(payload);
+
+		expect(perTestCoverage).toBeUndefined();
+	});
+
+	it("should leave perTestCoverage undefined when the envelope shape is malformed", () => {
+		expect.assertions(1);
+
+		const payload = JSON.stringify({
+			_perTestCoverage: [{ delta: { "out/m.luau": { s: ["not-a-number"] } } }],
+			numFailedTests: 0,
+			numPassedTests: 1,
+			numPendingTests: 0,
+			numTotalTests: 1,
+			startTime: 0,
+			success: true,
+			testResults: [],
+		});
+
+		const { perTestCoverage } = parseJestOutput(payload);
+
+		expect(perTestCoverage).toBeUndefined();
+	});
+
 	it("should extract snapshot summary from wrapped results", () => {
 		expect.assertions(1);
 

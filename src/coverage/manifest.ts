@@ -19,12 +19,35 @@ export interface InstrumentedFileRecord {
 	key: string;
 	branchCount?: number;
 	coverageMapPath: string;
+	/**
+	 * Per-statement attribution: maps a Luau statement id (the probe index, same
+	 * key space as the coverage-map sidecar) to the ids of the tests that covered
+	 * it. Populated after a coverage run by the per-test attribution harvester;
+	 * absent on a freshly-instrumented manifest (no run yet).
+	 */
+	coveringTestIds?: Record<string, Array<string>>;
 	functionCount?: number;
 	instrumentedLuauPath: string;
 	originalLuauPath: string;
 	sourceHash: string;
 	sourceMapPath: string;
 	statementCount: number;
+}
+
+/**
+ * One Jest test case's identity, recorded so Phase 3's differential cache can
+ * key on which tests cover a mutant and whether their source changed.
+ * `coveringTestIds` references these by `testId`.
+ */
+export interface TestRecord {
+	/** Full test name (describe chain + leaf `it`). */
+	testCaseId: string;
+	/** The test file's DataModel path, as the runner observed it. */
+	testFilePath: string;
+	/** SHA-256 of the test file's source, for cache invalidation. */
+	testFileSourceHash: string;
+	/** Stable unique id for the test case; referenced by `coveringTestIds`. */
+	testId: string;
 }
 
 export interface NonInstrumentedFileRecord {
@@ -43,6 +66,12 @@ export interface CoverageManifest {
 	nonInstrumentedFiles: Record<string, NonInstrumentedFileRecord>;
 	placeFilePath?: string;
 	shadowDir: string;
+	/**
+	 * Per-test attribution records, one per Jest test case that covered at least
+	 * one statement. Populated by the harvester after a coverage run; absent on a
+	 * freshly-instrumented manifest.
+	 */
+	tests?: Array<TestRecord>;
 	version: typeof MANIFEST_VERSION;
 }
 
@@ -52,6 +81,7 @@ const instrumentedFileRecordSchema = type({
 	"key": "string",
 	"branchCount?": "number",
 	"coverageMapPath": "string",
+	"coveringTestIds?": type({ "[string]": "string[]" }),
 	"functionCount?": "number",
 	"instrumentedLuauPath": "string",
 	"originalLuauPath": "string",
@@ -59,6 +89,13 @@ const instrumentedFileRecordSchema = type({
 	"sourceMapPath": "string",
 	"statementCount": "number",
 }).as<InstrumentedFileRecord>();
+
+const testRecordSchema = type({
+	testCaseId: "string",
+	testFilePath: "string",
+	testFileSourceHash: "string",
+	testId: "string",
+}).as<TestRecord>();
 
 const nonInstrumentedRecordSchema = type({
 	shadowPath: "string",
@@ -75,6 +112,7 @@ export const manifestSchema: type<CoverageManifest> = type({
 	"nonInstrumentedFiles": type({ "[string]": nonInstrumentedRecordSchema }),
 	"placeFilePath?": "string",
 	"shadowDir": "string",
+	"tests?": testRecordSchema.array(),
 	"version": type.unit(MANIFEST_VERSION),
 }).as<CoverageManifest>();
 

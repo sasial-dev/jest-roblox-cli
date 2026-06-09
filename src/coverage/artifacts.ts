@@ -29,4 +29,5 @@ export type {
 	InstrumentedFileRecord,
 	NonInstrumentedFileRecord,
 	ReadManifestResult as ReadCoverageManifestResult,
+	TestRecord,
 } from "./manifest.ts";

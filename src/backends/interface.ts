@@ -1,5 +1,5 @@
 import type { ResolvedConfig } from "../config/schema.ts";
-import type { RawCoverageData } from "../coverage/types.ts";
+import type { PerTestCoverageEntry, RawCoverageData } from "../coverage/types.ts";
 import type {
 	StreamingResultEntry,
 	StreamingResultReader,
@@ -111,6 +111,7 @@ export interface ProjectBackendResult {
 	elapsedMs: number;
 	gameOutput?: string;
 	luauTiming?: Record<string, number>;
+	perTestCoverage?: Array<PerTestCoverageEntry>;
 	result: JestResult;
 	setupMs?: number;
 	snapshotWrites?: SnapshotWrites;

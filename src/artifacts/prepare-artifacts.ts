@@ -3,8 +3,11 @@ import * as path from "node:path";
 import { mergeCliWithConfig } from "../config/merge.ts";
 import { resolveAllProjects } from "../config/projects.ts";
 import type { CliOptions, ResolvedConfig } from "../config/schema.ts";
+import type { AttributionResult } from "../coverage/attribution.ts";
+import { applyAttribution } from "../coverage/attribution.ts";
 import type { BuildManifestArtifact, BuildManifestProject } from "../coverage/build-manifest.ts";
 import { emitBuildManifest } from "../coverage/build-manifest.ts";
+import { readManifest, writeManifest } from "../coverage/manifest.ts";
 import {
 	COVERAGE_BUILD_MANIFEST_PATH,
 	COVERAGE_MANIFEST_PATH,
@@ -50,7 +53,11 @@ export async function prepareArtifacts(config: ResolvedConfig): Promise<Artifact
 	const cli: CliOptions = {};
 	const timing = createTimingCollector();
 	try {
-		const merged = mergeCliWithConfig(cli, { ...config, collectCoverage: true });
+		const merged = mergeCliWithConfig(cli, {
+			...config,
+			collectCoverage: true,
+			collectPerTestCoverage: true,
+		});
 		const result = await runSingleOrMulti(cli, merged, timing);
 
 		const { coverageArtifacts } = result;
@@ -64,6 +71,11 @@ export async function prepareArtifacts(config: ResolvedConfig): Promise<Artifact
 
 		// One atomic write that knows both places — never write-then-patch.
 		emitBuildManifest(COVERAGE_BUILD_MANIFEST_PATH, coverageArtifacts, cleanPlace);
+
+		// Fold per-test attribution into the coverage manifest the instrument
+		// step already published, so the consumer reads tests[] + coveringTestIds
+		// from the same artifact as the file records.
+		writeManifestAttribution(COVERAGE_MANIFEST_PATH, extractAttribution(result));
 
 		return {
 			buildId: coverageArtifacts.buildId,
@@ -85,6 +97,31 @@ function extractCoverageData(
 	return result.mode === "single"
 		? result.runtimeResult?.coverageData
 		: result.merged.coverageData;
+}
+
+function extractAttribution(
+	result: MultiRunResult | SingleRunResult,
+): AttributionResult | undefined {
+	return result.mode === "single" ? result.runtimeResult?.attribution : result.merged.attribution;
+}
+
+/**
+ * Re-publish the coverage manifest with attribution folded in. A missing or
+ * unreadable manifest, or a run that produced no attribution, is a no-op — the
+ * file records the instrument step wrote stay as published.
+ */
+function writeManifestAttribution(
+	manifestPath: string,
+	attribution: AttributionResult | undefined,
+): void {
+	if (attribution === undefined) {
+		return;
+	}
+
+	const read = readManifest(manifestPath);
+	if (read.kind === "ok") {
+		writeManifest(manifestPath, applyAttribution(read.manifest, attribution));
+	}
 }
 
 /**
