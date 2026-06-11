@@ -4,6 +4,7 @@ import { type } from "arktype";
 import { vol } from "memfs";
 import * as crypto from "node:crypto";
 import * as path from "node:path";
+import process from "node:process";
 import type { Except } from "type-fest";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
@@ -19,6 +20,7 @@ import type {
 } from "./manifest.ts";
 import { MANIFEST_VERSION, manifestSchema } from "./manifest.ts";
 import { collectLuauRootsFromRojo, prepareCoverage, resolveLuauRoots } from "./prepare.ts";
+import { computeRojoInputsHash } from "./rojo-inputs.ts";
 import { discoverInstrumentableFiles } from "./shadow-root.ts";
 
 vi.mock(import("node:fs"), async () => {
@@ -619,6 +621,11 @@ describe(prepareCoverage, () => {
 				luauRoots: ["out-tsc/test"],
 				nonInstrumentedFiles: previousNonInstrumentedFiles,
 				placeFilePath: previousPlaceFilePath,
+				rojoInputsHash: computeRojoInputsHash({
+					luauRoots: ["out-tsc/test"],
+					rojoProjectPath: "/project/default.project.json",
+					rootDirectory: "/project",
+				}),
 				shadowDir: ".jest-roblox/coverage",
 				version: MANIFEST_VERSION,
 			});
@@ -1214,6 +1221,119 @@ describe(prepareCoverage, () => {
 			prepareCoverage(config, beforeBuild);
 
 			expect(buildWithRojo).not.toHaveBeenCalled();
+		});
+
+		describe("when tracking non-luauRoot rojo inputs", () => {
+			const includeProject = {
+				name: "test",
+				tree: {
+					$className: "DataModel",
+					Inc: { $path: "include" },
+					Src: { $path: "out-tsc/test/client" },
+				},
+			};
+
+			function seedIncludeScenario(includeContent: string): void {
+				seedFilesystem();
+				vol.writeFileSync("/project/default.project.json", JSON.stringify(includeProject));
+				vol.mkdirSync("/project/include", { recursive: true });
+				vol.writeFileSync("/project/include/RuntimeLib.lua", includeContent);
+
+				const record = makeFileRecord({ key: "out-tsc/test/init.luau" });
+				vol.mkdirSync(".jest-roblox/coverage/out-tsc/test", { recursive: true });
+				vol.writeFileSync(record.instrumentedLuauPath, "-- instrumented");
+				vol.writeFileSync(record.coverageMapPath, "{}");
+				vol.writeFileSync(".jest-roblox/coverage/game.rbxl", "RBXL");
+
+				seedPreviousManifest({
+					files: { "out-tsc/test/init.luau": record },
+					generatedAt: new Date().toISOString(),
+					instrumenterVersion: INSTRUMENTER_VERSION,
+					luauRoots: ["out-tsc/test"],
+					nonInstrumentedFiles: {},
+					placeFilePath: ".jest-roblox/coverage/game.rbxl",
+					rojoInputsHash: computeRojoInputsHash({
+						luauRoots: ["out-tsc/test"],
+						rojoProjectPath: "/project/default.project.json",
+						rootDirectory: "/project",
+					}),
+					shadowDir: ".jest-roblox/coverage",
+					version: MANIFEST_VERSION,
+				});
+			}
+
+			function seedValidBuildManifest(): void {
+				vol.writeFileSync(
+					".jest-roblox/coverage/build-manifest.json",
+					JSON.stringify({
+						buildId: "prev-build-id",
+						coveragePlace: {
+							hash: sha256("RBXL"),
+							path: ".jest-roblox/coverage/game.rbxl",
+						},
+						files: {},
+						generatedAt: new Date().toISOString(),
+						projects: [],
+						version: 1,
+					}),
+				);
+			}
+
+			it("should rebuild when a non-luauRoot mount's file changes", async () => {
+				expect.assertions(1);
+
+				const { buildWithRojo } = await setupMocks();
+				seedIncludeScenario("-- v1");
+				vol.writeFileSync("/project/include/RuntimeLib.lua", "-- v2");
+
+				const config = makeConfig({ luauRoots: ["out-tsc/test"] });
+
+				prepareCoverage(config);
+
+				expect(buildWithRojo).toHaveBeenCalledOnce();
+			});
+
+			it("should reuse the place and log when rojo inputs are unchanged", async () => {
+				expect.assertions(2);
+
+				const { buildWithRojo } = await setupMocks();
+				const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+				seedIncludeScenario("-- v1");
+				seedValidBuildManifest();
+
+				const config = makeConfig({ luauRoots: ["out-tsc/test"] });
+
+				prepareCoverage(config);
+
+				expect(buildWithRojo).not.toHaveBeenCalled();
+				expect(stderr).toHaveBeenCalledWith(
+					expect.stringContaining("Reusing cached coverage place"),
+				);
+			});
+
+			it("should warn and skip the inputs check when they cannot be hashed", async () => {
+				expect.assertions(2);
+
+				const { buildWithRojo } = await setupMocks();
+				const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+				seedIncludeScenario("-- v1");
+				seedValidBuildManifest();
+				// config.luauRoots is set, so resolveLuauRootsWithRojo skips
+				// parsing and the run reaches the inputs hash with a
+				// now-malformed project. The reuse path never re-parses it, so
+				// the run still succeeds — the inputs check is skipped, not
+				// forced.
+				vol.writeFileSync("/project/default.project.json", "not valid json {{{");
+
+				const config = makeConfig({ luauRoots: ["out-tsc/test"] });
+
+				prepareCoverage(config);
+
+				expect(buildWithRojo).not.toHaveBeenCalled();
+				expect(stderr).toHaveBeenCalledWith(
+					expect.stringContaining("could not hash rojo build inputs"),
+				);
+			});
 		});
 
 		describe("when syncing non-instrumented files", () => {

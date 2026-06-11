@@ -3,7 +3,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { collectPaths, rebaseTreePaths, resolveNestedProjects } from "./rojo-tree.ts";
+import {
+	collectPaths,
+	rebaseTreePaths,
+	resolveNestedProjects,
+	resolveNestedProjectSources,
+} from "./rojo-tree.ts";
 import type { RojoTreeNode } from "./types.ts";
 
 describe(collectPaths, () => {
@@ -404,6 +409,128 @@ describe(resolveNestedProjects, () => {
 			$className: "DataModel",
 			ReplicatedStorage: {
 				Src: { $path: "src" },
+			},
+		});
+	});
+});
+
+describe(resolveNestedProjectSources, () => {
+	it("should report no project files when nothing is inlined", () => {
+		expect.assertions(2);
+
+		const tree: RojoTreeNode = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				client: { $path: "out/client" },
+			},
+		};
+
+		const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "rojo-tree-test-"));
+		const result = resolveNestedProjectSources(tree, temporaryDirectory);
+		fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+
+		expect(result.projectFiles).toStrictEqual([]);
+		expect(result.tree).toStrictEqual(tree);
+	});
+
+	it("should report the absolute path of each inlined nested project", () => {
+		expect.assertions(2);
+
+		const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "rojo-tree-test-"));
+		const projectFile = path.join(temporaryDirectory, "default.project.json");
+		fs.writeFileSync(projectFile, JSON.stringify({ name: "my-pkg", tree: { $path: "src" } }));
+
+		const tree: RojoTreeNode = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				"my-pkg": { $path: "default.project.json" },
+			},
+		};
+
+		const result = resolveNestedProjectSources(tree, temporaryDirectory);
+		fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+
+		expect(result.projectFiles).toStrictEqual([projectFile]);
+		expect(result.tree).toStrictEqual({
+			$className: "DataModel",
+			ReplicatedStorage: {
+				"my-pkg": { $path: "src" },
+			},
+		});
+	});
+
+	it("should report every project file in a chained reference", () => {
+		expect.assertions(1);
+
+		const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "rojo-tree-test-"));
+		const outer = path.join(temporaryDirectory, "a.project.json");
+		const inner = path.join(temporaryDirectory, "b.project.json");
+		fs.writeFileSync(outer, JSON.stringify({ name: "A", tree: { $path: "b.project.json" } }));
+		fs.writeFileSync(inner, JSON.stringify({ name: "B", tree: { $path: "src" } }));
+
+		const tree: RojoTreeNode = {
+			$className: "DataModel",
+			ReplicatedStorage: {
+				Chain: { $path: "a.project.json" },
+			},
+		};
+
+		const result = resolveNestedProjectSources(tree, temporaryDirectory);
+		fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+
+		expect(new Set(result.projectFiles)).toStrictEqual(new Set([inner, outer]));
+	});
+
+	it("should report a project file referenced from two branches once", () => {
+		expect.assertions(1);
+
+		const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "rojo-tree-test-"));
+		const projectFile = path.join(temporaryDirectory, "loader.project.json");
+		fs.writeFileSync(
+			projectFile,
+			JSON.stringify({ name: "Loader", tree: { $path: "src/loader" } }),
+		);
+
+		const tree: RojoTreeNode = {
+			$className: "DataModel",
+			ServerScriptService: {
+				Loader: { $path: "loader.project.json" },
+			},
+			StarterPlayer: {
+				Loader: { $path: "loader.project.json" },
+			},
+		};
+
+		const result = resolveNestedProjectSources(tree, temporaryDirectory);
+		fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+
+		expect(result.projectFiles).toStrictEqual([projectFile]);
+	});
+
+	it("should report a directory mount that contains a default.project.json", () => {
+		expect.assertions(2);
+
+		const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "rojo-tree-test-"));
+		const packageDirectory = path.join(temporaryDirectory, "pkg");
+		fs.mkdirSync(packageDirectory, { recursive: true });
+		const projectFile = path.join(packageDirectory, "default.project.json");
+		fs.writeFileSync(projectFile, JSON.stringify({ name: "pkg", tree: { $path: "src" } }));
+
+		const tree: RojoTreeNode = {
+			$className: "DataModel",
+			ServerScriptService: {
+				pkg: { $path: "pkg" },
+			},
+		};
+
+		const result = resolveNestedProjectSources(tree, temporaryDirectory);
+		fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+
+		expect(result.projectFiles).toStrictEqual([projectFile]);
+		expect(result.tree).toStrictEqual({
+			$className: "DataModel",
+			ServerScriptService: {
+				pkg: { $path: "pkg/src" },
 			},
 		});
 	});

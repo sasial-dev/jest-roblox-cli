@@ -65,6 +65,14 @@ export interface CoverageManifest {
 	luauRoots: Array<string>;
 	nonInstrumentedFiles: Record<string, NonInstrumentedFileRecord>;
 	placeFilePath?: string;
+	/**
+	 * SHA-256 over every rojo build input OUTSIDE the luauRoots (non-luauRoot
+	 * `$path` mounts plus the rojo project files), per `computeRojoInputsHash`.
+	 * The incremental cache rebuilds the place when it drifts. Absent on manifests
+	 * written before this field existed; a missing value is treated as changed so
+	 * the next run repopulates it.
+	 */
+	rojoInputsHash?: string;
 	shadowDir: string;
 	/**
 	 * Per-test attribution records, one per Jest test case that covered at least
@@ -111,6 +119,7 @@ export const manifestSchema: type<CoverageManifest> = type({
 	"luauRoots": "string[]",
 	"nonInstrumentedFiles": type({ "[string]": nonInstrumentedRecordSchema }),
 	"placeFilePath?": "string",
+	"rojoInputsHash?": "string",
 	"shadowDir": "string",
 	"tests?": testRecordSchema.array(),
 	"version": type.unit(MANIFEST_VERSION),

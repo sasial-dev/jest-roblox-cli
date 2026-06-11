@@ -29,6 +29,7 @@ import type {
 	NonInstrumentedFileRecord,
 } from "./manifest.ts";
 import { MANIFEST_VERSION, readManifest, writeManifest } from "./manifest.ts";
+import { computeRojoInputsHash } from "./rojo-inputs.ts";
 import { cleanupDeletedFiles, detectDeletedFiles, prepareShadowRoot } from "./shadow-root.ts";
 
 const COVERAGE_DIR = ".jest-roblox/coverage";
@@ -62,6 +63,7 @@ interface WriteManifestOptions {
 	manifestPath: string;
 	nonInstrumentedFiles: Record<string, NonInstrumentedFileRecord>;
 	placeFile: string;
+	rojoInputsHash: string;
 }
 
 interface PriorPlaceReuse {
@@ -161,6 +163,12 @@ export function prepareCoverage(
 
 	validateRelativeRoots(luauRoots);
 
+	const { hash: rojoInputsHash, resolved: inputsResolved } = resolveRojoInputsHash(
+		config,
+		rojoProjectPath,
+		luauRoots,
+	);
+
 	const manifestPath = path.join(COVERAGE_DIR, COVERAGE_MANIFEST);
 	const buildManifestPath = path.join(COVERAGE_DIR, BUILD_MANIFEST_FILE);
 	const previousManifest = loadCoverageManifest(manifestPath);
@@ -212,11 +220,24 @@ export function prepareCoverage(
 		}
 	}
 
+	// A non-luauRoot rojo input changed — the shadow diff can't see those, so
+	// force a rebuild rather than reuse a stale place built from the old include/
+	// or vendored sources. When the inputs couldn't be hashed the check is
+	// skipped (not forced): a project too broken to hash would also fail the
+	// rebuild's own parse, so preserve the prior reuse behavior instead of
+	// converting it into a hard failure.
+	if (useIncremental && inputsResolved && previousManifest?.rojoInputsHash !== rojoInputsHash) {
+		hasChanges = true;
+	}
+
 	const placeFile = path.join(COVERAGE_DIR, "game.rbxl");
 	const files = toBuildManifestFiles(allFiles);
 
 	const reused = reuseCoverageResult({ buildManifestPath, files, hasChanges, previousManifest });
 	if (reused !== undefined) {
+		process.stderr.write(
+			`Reusing cached coverage place (built ${reused.manifest.generatedAt})\n`,
+		);
 		return reused;
 	}
 
@@ -240,6 +261,7 @@ export function prepareCoverage(
 		manifestPath,
 		nonInstrumentedFiles: allNonInstrumented,
 		placeFile,
+		rojoInputsHash,
 	});
 
 	return { buildId, coveragePlace, files, manifest, placeFile, rebuilt: true };
@@ -377,8 +399,41 @@ function canUseIncremental(
 	return true;
 }
 
+/**
+ * Hash the rojo build inputs the per-luauRoot shadow diff never sees (include/,
+ * vendored @rbxts, assets, the project files). Runs regardless of how luauRoots
+ * resolved. A malformed/circular project throws; degrade to `resolved: false` so
+ * the caller skips the inputs check (a project too broken to hash would also
+ * fail the rebuild's own parse) rather than hard-failing a working run.
+ */
+function resolveRojoInputsHash(
+	config: ResolvedConfig,
+	rojoProjectPath: string,
+	luauRoots: Array<string>,
+): { hash: string; resolved: boolean } {
+	try {
+		const hash = computeRojoInputsHash({
+			luauRoots,
+			rojoProjectPath,
+			rootDirectory: config.rootDir,
+		});
+		return { hash, resolved: true };
+	} catch (err) {
+		process.stderr.write(`Warning: could not hash rojo build inputs: ${String(err)}\n`);
+		return { hash: "", resolved: false };
+	}
+}
+
 function buildAndWriteManifest(options: WriteManifestOptions): CoverageManifest {
-	const { allFiles, buildId, luauRoots, manifestPath, nonInstrumentedFiles, placeFile } = options;
+	const {
+		allFiles,
+		buildId,
+		luauRoots,
+		manifestPath,
+		nonInstrumentedFiles,
+		placeFile,
+		rojoInputsHash,
+	} = options;
 
 	const manifest: CoverageManifest = {
 		buildId,
@@ -388,6 +443,7 @@ function buildAndWriteManifest(options: WriteManifestOptions): CoverageManifest 
 		luauRoots,
 		nonInstrumentedFiles,
 		placeFilePath: placeFile,
+		rojoInputsHash,
 		shadowDir: COVERAGE_DIR,
 		version: MANIFEST_VERSION,
 	};

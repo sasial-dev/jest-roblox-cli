@@ -15,6 +15,11 @@ export type {
 	RelativeRbxPath,
 	RojoResolverState,
 } from "./rojo-resolver.ts";
-export { collectPaths, rebaseTreePaths, resolveNestedProjects } from "./rojo-tree.ts";
+export {
+	collectPaths,
+	rebaseTreePaths,
+	resolveNestedProjects,
+	resolveNestedProjectSources,
+} from "./rojo-tree.ts";
 export { findInTree, matchNodePath } from "./tree-mapper.ts";
 export type { LoadedRojoProject, RojoProject, RojoTreeNode } from "./types.ts";
