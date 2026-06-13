@@ -39,6 +39,7 @@ describe(harvestAttribution, () => {
 					testFilePath: "out/m.spec.luau",
 				},
 			],
+			{},
 			() => {
 				return "hash-a";
 			},
@@ -68,6 +69,7 @@ describe(harvestAttribution, () => {
 					testFilePath: "out/m.spec.luau",
 				},
 			],
+			{},
 			() => {
 				return "hash-a";
 			},
@@ -97,6 +99,7 @@ describe(harvestAttribution, () => {
 					testFilePath: "out/m.spec.luau",
 				},
 			],
+			{},
 			() => {
 				return "hash-a";
 			},
@@ -123,6 +126,7 @@ describe(harvestAttribution, () => {
 					testFilePath: "out/m.spec.luau",
 				},
 			],
+			{},
 			() => {
 				return "hash-a";
 			},
@@ -145,6 +149,7 @@ describe(harvestAttribution, () => {
 					testFilePath: "out/m.spec.luau",
 				},
 			],
+			{},
 			() => {
 				return "hash-a";
 			},
@@ -154,6 +159,62 @@ describe(harvestAttribution, () => {
 		expect(result.coveringTestIds["out/m.luau"]).toStrictEqual({
 			"1": ["out/m.spec.luau::throws after the first assertion"],
 		});
+	});
+
+	it("should mark statements hit at load but credited to no test as static", () => {
+		expect.assertions(1);
+
+		// Cumulative: statements 0, 1, 2 were all hit during the run. The test
+		// credited only statement 2 to a window, so 0 and 1 ran at module load.
+		const result = harvestAttribution(
+			[
+				{
+					delta: { "out/m.luau": { s: [2] } },
+					testCaseId: "adds",
+					testFilePath: "out/m.spec.luau",
+				},
+			],
+			{ "out/m.luau": { s: { "0": 1, "1": 1, "2": 1 } } },
+			() => {
+				return "hash-a";
+			},
+		);
+
+		expect(result.staticStatementIds).toStrictEqual({ "out/m.luau": ["0", "1"] });
+	});
+
+	it("should treat every hit in a file with no covering test as static", () => {
+		expect.assertions(1);
+
+		// No per-test deltas, so nothing is credited; statement 1 was never hit
+		// (count 0) and stays out of the static set.
+		const result = harvestAttribution(
+			[],
+			{ "out/m.luau": { s: { "0": 1, "1": 0 } } },
+			() => "hash-a",
+		);
+
+		expect(result.staticStatementIds).toStrictEqual({ "out/m.luau": ["0"] });
+	});
+
+	it("should produce no static entry for a file whose every hit is credited", () => {
+		expect.assertions(1);
+
+		const result = harvestAttribution(
+			[
+				{
+					delta: { "out/m.luau": { s: [1] } },
+					testCaseId: "adds",
+					testFilePath: "out/m.spec.luau",
+				},
+			],
+			{ "out/m.luau": { s: { "1": 1 } } },
+			() => {
+				return "hash-a";
+			},
+		);
+
+		expect(result.staticStatementIds).toStrictEqual({});
 	});
 
 	it("should record an empty source hash when the test file cannot be resolved", () => {
@@ -167,6 +228,7 @@ describe(harvestAttribution, () => {
 					testFilePath: "out/m.spec.luau",
 				},
 			],
+			{},
 			() => {},
 		);
 
@@ -180,6 +242,7 @@ describe(applyAttribution, () => {
 
 		const result = applyAttribution(exampleManifest(), {
 			coveringTestIds: { "out/m.luau": { "1": ["t1"], "2": ["t1", "t2"] } },
+			staticStatementIds: {},
 			tests: [
 				{
 					testCaseId: "adds",
@@ -205,11 +268,24 @@ describe(applyAttribution, () => {
 		});
 	});
 
-	it("should ignore covering attribution for files absent from the manifest", () => {
+	it("should distribute a static-statement set onto its file record", () => {
+		expect.assertions(1);
+
+		const result = applyAttribution(exampleManifest(), {
+			coveringTestIds: {},
+			staticStatementIds: { "out/m.luau": ["0", "1"] },
+			tests: [],
+		});
+
+		expect(result.files["out/m.luau"]!.staticStatementIds).toStrictEqual(["0", "1"]);
+	});
+
+	it("should ignore covering and static attribution for files absent from the manifest", () => {
 		expect.assertions(1);
 
 		const result = applyAttribution(exampleManifest(), {
 			coveringTestIds: { "out/ghost.luau": { "1": ["t1"] } },
+			staticStatementIds: { "out/ghost.luau": ["0"] },
 			tests: [],
 		});
 
@@ -224,6 +300,7 @@ describe(mergeAttribution, () => {
 		const merged = mergeAttribution(
 			{
 				coveringTestIds: { "out/m.luau": { "1": ["a"] } },
+				staticStatementIds: {},
 				tests: [
 					{
 						testCaseId: "a",
@@ -235,6 +312,7 @@ describe(mergeAttribution, () => {
 			},
 			{
 				coveringTestIds: { "out/m.luau": { "1": ["b"], "2": ["c"] } },
+				staticStatementIds: {},
 				tests: [
 					{
 						testCaseId: "b",
@@ -248,6 +326,7 @@ describe(mergeAttribution, () => {
 
 		expect(merged).toStrictEqual({
 			coveringTestIds: { "out/m.luau": { "1": ["a", "b"], "2": ["c"] } },
+			staticStatementIds: {},
 			tests: [
 				{
 					testCaseId: "a",
@@ -262,6 +341,52 @@ describe(mergeAttribution, () => {
 					testId: "b",
 				},
 			],
+		});
+	});
+
+	it("should union static sets but drop any id credited in another project", () => {
+		expect.assertions(1);
+
+		// Statement 5 is static in A but credited to a test in B, so it is not
+		// static across the merged run; 9 is static in both and credited nowhere.
+		const merged = mergeAttribution(
+			{
+				coveringTestIds: { "out/m.luau": { "1": ["a"] } },
+				staticStatementIds: { "out/m.luau": ["5", "9"] },
+				tests: [],
+			},
+			{
+				coveringTestIds: { "out/m.luau": { "5": ["b"] } },
+				staticStatementIds: { "out/m.luau": ["9"] },
+				tests: [],
+			},
+		);
+
+		expect(merged.staticStatementIds).toStrictEqual({ "out/m.luau": ["9"] });
+	});
+
+	it("should union per-file static sets across projects, sorted and credited-filtered", () => {
+		expect.assertions(1);
+
+		const merged = mergeAttribution(
+			{
+				coveringTestIds: { "credited.luau": { "5": ["t"] } },
+				staticStatementIds: { "credited.luau": ["5"], "only-a.luau": ["9", "2"] },
+				tests: [],
+			},
+			{
+				coveringTestIds: {},
+				staticStatementIds: { "only-b.luau": ["3"] },
+				tests: [],
+			},
+		);
+
+		// only-a.luau: present only in A, sorted numerically; only-b.luau:
+		// present only in B; credited.luau: its single static id is credited, so
+		// it drops.
+		expect(merged.staticStatementIds).toStrictEqual({
+			"only-a.luau": ["2", "9"],
+			"only-b.luau": ["3"],
 		});
 	});
 });

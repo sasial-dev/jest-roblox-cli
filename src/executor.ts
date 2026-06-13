@@ -780,9 +780,13 @@ function processProjectResult(
 
 	resolveTestFilePaths(result, sourceMapper);
 
+	// Harvest whenever per-test coverage was collected, even if no test credited
+	// anything (perTestCoverage is then undefined): every cumulative hit ran
+	// outside a window, so the whole hit set is static.
+	const harvestStatic = config.collectPerTestCoverage === true && coverageData !== undefined;
 	const attribution =
-		perTestCoverage !== undefined
-			? harvestAttribution(perTestCoverage, (testFilePath) => {
+		perTestCoverage !== undefined || harvestStatic
+			? harvestAttribution(perTestCoverage ?? [], coverageData ?? {}, (testFilePath) => {
 					return resolveTestFileHash(sourceMapper, testFilePath);
 				})
 			: undefined;

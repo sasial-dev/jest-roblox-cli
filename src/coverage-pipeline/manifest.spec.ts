@@ -116,6 +116,32 @@ describe(writeManifest, () => {
 		expect(expectOk(readManifest("/coverage/manifest.json"))).toStrictEqual(manifest);
 	});
 
+	it("should round-trip a per-file static-statement set", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		const manifest = exampleManifest({
+			files: {
+				"out/init.luau": {
+					key: "out/init.luau",
+					coverageMapPath: ".jest-roblox/coverage/out/init.luau.cov-map.json",
+					instrumentedLuauPath: ".jest-roblox/coverage/out/init.luau",
+					originalLuauPath: "out/init.luau",
+					sourceHash: "abc123",
+					sourceMapPath: "out/init.luau.map",
+					statementCount: 3,
+					staticStatementIds: ["0", "2"],
+				},
+			},
+		});
+		writeManifest("/coverage/manifest.json", manifest);
+
+		expect(expectOk(readManifest("/coverage/manifest.json"))).toStrictEqual(manifest);
+	});
+
 	it("should create parent directories before writing", () => {
 		expect.assertions(1);
 
@@ -227,6 +253,20 @@ describe(readManifest, () => {
 		expect(readManifest("/coverage/manifest.json").kind).toBe("version-mismatch");
 	});
 
+	it("should reject v3 caches (pre-static-statement-set) as version-mismatch", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		const manifest = { ...exampleManifest(), version: 3 };
+		vol.mkdirSync("/coverage", { recursive: true });
+		vol.writeFileSync("/coverage/manifest.json", JSON.stringify(manifest));
+
+		expect(readManifest("/coverage/manifest.json").kind).toBe("version-mismatch");
+	});
+
 	it("should return invalid when buildId is absent", () => {
 		expect.assertions(1);
 
@@ -285,6 +325,29 @@ describe(readManifest, () => {
 				"out/init.luau": {
 					...manifest.files["out/init.luau"],
 					coveringTestIds: { "1": "not-an-array" },
+				},
+			},
+		};
+		vol.mkdirSync("/coverage", { recursive: true });
+		vol.writeFileSync("/coverage/manifest.json", JSON.stringify(malformed));
+
+		expect(readManifest("/coverage/manifest.json").kind).toBe("invalid");
+	});
+
+	it("should return invalid when a static-statement set is not an array of ids", () => {
+		expect.assertions(1);
+
+		onTestFinished(() => {
+			vol.reset();
+		});
+
+		const manifest = exampleManifest();
+		const malformed = {
+			...manifest,
+			files: {
+				"out/init.luau": {
+					...manifest.files["out/init.luau"],
+					staticStatementIds: { "0": true },
 				},
 			},
 		};

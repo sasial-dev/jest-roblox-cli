@@ -720,6 +720,68 @@ describe("execute single-project helper", () => {
 		});
 	});
 
+	it("should derive the static set from the cumulative coverage and the deltas", async () => {
+		expect.assertions(1);
+
+		const perTestCoverage: Array<PerTestCoverageEntry> = [
+			{
+				delta: { "out/m.luau": { s: [1] } },
+				testCaseId: "math > adds",
+				testFilePath: "out/m.spec.luau",
+			},
+		];
+		// Statement 0 is hit cumulatively but credited to no test → static.
+		const coverageData: RawCoverageData = {
+			"out/m.luau": { s: { "0": 1, "1": 2 } },
+		};
+		const backend: Backend = {
+			kind: "studio",
+			runTests: async (): Promise<BackendResult> => {
+				return singleEntryResult({
+					coverageData,
+					perTestCoverage,
+					result: createPassingResult(),
+				});
+			},
+		};
+		const options: ExecuteOptions = {
+			backend,
+			config: { ...DEFAULT_CONFIG, collectCoverage: true },
+			testFiles: ["src/test.spec.ts"],
+			version: "0.0.0-test",
+		};
+
+		const result = await executeSingle(options);
+
+		expect(result.attribution?.staticStatementIds).toStrictEqual({ "out/m.luau": ["0"] });
+	});
+
+	it("should derive an all-static set when per-test collection ran but credited nothing", async () => {
+		expect.assertions(1);
+
+		// No test covered anything new, so the runner emits no per-test entries
+		// (parser returns undefined). Every cumulative hit ran outside a window.
+		const coverageData: RawCoverageData = {
+			"out/m.luau": { s: { "0": 1, "1": 1 } },
+		};
+		const backend: Backend = {
+			kind: "studio",
+			runTests: async (): Promise<BackendResult> => {
+				return singleEntryResult({ coverageData, result: createPassingResult() });
+			},
+		};
+		const options: ExecuteOptions = {
+			backend,
+			config: { ...DEFAULT_CONFIG, collectCoverage: true, collectPerTestCoverage: true },
+			testFiles: ["src/test.spec.ts"],
+			version: "0.0.0-test",
+		};
+
+		const result = await executeSingle(options);
+
+		expect(result.attribution?.staticStatementIds).toStrictEqual({ "out/m.luau": ["0", "1"] });
+	});
+
 	it("should not factor coverage into exit code", async () => {
 		expect.assertions(1);
 

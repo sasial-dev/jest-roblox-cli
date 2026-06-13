@@ -54,6 +54,7 @@ const mocks = {
 
 const EXAMPLE_ATTRIBUTION: AttributionResult = {
 	coveringTestIds: { "out/init.luau": { "1": ["t1"] } },
+	staticStatementIds: { "out/init.luau": ["0"] },
 	tests: [
 		{
 			testCaseId: "adds",
@@ -254,7 +255,7 @@ describe(prepareArtifacts, () => {
 	});
 
 	it("should fold per-test attribution into the published coverage manifest", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		mocks.runSingleOrMulti.mockResolvedValue(
 			singleResult({
@@ -271,6 +272,7 @@ describe(prepareArtifacts, () => {
 
 		expect(written.tests).toStrictEqual(EXAMPLE_ATTRIBUTION.tests);
 		expect(written.files["out/init.luau"]!.coveringTestIds).toStrictEqual({ "1": ["t1"] });
+		expect(written.files["out/init.luau"]!.staticStatementIds).toStrictEqual(["0"]);
 	});
 
 	it("should not rewrite the manifest when it cannot be read", async () => {

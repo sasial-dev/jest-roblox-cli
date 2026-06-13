@@ -13,7 +13,7 @@ import { parseVersionedManifest } from "./manifest-parse.ts";
  * probe-inserter is intentionally not formalized here: it has no serialization
  * boundary, so the TypeScript interface is sufficient.
  */
-export const MANIFEST_VERSION = 3 as const;
+export const MANIFEST_VERSION = 4 as const;
 
 export interface InstrumentedFileRecord {
 	key: string;
@@ -32,6 +32,13 @@ export interface InstrumentedFileRecord {
 	sourceHash: string;
 	sourceMapPath: string;
 	statementCount: number;
+	/**
+	 * Statement ids hit during the coverage run but credited to no per-test
+	 * window (executed at module load or in a hook). Computed by the per-test
+	 * attribution harvester; a consumer marks a mutant on one of these as
+	 * Ignored (ADR-0003). Absent on a freshly-instrumented manifest (no run yet).
+	 */
+	staticStatementIds?: Array<string>;
 }
 
 /**
@@ -96,6 +103,7 @@ const instrumentedFileRecordSchema = type({
 	"sourceHash": "string",
 	"sourceMapPath": "string",
 	"statementCount": "number",
+	"staticStatementIds?": "string[]",
 }).as<InstrumentedFileRecord>();
 
 const testRecordSchema = type({

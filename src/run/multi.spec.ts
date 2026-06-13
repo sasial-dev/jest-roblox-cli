@@ -958,6 +958,7 @@ describe(runMultiProject, () => {
 					return makeExecuteResult({
 						attribution: {
 							coveringTestIds: { "shared.luau": { "1": [tag] } },
+							staticStatementIds: {},
 							tests: [
 								{
 									testCaseId: tag,
