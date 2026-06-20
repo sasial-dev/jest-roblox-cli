@@ -22,7 +22,13 @@ import {
 } from "./formatters/formatter.ts";
 import { formatAnnotations, formatJobSummary } from "./formatters/github-actions.ts";
 import { writeJsonFile } from "./formatters/json.ts";
-import { mergeProjectResults, outputMultiResult, outputSingleResult } from "./output.ts";
+import {
+	mergeProjectResults,
+	mergeResults,
+	outputMultiResult,
+	outputSingleResult,
+	writeResultFile,
+} from "./output.ts";
 import type {
 	MultiRunResult,
 	ProjectResult,
@@ -1236,6 +1242,100 @@ describe("writeGameOutput integration", () => {
 		await outputMultiResult(makeConfig({ gameOutput: "/tmp/game.json" }), makeMultiResult());
 
 		expect(spies.consoleError).not.toHaveBeenCalled();
+	});
+});
+
+describe(writeResultFile, () => {
+	it("should serialize the shared mergeResults output to the given path", async () => {
+		expect.assertions(1);
+
+		setupDefaults();
+		setupOutputSpies();
+
+		const typecheck = makeJestResult({ numPassedTests: 1, numTotalTests: 1 });
+		const runtime = makeJestResult({ numPassedTests: 2, numTotalTests: 2 });
+
+		await writeResultFile("/tmp/results.json", typecheck, runtime);
+
+		expect(mocks.writeJsonFile).toHaveBeenCalledWith(
+			mergeResults(typecheck, runtime),
+			"/tmp/results.json",
+		);
+	});
+
+	it("should be a no-op when outputFile is undefined", async () => {
+		expect.assertions(1);
+
+		setupDefaults();
+		setupOutputSpies();
+
+		await writeResultFile(undefined, makeJestResult(), makeJestResult());
+
+		expect(mocks.writeJsonFile).not.toHaveBeenCalled();
+	});
+
+	it("should collapse to the present side when only one result is given", async () => {
+		expect.assertions(1);
+
+		setupDefaults();
+		setupOutputSpies();
+
+		const typecheck = makeJestResult({ numFailedTests: 1, success: false });
+
+		await writeResultFile("/tmp/results.json", typecheck, undefined);
+
+		expect(mocks.writeJsonFile).toHaveBeenCalledWith(typecheck, "/tmp/results.json");
+	});
+
+	// Single AND multi serialize *exactly* the shared `mergeResults` output, so a
+	// new result dimension reaches the file in every mode by a one-line change to
+	// that merge — no per-writer / per-branch hunt. (The workspace mode's
+	// identical guarantee is asserted in `workspace-runner.spec.ts` against the
+	// real on-disk file.)
+	it("should write exactly the shared mergeResults output for single mode", async () => {
+		expect.assertions(1);
+
+		setupDefaults();
+		setupOutputSpies();
+
+		const typecheckResult = makeJestResult({ numFailedTests: 1, success: false });
+		const runtime = makeJestResult({ numPassedTests: 3, numTotalTests: 3 });
+
+		await outputSingleResult(
+			makeConfig({ outputFile: "/tmp/results.json" }),
+			makeSingleResult({
+				runtimeResult: makeExecuteResult({ result: runtime }),
+				typecheckResult,
+			}),
+		);
+
+		expect(mocks.writeJsonFile).toHaveBeenCalledWith(
+			mergeResults(typecheckResult, runtime),
+			"/tmp/results.json",
+		);
+	});
+
+	it("should write exactly the shared mergeResults output for multi mode", async () => {
+		expect.assertions(1);
+
+		setupDefaults();
+		setupOutputSpies();
+
+		const typecheckResult = makeJestResult({ numFailedTests: 1, success: false });
+		const runtime = makeJestResult({ numPassedTests: 3, numTotalTests: 3 });
+
+		await outputMultiResult(
+			makeConfig({ outputFile: "/tmp/results.json" }),
+			makeMultiResult({
+				projectResults: [makeProjectResult("client", { result: runtime })],
+				typecheckResult,
+			}),
+		);
+
+		expect(mocks.writeJsonFile).toHaveBeenCalledWith(
+			mergeResults(typecheckResult, runtime),
+			"/tmp/results.json",
+		);
 	});
 });
 

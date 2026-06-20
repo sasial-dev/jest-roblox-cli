@@ -40,11 +40,10 @@ import {
 	type WorkspacePackageCoverage,
 } from "./coverage-pipeline/workspace-prepare.ts";
 import { type ExecuteResult, runProjects, type RunProjectsOptions } from "./executor.ts";
-import { writeJsonFile } from "./formatters/json.ts";
 import { usesAgentFormatter } from "./formatters/utils.ts";
 import { StreamingResultClient } from "./memory-store/sorted-map-client.ts";
 import { prepareWorkStealingQueue } from "./memory-store/work-stealing.ts";
-import { mergeProjectResults, mergeResults } from "./output.ts";
+import { mergeProjectResults, mergeResults, writeResultFile } from "./output.ts";
 import {
 	StreamingAggregator,
 	type StreamingAggregatorOnEntry,
@@ -453,13 +452,15 @@ async function runWorkspaceProfiled(
 		);
 	}
 
-	if (runOptions.outputFile !== undefined) {
-		await writeWorkspaceOutputFile(
-			runOptions.outputFile,
-			mergeProjectResults(results).result,
-			typecheckPass.outcome.result,
-		);
-	}
+	// Only merge the runtime side when there's a sink to write it to:
+	// `mergeProjectResults` folds every project's coverage + source mappers, so
+	// computing it for a run without `outputFile` (the common case) is wasted
+	// work. `writeResultFile` still owns the merge-and-write across all modes.
+	await writeResultFile(
+		runOptions.outputFile,
+		typecheckPass.outcome.result,
+		runOptions.outputFile !== undefined ? mergeProjectResults(results).result : undefined,
+	);
 
 	emitWorkspaceGameOutput({
 		pending,
@@ -1097,20 +1098,6 @@ function attachTypecheck(
 	};
 }
 
-// Writes the aggregate result file (runtime ∪ Type Tests) to the workspace
-// `outputFile` sink. The runner owns this sink — `output.ts` only writes the
-// single/multi aggregates — so both the runtime path (where `typecheck` may be
-// undefined) and the `--typecheckOnly` short-circuit (where `runtime` is
-// undefined) route through here to keep the Type Test result from being dropped
-// from the JSON output. `mergeResults` collapses to whichever side is present.
-async function writeWorkspaceOutputFile(
-	outputFile: string,
-	runtime: JestResult | undefined,
-	typecheck: JestResult | undefined,
-): Promise<void> {
-	await writeJsonFile(mergeResults(typecheck, runtime), outputFile);
-}
-
 // The `--typecheckOnly` / no-runtime-specs short-circuit: run only the host-side
 // Type Test pass, write it to the workspace `outputFile` sink (no runtime side),
 // and return it. Skips instrumentation, the synthesized place build, and Open
@@ -1127,13 +1114,7 @@ async function runTypecheckOnlyWorkspace(input: {
 		input.typeTestEntries,
 		input.typecheckByDirectory,
 	);
-	if (input.runOptions.outputFile !== undefined) {
-		await writeWorkspaceOutputFile(
-			input.runOptions.outputFile,
-			undefined,
-			typecheckPass.outcome.result,
-		);
-	}
+	await writeResultFile(input.runOptions.outputFile, typecheckPass.outcome.result, undefined);
 
 	// Per-package files route through the same writer as the runtime path: there
 	// is no runtime side here, so every entry is the package's Type Test result

@@ -102,6 +102,25 @@ export function mergeResults(
 	return result;
 }
 
+// The single owner of the merged result-file (`outputFile`) sink across every
+// mode — single, multi, and workspace. Gates on the resolved sink path (the one
+// seam where `config.outputFile` vs the workspace consensus path is decided by
+// the caller) and serializes the shared `mergeResults` output. Routing both
+// sides through `mergeResults` here means a new result dimension lands in the
+// file for every mode by a one-line change to that merge, with no second writer
+// to keep in sync (see `tools/jest-roblox-cli/CLAUDE.md`).
+export async function writeResultFile(
+	outputFile: string | undefined,
+	typecheck: JestResult | undefined,
+	runtime: JestResult | undefined,
+): Promise<void> {
+	if (outputFile === undefined) {
+		return;
+	}
+
+	await writeJsonFile(mergeResults(typecheck, runtime), outputFile);
+}
+
 export async function outputSingleResult(
 	config: ResolvedConfig,
 	result: SingleRunResult,
@@ -119,9 +138,7 @@ export async function outputSingleResult(
 
 	const coveragePassed = processCoverage(config, runtimeResult?.coverageData);
 
-	if (config.outputFile !== undefined) {
-		await writeJsonFile(mergedResult, config.outputFile);
-	}
+	await writeResultFile(config.outputFile, typecheckResult, runtimeResult?.result);
 
 	if (runtimeResult !== undefined) {
 		writeGameOutputIfConfigured(config, runtimeResult.gameOutput, {
@@ -264,9 +281,7 @@ export async function outputMultiResult(
 	// has package identity, the workspace root, and the consensus-resolved
 	// paths); here we only handle the single-config `multi` case.
 	if (mode === "multi") {
-		if (config.outputFile !== undefined) {
-			await writeJsonFile(mergedResult, config.outputFile);
-		}
+		await writeResultFile(config.outputFile, typecheckResult, merged.result);
 
 		writeAggregatedGameOutput(config, projectResults, {
 			hintsShown: !mergedResult.success,
