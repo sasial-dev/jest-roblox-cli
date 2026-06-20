@@ -1,6 +1,11 @@
 /** Host-only Type Test config. Valid at root `test:` and per-project `test:`. */
 export interface TypecheckConfig {
+	/**
+	 * Enable Type Tests (`*.spec-d.ts`/`*.test-d.ts`). This is the only gate —
+	 * setting other typecheck fields does not auto-enable. Default `false`.
+	 */
 	enabled?: boolean;
+	/** Globs excluded from Type Test discovery. */
 	exclude?: Array<string>;
 	/**
 	 * When `false` (default), type errors in non-test source files surface as
@@ -8,10 +13,16 @@ export interface TypecheckConfig {
 	 * discovered Type Test files are suppressed.
 	 */
 	ignoreSourceErrors?: boolean;
+	/**
+	 * Globs selecting Type Test files. When unset, derived from the project's
+	 * runtime `include` (`.spec.` → `.spec-d.`).
+	 */
 	include?: Array<string>;
+	/** Run only Type Tests and skip Runtime Tests. Implies `enabled`. Default `false`. */
 	only?: boolean;
 	/** Milliseconds the tsgo spawn may run before it is killed and the pass throws. */
 	spawnTimeout?: number;
+	/** Custom tsconfig used for type checking (root-only in projects mode). */
 	tsconfig?: string;
 }
 

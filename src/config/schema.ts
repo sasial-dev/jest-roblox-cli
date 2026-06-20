@@ -12,41 +12,92 @@ export type CoverageReporter = keyof ReportOptions;
 
 export type FormatterEntry = [string, Record<string, unknown>] | string;
 
+/** pretty-format options controlling how snapshots are serialized. */
 export interface SnapshotFormatOptions {
+	/** Call a value's `toJSON` method (when present) before serializing it. */
 	callToJSON?: boolean;
+	/** Escape regex special characters in string snapshots. */
 	escapeRegex?: boolean;
+	/** Escape backslashes and quotes in string snapshots. */
 	escapeString?: boolean;
+	/** Number of spaces per indentation level. */
 	indent?: number;
+	/** Maximum depth of nested objects/arrays to print before collapsing. */
 	maxDepth?: number;
+	/** Print on a single line with no indentation. */
 	min?: boolean;
+	/** Print the `Object`/class prototype name for plain objects. */
 	printBasicPrototype?: boolean;
+	/** Print function names instead of `[Function]`. */
 	printFunctionName?: boolean;
 }
 
+/** A reporter label with a colour, used to tag a project's output. */
 export interface DisplayName {
+	/** The label shown in reporter output. */
 	name: string;
+	/** Colour applied to the label (e.g. `"magenta"`, `"white"`). */
 	color: string;
 }
 
 /** Jest-passthrough keys valid both at `test:` and per-project. */
 export interface SharedTestConfig {
+	/** Automatically mock every required module. Default `false`. */
 	automock?: boolean;
+	/**
+	 * Clear `mock.calls`/`instances`/`results` on every mock before each test
+	 * (like `jest.clearAllMocks()`). Default `false`.
+	 */
 	clearMocks?: boolean;
+	/**
+	 * Inject Jest's globals (`describe`, `it`, `expect`, …) into the test
+	 * environment instead of requiring them explicitly. Default `true`.
+	 */
 	injectGlobals?: boolean;
+	/**
+	 * Swap the live Roblox DataModel for a fresh mock instance per test file so
+	 * tests can mutate the tree in isolation. Default `false`.
+	 */
 	mockDataModel?: boolean;
+	/**
+	 * Reset mock state and remove any mocked implementation before each test
+	 * (like `jest.resetAllMocks()`). Default `false`.
+	 */
 	resetMocks?: boolean;
+	/**
+	 * Reset the module registry before each test so every test re-requires a
+	 * fresh module graph. Default `false`.
+	 */
 	resetModules?: boolean;
+	/**
+	 * Restore `spyOn` mocks to their original implementations before each test
+	 * (like `jest.restoreAllMocks()`). Default `false`.
+	 */
 	restoreMocks?: boolean;
+	/** DataModel paths to scripts run once before the test framework is installed. */
 	setupFiles?: Array<string>;
+	/**
+	 * DataModel paths to scripts run after the framework is installed, before
+	 * each test file — the place for global hooks and custom matchers.
+	 */
 	setupFilesAfterEnv?: Array<string>;
+	/** Seconds after which a single test is reported as slow. Default `5`. */
 	slowTestThreshold?: number;
+	/** pretty-format options controlling how snapshots are serialized. */
 	snapshotFormat?: SnapshotFormatOptions;
+	/** DataModel paths to custom snapshot serializer modules. */
 	snapshotSerializers?: Array<string>;
+	/** Test environment used to run the tests. */
 	testEnvironment?: string;
+	/** Options forwarded to the test environment. */
 	testEnvironmentOptions?: Record<string, unknown> | string;
+	/** Glob patterns Jest uses to detect test files. */
 	testMatch?: Array<string>;
+	/** Regex patterns; a test file is skipped when its path matches any of them. */
 	testPathIgnorePatterns?: Array<string>;
+	/** Regex pattern(s) Jest uses to detect test files (alternative to `testMatch`). */
 	testRegex?: Array<string> | string;
+	/** Default per-test timeout in milliseconds. Default `5000`. */
 	testTimeout?: number;
 	/**
 	 * Host-only Type Test config. Never forwarded to the Roblox runtime.
@@ -57,10 +108,27 @@ export interface SharedTestConfig {
 
 /** Jest-passthrough keys valid only per-project (under `projects[N].test`). */
 export interface ProjectTestConfig extends SharedTestConfig {
+	/**
+	 * Reporter label identifying this project's tests — a string, or
+	 * `{ name, color }` to tint it. Must be unique across projects.
+	 */
 	displayName: DisplayName | string;
+	/** Globs subtracted from this project's Runtime Test discovery. */
 	exclude?: Array<string>;
+	/**
+	 * Globs (with TS extensions) selecting this project's test files, relative
+	 * to `root`. The static directory prefix of each glob maps to a Rojo
+	 * `$path`/DataModel mount.
+	 */
 	include: Array<string>;
+	/**
+	 * Compiled-output directory the project's `.luau` lives in. Setting it pins
+	 * the project to a single DataModel mount (exact Rojo lookup, no
+	 * auto-expand). roblox-ts users point this at the compiled output (e.g.
+	 * `"out/client"`), not `"src/…"`.
+	 */
 	outDir?: string;
+	/** Base path prepended to this project's `include`, `exclude`, and `outDir`. */
 	root?: string;
 }
 
@@ -102,47 +170,104 @@ export type ProjectEntry = InlineProjectConfig | string;
 
 /** Jest-passthrough keys valid only at root `test:` (not per-project). */
 export interface GlobalTestConfig extends SharedTestConfig {
+	/**
+	 * Report coverage for every file matched by the coverage globs, even those
+	 * no test exercised (untested files count as 0%). Default `false`.
+	 */
 	all?: boolean;
+	/**
+	 * Stop the run after `n` failing test suites (`true` ⇒ after the first).
+	 * Default `0` (never bail).
+	 */
 	bail?: boolean | number;
+	/** Run only tests affected by files changed since the given git ref. */
 	changedSince?: string;
+	/** Assume a CI environment, which disables writing new snapshots. */
 	ci?: boolean;
+	/** Clear Jest's transform cache before running, then exit. */
 	clearCache?: boolean;
+	/** Collect code coverage during the run. Default `false`. */
 	collectCoverage?: boolean;
+	/** Globs selecting which source files coverage is collected from. */
 	collectCoverageFrom?: Array<string>;
+	/** Alias for {@link collectCoverage}. */
 	coverage?: boolean;
+	/** Directory coverage reports are written to. Default `"coverage"`. */
 	coverageDirectory?: string;
+	/** Globs excluded from coverage collection. */
 	coveragePathIgnorePatterns?: Array<string>;
+	/**
+	 * Istanbul reporters to emit (e.g. `"text"`, `"lcov"`, `"html"`). Default
+	 * `["text", "lcov"]`.
+	 */
 	coverageReporters?: Array<CoverageReporter>;
+	/**
+	 * Minimum coverage percentages (0–100); the run fails when any is not met.
+	 */
 	coverageThreshold?: {
 		branches?: number;
 		functions?: number;
 		lines?: number;
 		statements?: number;
 	};
+	/** Print Jest's resolved config and debugging info. */
 	debug?: boolean;
+	/** Reporter label for the whole run — a string, or `{ name, color }`. */
 	displayName?: DisplayName | string;
+	/** Test environment to use, forwarded to the Jest runtime. */
 	env?: string;
+	/**
+	 * Globs subtracted from Runtime Test discovery. Applies to single-,
+	 * multi-project, and `--workspace` runs (skipped for explicit file args).
+	 */
 	exclude?: Array<string>;
+	/** Show full diffs and error output instead of truncating. */
 	expand?: boolean;
+	/** A JSON string of globals to expose in every test environment. */
 	globals?: string;
+	/** Globs selecting Runtime Test files when no `projects` are configured. */
 	include?: Array<string>;
+	/**
+	 * Maximum worker count, or a percentage string like `"50%"`, for parallel
+	 * test execution.
+	 */
 	maxWorkers?: number | string;
+	/** Omit stack traces from failure output. */
 	noStackTrace?: boolean;
+	/** Default compiled-output directory for test discovery when not set per-project. */
 	outDir?: string;
+	/** Exit `0` even when no tests are found. Default `false`. */
 	passWithNoTests?: boolean;
+	/** Name of a preset that supplies base Jest config. */
 	preset?: string;
+	/**
+	 * Per-project configs for a multi-project run. Each entry is a DataModel
+	 * path string, or an inline {@link defineProject} object.
+	 */
 	projects?: Array<ProjectEntry>;
+	/** Reporter modules (DataModel paths) used to format results. */
 	reporters?: Array<string>;
+	/** Root directories Jest scans for tests and modules. */
 	roots?: Array<string>;
+	/** Run all tests serially in the current process instead of in workers. */
 	runInBand?: boolean;
+	/** Run only the projects whose `displayName` is listed. */
 	selectProjects?: Array<string>;
+	/** Print the resolved config and exit without running tests. */
 	showConfig?: boolean;
+	/** Suppress test `print`/console output. Default `false`. */
 	silent?: boolean;
+	/** Process exit code used when tests fail. */
 	testFailureExitCode?: string;
+	/** Run only tests whose full name matches this regex. */
 	testNamePattern?: string;
+	/** Run only test files whose path matches this regex. */
 	testPathPattern?: string;
+	/** Fake-timers mode (e.g. `"real"`, `"fake"`). */
 	timers?: string;
+	/** Update stored snapshots to match current output. */
 	updateSnapshot?: boolean;
+	/** Report each individual test result, not just suite summaries. Default `false`. */
 	verbose?: boolean;
 }
 
@@ -151,10 +276,29 @@ export interface GlobalTestConfig extends SharedTestConfig {
  * jest-passthrough options live.
  */
 export interface Config {
+	/**
+	 * Execution backend. `"auto"` probes for a running Studio then falls back to
+	 * Open Cloud; `"open-cloud"` uploads and runs via Roblox Open Cloud;
+	 * `"studio"` drives a locally running Studio. Default `"auto"`.
+	 */
 	backend?: Backend;
+	/** Force ANSI colour in output. Default `true`. */
 	color?: boolean;
+	/**
+	 * Reuse the incrementally-instrumented coverage place between runs when
+	 * nothing changed. Default `true`.
+	 */
 	coverageCache?: boolean;
+	/**
+	 * One or more config files to inherit from (c12 layering), relative to this
+	 * file. Local keys win over extended ones.
+	 */
 	extends?: Array<string> | string;
+	/**
+	 * Output formatters — `"default"`, `"agent"`, `"json"`,
+	 * `"github-actions"` — each a name or a `[name, options]` pair. Default
+	 * `["default"]`.
+	 */
 	formatters?: Array<FormatterEntry>;
 	/**
 	 * Where to write Game Output. A path, or `true` to default to
@@ -162,7 +306,16 @@ export interface Config {
 	 * single Aggregated Game Output file (consensus-resolved).
 	 */
 	gameOutput?: string | true;
+	/**
+	 * DataModel path to the Jest module the runner requires (e.g.
+	 * `"ReplicatedStorage/Packages/Jest"`). Defaults to auto-detection in
+	 * ReplicatedStorage.
+	 */
 	jestPath?: string;
+	/**
+	 * Compiled-Luau directories to instrument for coverage. Defaults to the
+	 * tsconfig `outDir`.
+	 */
 	luauRoots?: Array<string>;
 	/**
 	 * Where to write the Jest result JSON. A path, or `true` to default to
@@ -170,17 +323,44 @@ export interface Config {
 	 * single aggregated result file (consensus-resolved).
 	 */
 	outputFile?: string | true;
+	/** Number of places to shard the run across, or `"auto"` to pick automatically. */
 	parallel?: "auto" | number;
+	/** Path to the `.rbxl` place uploaded and run. Default `"./game.rbxl"`. */
 	placeFile?: string;
+	/** Open Cloud place id to publish/run against. */
 	placeId?: string;
+	/** WebSocket port for the Studio backend. Default `3001`. */
 	port?: number;
+	/**
+	 * Path to the Rojo project file used to map DataModel paths to source.
+	 * Auto-detected when unset.
+	 */
 	rojoProject?: string;
+	/**
+	 * Base directory for resolving relative paths. Defaults to the current
+	 * working directory.
+	 */
 	rootDir?: string;
+	/** Include the translated Luau line in error/stack output. Default `true`. */
 	showLuau?: boolean;
+	/** Map Luau stack traces back to TypeScript source. Default `true`. */
 	sourceMap?: boolean;
+	/**
+	 * The Jest options block. Every jest-passthrough setting lives here, kept
+	 * separate from the CLI/runner keys above.
+	 */
 	test?: GlobalTestConfig;
+	/**
+	 * Maximum remote execution time in milliseconds before the run is
+	 * abandoned. Default `300000`.
+	 */
 	timeout?: number;
+	/** Open Cloud universe id that owns the place. */
 	universeId?: string;
+	/**
+	 * Workspace-mode knobs for multi-package runs. Ignored outside
+	 * `--workspace`.
+	 */
 	workspace?: WorkspaceConfig;
 }
 
@@ -494,11 +674,19 @@ export const configSchema: Type<Config> = type({
 	"workspace?": workspaceConfigSchema,
 }).as<Config>();
 
-export interface ConfigInput extends Except<Config, "formatters" | "luauRoots" | "test"> {
-	formatters?: Mergeable<Array<FormatterEntry>>;
-	luauRoots?: Mergeable<Array<string>>;
-	test?: GlobalTestConfigInput;
-}
+// Homomorphic (`[K in keyof T]`) so each property's JSDoc is preserved on
+// hover in a `defineConfig({ … })` literal — the mergeable keys still relax
+// to accept a `(defaults) => merged` function, but TypeScript forwards the
+// source doc comment.
+export type ConfigInput = {
+	[K in keyof Config]?: K extends "formatters"
+		? Mergeable<Array<FormatterEntry>>
+		: K extends "luauRoots"
+			? Mergeable<Array<string>>
+			: K extends "test"
+				? GlobalTestConfigInput
+				: Config[K];
+};
 
 type MergeableTestKey =
 	| "collectCoverageFrom"
@@ -515,8 +703,12 @@ type MergeableTestKey =
 	| "testMatch"
 	| "testPathIgnorePatterns";
 
-type GlobalTestConfigInput = Except<GlobalTestConfig, MergeableTestKey> & {
-	[K in MergeableTestKey]?: Mergeable<NonNullable<GlobalTestConfig[K]>>;
+// Homomorphic for the same JSDoc-preservation reason as `ConfigInput`; the
+// mergeable keys relax to `Mergeable<…>` while every key keeps its source doc.
+type GlobalTestConfigInput = {
+	[K in keyof GlobalTestConfig]?: K extends MergeableTestKey
+		? Mergeable<NonNullable<GlobalTestConfig[K]>>
+		: GlobalTestConfig[K];
 };
 
 type RootCliKey = Exclude<keyof Config, "test">;
@@ -722,7 +914,28 @@ export function validateConfig(raw: unknown): Config {
 	return result;
 }
 
+/**
+ * Identity helper for authoring a typed `jest.config.*` file. Returns its
+ * input unchanged; it exists purely to give editors autocompletion and
+ * type-checking for the root config shape (`Config` plus the c12 layer props
+ * on `ConfigInput`).
+ *
+ * Use it as the default export of a config file discovered by c12 (`.ts`,
+ * `.js`, `.mjs`, `.cjs`, `.json`, `.yaml`, `.toml`). All jest-passthrough
+ * options live under the `test:` block; root keys are CLI/runner-level.
+ * Configs may extend a shared base via `extends`, and any `Mergeable` array
+ * field (e.g. `test.testMatch`) accepts a function that receives the inherited
+ * defaults and returns the merged value. Precedence is CLI flags > config file
+ * > extended config > defaults.
+ */
 export const defineConfig: (input: ConfigInput) => ConfigInput = createDefineConfig<ConfigInput>();
 
+/**
+ * Identity helper for a single entry inside `test.projects`, mirroring
+ * {@link defineConfig} for per-project overrides. Returns its input unchanged
+ * and exists only for editor autocompletion and type-checking of the
+ * `InlineProjectConfig` shape — a `test:` block carrying the project's
+ * `include`/`displayName` plus any shared per-project jest options.
+ */
 export const defineProject: (input: InlineProjectConfig) => InlineProjectConfig =
 	createDefineConfig<InlineProjectConfig>();
