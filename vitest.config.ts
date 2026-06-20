@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
+import { normalizeWindowsPath } from "./src/utils/normalize-windows-path.ts";
+
 const luauPlugin = {
 	name: "luau-raw",
 	load(id: string) {
@@ -56,6 +58,36 @@ const workspaceSourceAliases = [
 	sourceAlias("@isentinel/roblox-runner"),
 ];
 
+// The `config`/`executor` integration tests load a `jest.config.ts` fixture
+// through the real config loader (c12 → jiti). The fixture imports
+// `@isentinel/jest-roblox`, and that load happens inside jiti's own resolver —
+// not Vitest's module graph — so the `resolve.alias` above does not reach it
+// and plain resolution lands on `dist/index.mjs`, forcing a prior `build`.
+// Point jiti at the package's own `source` export via its `JITI_ALIAS` env
+// contract so the fixture load resolves to source, keeping `test` build-free.
+//
+// These tests live in a dedicated `integration` project run WITHOUT coverage,
+// kept out of the coverage-measured `unit` project on purpose: jiti executes
+// the package's real source files in-process, and `@vitest/coverage-v8`'s
+// process-wide V8 data then attributes jiti's import-only execution (module
+// top level ran, but the functions were never called) to those same `src`
+// files, shadowing the genuine `unit` coverage down from 100%. A separate
+// no-coverage run sidesteps the collision entirely.
+function selfSourceEntry(): string {
+	const packageJson = requireFromConfig("./package.json") as PackageJsonWithSourceExport;
+	const sourceEntry = packageJson.exports?.["."]?.source;
+	if (typeof sourceEntry !== "string") {
+		throw new Error('package.json must expose exports["."].source for integration tests');
+	}
+
+	// Canonicalize via the repo convention (backslashes → `/`, upper-case
+	// drive letter) so jiti gets a stable module ID regardless of how the
+	// drive-letter casing arrived from Node on Windows.
+	return normalizeWindowsPath(resolve(import.meta.dirname, sourceEntry));
+}
+
+const jitiSourceAlias = JSON.stringify({ "@isentinel/jest-roblox": selfSourceEntry() });
+
 export default defineConfig({
 	plugins: [luauPlugin],
 	test: {
@@ -98,6 +130,11 @@ export default defineConfig({
 						"src/**/__fixtures__/**",
 						"test/fixtures/**",
 						"test/e2e/**",
+						// Config-loading integration tests run in the
+						// `integration` project (no coverage) — see the
+						// JITI_ALIAS note above.
+						"test/integration/config/**",
+						"test/integration/executor/**",
 						"**/src/types/**",
 						"./src/cli.ts",
 						"**/*.luau",
@@ -111,6 +148,33 @@ export default defineConfig({
 						include: ["src/**/*.spec-d.ts"],
 						tsconfig: "./tsconfig.spec.json",
 					},
+					unstubEnvs: true,
+				},
+			},
+			{
+				plugins: [luauPlugin],
+				resolve: { alias: workspaceSourceAliases },
+				test: {
+					name: "integration",
+					// Benchmarks belong to the unit project only.
+					benchmark: {
+						include: [],
+					},
+					clearMocks: true,
+					// Resolve the package's own fixture imports to source
+					// so this project runs build-free (no `dist`). See the
+					// JITI_ALIAS note above for why these tests are
+					// isolated from coverage.
+					env: {
+						GITHUB_ACTIONS: "",
+						JITI_ALIAS: jitiSourceAlias,
+					},
+					include: [
+						"test/integration/config/**/*.spec.ts",
+						"test/integration/executor/**/*.spec.ts",
+					],
+					restoreMocks: true,
+					setupFiles,
 					unstubEnvs: true,
 				},
 			},

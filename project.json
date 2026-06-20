@@ -32,11 +32,11 @@
 			"dependsOn": ["weld:build"]
 		},
 		"test": {
-			"command": "tsgo --build --emitDeclarationOnly && vitest run --project unit --coverage",
+			"command": "tsgo --build --emitDeclarationOnly && vitest run --project unit --coverage && vitest run --project integration",
 			"options": {
 				"cwd": "tools/jest-roblox-cli"
 			},
-			"dependsOn": ["build:bundle", "build"]
+			"dependsOn": ["build:bundle"]
 		},
 		"e2e": {
 			"command": "vitest run --project e2e --project live",
